@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to iSolarCloud",
+        "description": "Enter your iSolarCloud API credentials.",
+        "data": {
+          "gateway": "Gateway Region",
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "app_id": "App ID",
+          "redirect_uri": "Redirect URI"
+        }
+      },
+      "auth": {
+        "title": "Authorize App",
+        "description": "Please visit the URL below to authorize the application:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in.\n2. You will be redirected (page may show an error).\n3. Copy the **code** parameter from the URL address bar.\n4. Paste it below.",
+        "data": {
+          "code": "Authorization Code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "invalid_auth_url": "Could not find 'applicationId' in the provided URL.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}

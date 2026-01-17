@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# VS Code
+.vscode/
+
+# Home Assistant Configuration
+# Ignore everything in the config folder...
+.ha-config/*
+
+# ...except the files we want to track (read-only reference)
+!.ha-config/configuration.yaml
+!.ha-config/automations.yaml
+!.ha-config/scripts.yaml
+!.ha-config/scenes.yaml

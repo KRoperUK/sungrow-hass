@@ -1,0 +1,12 @@
+{
+  "domain": "sungrow_hass",
+  "name": "Sungrow iSolarCloud",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/KRoperUK/sungrow-hass",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/KRoperUK/sungrow-hass/issues",
+  "requirements": ["pysolarcloud"],
+  "version": "1.0.0",
+  "icon": "mdi:solar-power"
+}
