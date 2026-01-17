@@ -1,4 +1,4 @@
-![Logo](images/logo.svg)
+<!-- ![Logo](images/logo.svg) -->
 
 # Sungrow iSolarCloud Home Assistant Integration
 

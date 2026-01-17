@@ -130,8 +130,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
         # Prefer generating name from code to avoid Chinese names from API
         # The API often returns Chinese names even when locale is set to English
+        # We assume point_code is a readable string identifier (e.g. 'total_active_power')
         if point_code.isdigit():
-             sensor_name = init_data.get('name', point_code)
+             # Fallback if we only have a number, but ideally we should have a string key
+             sensor_name = init_data.get('name', f"Sensor {point_code}")
         else:
              sensor_name = point_code.replace("_", " ").title()
 
