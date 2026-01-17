@@ -50,6 +50,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         _LOGGER.debug(f"async_step_user called with user_input: {user_input}")
         errors = {}
+
         if user_input is not None:
             self.init_info = user_input
             return await self.async_step_auth()
@@ -62,20 +63,21 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         default_redirect = f"{base_url}/api/sungrow_hass/callback"
 
+        self.context["title_placeholders"] = {
+            "app_id": user_input.get(CONF_APP_ID, "YourAppID") if user_input else "YourAppID"
+        }
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_APP_KEY): str,
                     vol.Required(CONF_APP_SECRET): str,
-                    vol.Required(CONF_APP_ID, default="2190"): str,
+                    vol.Required(CONF_APP_ID, default=""): str,
                     vol.Required(CONF_GATEWAY, default="Europe"): vol.In(list(GATEWAYS.keys())),
                     vol.Required(CONF_REDIRECT_URI, default=default_redirect): str,
                 }
             ),
-            description_placeholders={
-                "app_id_desc": "Log in to the iSolarCloud Developer Platform to get your App ID/Key/Secret.",
-            },
             errors=errors
         )
 
@@ -102,7 +104,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             _LOGGER.info("Initialized Auth client for Sungrow iSolarCloud")
             _LOGGER.debug(f"Auth client details: {self.auth_client}")
-            _LOGGER.debug(f"Auth URL: {self.auth_client.auth_url(self.init_info[CONF_REDIRECT_URI])}")
 
         if user_input is not None and user_input.get("code"):
             try:
