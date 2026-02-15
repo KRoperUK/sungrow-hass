@@ -33,7 +33,7 @@ jobs:
                   tag-prefix: dev-v
                   release-name: "Development v{{version}}"
                   skip-on-empty: true
-                  version-file: custom_components/mozillion/manifest.json
+                  version-file: custom_components/sungrow/manifest.json
                   version-path: version
                   preset: conventionalcommits
                   create-summary: true
