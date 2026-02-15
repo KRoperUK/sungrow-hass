@@ -19,3 +19,6 @@ build/
 !.ha-config/automations.yaml
 !.ha-config/scripts.yaml
 !.ha-config/scenes.yaml
+
+# Local Environment Variables
+.env
