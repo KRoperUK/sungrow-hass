@@ -1,0 +1,51 @@
+name: Release
+
+on:
+    push:
+        branches:
+            - main
+    workflow_dispatch: {}
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    release:
+        if: "!contains(github.event.head_commit.message, '[skip ci]')"
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Conventional Changelog / Dev Tag
+              id: changelog
+              uses: TriPSs/conventional-changelog-action@v5
+              with:
+                  github-token: ${{ github.token }}
+                  output-file: CHANGELOG.md
+                  tag-prefix: dev-v
+                  release-name: "Development v{{version}}"
+                  skip-on-empty: true
+                  version-file: custom_components/mozillion/manifest.json
+                  version-path: version
+                  preset: conventionalcommits
+                  create-summary: true
+                  skip-commit: false
+                  skip-release: true
+                  git-user-name: "github-actions[bot]"
+                  git-user-email: "41898282+github-actions[bot]@users.noreply.github.com"
+                  create-release: false
+
+            - name: Show dev tag summary
+              if: steps.changelog.outputs.skipped != 'true'
+              run: |
+                  echo "Dev Version: ${{ steps.changelog.outputs.version }}"
+                  echo "Dev Tag: dev-v${{ steps.changelog.outputs.version }}"
+                  echo "Changelog file updated (commit not auto-pushed; awaiting PR approval)."

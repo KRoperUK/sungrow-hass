@@ -25,7 +25,7 @@ This custom component integrates Sungrow inverters via iSolarCloud into Home Ass
 ### Manual Installation
 
 1.  Download the latest release.
-2.  Copy the `custom_components/sungrow_hass` folder to your Home Assistant `custom_components` directory.
+2.  Copy the `custom_components/sungrow` folder to your Home Assistant `custom_components` directory.
 3.  Restart Home Assistant.
 
 ## Configuration
@@ -45,3 +45,34 @@ To get your App Key and Secret, you might need to request them from Sungrow or u
 ## Support
 
 If you encounter any issues, please open an issue on the [GitHub repository](https://github.com/KRoperUK/sungrow-hass/issues).
+
+## Development
+
+### Running Tests
+
+1.  Install dependencies:
+    ```bash
+    pip install -r requirements_test.txt
+    ```
+
+2.  Run tests:
+    ```bash
+    pytest
+    ```
+
+### Live Integration Testing
+
+To run live integration tests, you need to provide your iSolarCloud credentials.
+
+1.  Create a `.env` file in the root directory (see `.env.example`):
+    ```env
+    SUNGROW_USER="your_email@example.com"
+    SUNGROW_PASSWORD="your_password"
+    ```
+
+2.  Run live tests:
+    ```bash
+    pytest -k "live"
+    ```
+
+    *Note: Live tests are skipped if variables are missing.*
