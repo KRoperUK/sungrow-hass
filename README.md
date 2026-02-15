@@ -1,78 +1,98 @@
-<!-- ![Logo](images/logo.svg) -->
+# Sungrow iSolarCloud Integration for Home Assistant
 
-# Sungrow iSolarCloud Home Assistant Integration
+[![HACS][hacs-badge]][hacs-url]
+[![CI][ci-badge]][ci-url]
+[![GitHub Release][release-badge]][release-url]
 
-This custom component integrates Sungrow inverters via iSolarCloud into Home Assistant. It uses the `pysolarcloud` library to communicate with the iSolarCloud API.
+Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`pysolarcloud`](https://pypi.org/project/pysolarcloud/) library.
 
 ## Features
 
--   **Cloud Polling**: Fetches data from iSolarCloud API.
--   **Auto-Discovery**: Automatically discovers plants linked to your account.
--   **Sensors**: Creates sensors for all available data points (Power, Energy, Battery SOC, etc.).
--   **Config Flow**: Easy setup via Home Assistant UI.
+- **Cloud Polling** — fetches real-time data from the iSolarCloud API.
+- **Auto-Discovery** — automatically finds all plants linked to your account.
+- **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.).
+- **Config Flow** — set up entirely through the Home Assistant UI.
 
 ## Installation
 
 ### HACS (Recommended)
 
-1.  Open HACS in Home Assistant.
-2.  Go to "Integrations".
-3.  Click the three dots in the top right corner and select "Custom repositories".
-4.  Add `https://github.com/KRoperUK/sungrow-hass` as an "Integration".
-5.  Search for "Sungrow iSolarCloud" and install it.
-6.  Restart Home Assistant.
+[![Open HACS Repository][hacs-my-badge]][hacs-my-url]
 
-### Manual Installation
+Or manually:
 
-1.  Download the latest release.
-2.  Copy the `custom_components/sungrow` folder to your Home Assistant `custom_components` directory.
-3.  Restart Home Assistant.
+1. Open **HACS** → **Integrations**.
+2. Click the three-dot menu → **Custom repositories**.
+3. Add `https://github.com/KRoperUK/sungrow-hass` as an **Integration**.
+4. Search for **Sungrow iSolarCloud** and install.
+5. Restart Home Assistant.
+
+### Manual
+
+1. Download the [latest release][release-url].
+2. Copy `custom_components/sungrow` into your Home Assistant `custom_components` directory.
+3. Restart Home Assistant.
 
 ## Configuration
 
-1.  Go to **Settings** -> **Devices & Services**.
-2.  Click **Add Integration** and search for "Sungrow iSolarCloud".
-3.  Enter your iSolarCloud credentials:
-    -   **Gateway**: Select your region (e.g., Europe, Australia, China).
-    -   **App Key**: Your AccessKey from iSolarCloud.
-    -   **App Secret**: Your AccessKey Secret from iSolarCloud.
-    -   **App ID**: Your App ID (usually `2190` for the iSolarCloud App).
+1. Go to **Settings** → **Devices & Services**.
+2. Click **Add Integration** and search for **Sungrow iSolarCloud**.
+3. Enter your iSolarCloud API credentials:
+
+| Field | Description |
+|---|---|
+| **Gateway** | Your region (Europe, Australia, China, etc.) |
+| **App Key** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
+| **App Secret** | AppSecret from the Developer Platform |
+| **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
+| **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
+
+4. Click **Submit** — you'll be shown an authorisation URL.
+5. Visit the URL, log in, and paste the returned **code** back into Home Assistant.
 
 ### Obtaining Credentials
 
-To get your App Key and Secret, you might need to request them from Sungrow or use the default App ID `2190` which mimics the mobile app.
-
-## Support
-
-If you encounter any issues, please open an issue on the [GitHub repository](https://github.com/KRoperUK/sungrow-hass/issues).
+Register an application on the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) to get your App Key, App Secret, and App ID.
 
 ## Development
 
 ### Running Tests
 
-1.  Install dependencies:
-    ```bash
-    pip install -r requirements_test.txt
-    ```
-
-2.  Run tests:
-    ```bash
-    pytest
-    ```
+```bash
+pip install -r requirements_test.txt
+pytest
+```
 
 ### Live Integration Testing
 
-To run live integration tests, you need to provide your iSolarCloud credentials.
+To run live tests against the real iSolarCloud API:
 
-1.  Create a `.env` file in the root directory (see `.env.example`):
-    ```env
-    SUNGROW_USER="your_email@example.com"
-    SUNGROW_PASSWORD="your_password"
-    ```
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```env
+   SUNGROW_APPKEY="your_app_key"
+   SUNGROW_APPSECRET="your_app_secret"
+   SUNGROW_APP_ID="your_app_id"
+   ```
 
-2.  Run live tests:
-    ```bash
-    pytest -k "live"
-    ```
+2. Run the live tests:
+   ```bash
+   pytest -m live
+   ```
 
-    *Note: Live tests are skipped if variables are missing.*
+   > Live tests are automatically skipped when credentials are not set.
+
+## Support
+
+Found a bug or have a feature request? [Open an issue][issues-url].
+
+---
+
+[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[hacs-url]: https://hacs.xyz
+[ci-badge]: https://github.com/KRoperUK/sungrow-hass/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/KRoperUK/sungrow-hass/actions/workflows/ci.yml
+[release-badge]: https://img.shields.io/github/v/release/KRoperUK/sungrow-hass
+[release-url]: https://github.com/KRoperUK/sungrow-hass/releases/latest
+[hacs-my-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
+[hacs-my-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=KRoperUK&repository=sungrow-hass&category=integration
+[issues-url]: https://github.com/KRoperUK/sungrow-hass/issues

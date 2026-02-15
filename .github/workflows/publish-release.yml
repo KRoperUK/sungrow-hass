@@ -29,7 +29,7 @@ jobs:
             - name: Extract version from manifest
               id: version
               run: |
-                  VERSION=$(grep '"version":' custom_components/mozillion/manifest.json | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
+                  VERSION=$(grep '"version":' custom_components/sungrow/manifest.json | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
                   echo "version=${VERSION}" >> $GITHUB_OUTPUT
                   echo "Version extracted: ${VERSION}"
 
