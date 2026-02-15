@@ -113,6 +113,30 @@ class TestSungrowSensor:
         assert sensor._attr_device_info["name"] == "My Solar Plant"
         assert sensor._attr_device_info["manufacturer"] == "Sungrow"
 
+    def test_sensor_disabled_by_default(self):
+        """Test sensors with no value are disabled by default."""
+        coordinator = self._make_coordinator()
+        
+        # Test None
+        init_none = {"code": "x", "value": None, "unit": "", "name": "X"}
+        s1 = SungrowSensor(coordinator, "x", "123", "Plant", init_none, "entry")
+        assert s1.entity_registry_enabled_default is False
+
+        # Test empty string
+        init_empty = {"code": "y", "value": "  ", "unit": "", "name": "Y"}
+        s2 = SungrowSensor(coordinator, "y", "123", "Plant", init_empty, "entry")
+        assert s2.entity_registry_enabled_default is False
+
+        # Test "Unknown" literal
+        init_unk = {"code": "z", "value": "Unknown", "unit": "", "name": "Z"}
+        s3 = SungrowSensor(coordinator, "z", "123", "Plant", init_unk, "entry")
+        assert s3.entity_registry_enabled_default is False
+
+        # Test valid value is NOT disabled
+        init_val = {"code": "v", "value": "1.2", "unit": "", "name": "V"}
+        s4 = SungrowSensor(coordinator, "v", "123", "Plant", init_val, "entry")
+        assert s4.entity_registry_enabled_default is True
+
     def test_native_value_float_conversion(self):
         """Test native_value converts string numbers to float."""
         data = {"power": {"code": "power", "value": "5.23", "unit": "kW", "name": "Power"}}
