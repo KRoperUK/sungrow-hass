@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -199,8 +200,9 @@ class TestSungrowPlantCoordinator:
         """Test successful data fetch returns plant data."""
         mock_plants = MagicMock()
         mock_plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+        mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
         data = await coordinator._async_update_data()
 
         assert "total_active_power" in data
@@ -210,8 +212,9 @@ class TestSungrowPlantCoordinator:
         """Test returns empty dict when plant_id is not in response."""
         mock_plants = MagicMock()
         mock_plants.async_get_realtime_data = AsyncMock(return_value={"99999": {}})
+        mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
         data = await coordinator._async_update_data()
 
         assert data == {}
@@ -220,8 +223,9 @@ class TestSungrowPlantCoordinator:
         """Test API error raises UpdateFailed."""
         mock_plants = MagicMock()
         mock_plants.async_get_realtime_data = AsyncMock(side_effect=Exception("API down"))
+        mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
 
         with pytest.raises(UpdateFailed, match="Error communicating with API"):
             await coordinator._async_update_data()
@@ -236,6 +240,9 @@ async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_au
     """Test async_setup_entry creates sensors for each data point."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
+    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
+    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
@@ -300,6 +307,9 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_s
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
+    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
+    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 

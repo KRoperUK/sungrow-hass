@@ -73,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         _LOGGER.debug(f"Setting up plant: {plant_name} ({plant_id})")
 
-        coordinator = SungrowPlantCoordinator(hass, plants_service, plant_id, plant_name)
+        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name)
 
         # Determine available sensors by doing a first refresh
         await coordinator.async_config_entry_first_refresh()
@@ -93,13 +93,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class SungrowPlantCoordinator(DataUpdateCoordinator):
     """Coordinator to manage fetching data from single plant."""
 
-    def __init__(self, hass, plants_service, plant_id, plant_name):
+    def __init__(self, hass, config_entry, plants_service, plant_id, plant_name):
         """Initialize."""
         super().__init__(
             hass,
             _LOGGER,
             name=f"Sungrow Plant {plant_name}",
             update_interval=SCAN_INTERVAL,
+            config_entry=config_entry,
         )
         self.plants_service = plants_service
         self.plant_id = plant_id

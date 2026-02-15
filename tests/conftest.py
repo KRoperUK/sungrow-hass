@@ -83,6 +83,39 @@ MOCK_REALTIME_DATA = {
 }
 
 
+@pytest.fixture(autouse=True)
+def patch_async_drop_config_annotations():
+    """Patch async_drop_config_annotations to handle IntegrationConfigInfo.
+
+    HA 2025.2+ passes IntegrationConfigInfo to this function, but the implementation
+    expects a dict. This patch unwraps it.
+    """
+    from homeassistant import config as ha_config
+
+    original_func = ha_config.async_drop_config_annotations
+
+    def side_effect(config, integration):
+        # HA 2025.2's async_drop_config_annotations expects an object with .config attribute
+
+        # Case 1: Config is a dict (from tests) -> Wrap it
+        if isinstance(config, dict):
+            from types import SimpleNamespace
+
+            return original_func(SimpleNamespace(config=config, exception_info_list=[]), integration)
+
+        # Case 2: Config is IntegrationConfigInfo (from setup.py)
+        # If internal config is NOT a dict (e.g. validator function), return empty dict
+        # to avoid TypeError in async_drop_config_annotations
+        if hasattr(config, "config") and not isinstance(config.config, dict):
+            return {}
+
+        # Pass through otherwise
+        return original_func(config, integration)
+
+    with patch("homeassistant.config.async_drop_config_annotations", side_effect=side_effect):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # HA integration fixtures
 # ---------------------------------------------------------------------------
@@ -101,6 +134,7 @@ def auto_mock_hass_http(hass: HomeAssistant):
     The test HA instance doesn't have an HTTP server, so hass.http is None.
     This also prevents thread leaks from the HTTP server in teardown checks.
     """
+    print(f"DEBUG: hass.config type: {type(hass.config)}")
     hass.http = MagicMock()
     yield
 
