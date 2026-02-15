@@ -1,10 +1,11 @@
-pytest==8.1.1
-pytest-homeassistant-custom-component==0.13.111
-pytest-asyncio==0.23.6
-pytest-cov==5.0.0
-pytest-sugar==1.0.0
-python-dotenv==1.0.1
-ruff==0.3.4
-pre-commit==3.7.0
-black==24.3.0
-mypy==1.9.0
+# Core test dependency — pulls in pytest, pytest-asyncio, homeassistant, etc.
+# 0.13.206+ requires Python 3.13, so cap for Python 3.12 compat
+pytest-homeassistant-custom-component>=0.13.205,<0.13.206
+
+# Additional test utilities
+pytest-cov>=6.0.0
+pytest-sugar>=1.0.0
+python-dotenv>=1.0.1
+
+# Linting & formatting (match pre-commit versions)
+ruff>=0.3.4
