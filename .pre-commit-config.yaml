@@ -14,7 +14,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-push]
+        stages: [push]
 
   - repo: local
     hooks:
