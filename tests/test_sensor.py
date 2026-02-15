@@ -116,7 +116,7 @@ class TestSungrowSensor:
     def test_sensor_disabled_by_default(self):
         """Test sensors with no value are disabled by default."""
         coordinator = self._make_coordinator()
-        
+
         # Test None
         init_none = {"code": "x", "value": None, "unit": "", "name": "X"}
         s1 = SungrowSensor(coordinator, "x", "123", "Plant", init_none, "entry")

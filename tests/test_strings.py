@@ -37,9 +37,9 @@ def test_strings_user_step_has_required_fields(strings_data):
     """Test the user step defines all form fields used by the config flow."""
     user_data = strings_data["config"]["step"]["user"]["data"]
     required_fields = {"gateway", "app_key", "app_secret", "app_id", "redirect_uri"}
-    assert required_fields.issubset(set(user_data.keys())), (
-        f"Missing form fields: {required_fields - set(user_data.keys())}"
-    )
+    assert required_fields.issubset(
+        set(user_data.keys())
+    ), f"Missing form fields: {required_fields - set(user_data.keys())}"
 
 
 def test_strings_auth_step_has_code_field(strings_data):
