@@ -1,27 +1,21 @@
 """Config flow for Sungrow iSolarCloud integration."""
 import logging
 from typing import Any
-from urllib.parse import urlparse, urlunparse
 
 import voluptuous as vol
 from aiohttp import ClientError
-
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
-import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    DOMAIN,
+    CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
-    CONF_APP_ID,
-    CONF_AUTH_URL,
     CONF_GATEWAY,
     CONF_REDIRECT_URI,
-    CONF_USERNAME,
-    CONF_PASSWORD,
-    GATEWAYS
+    DOMAIN,
+    GATEWAYS,
 )
 
 # Try to import pysolarcloud, handle if missing gracefully for development
@@ -29,7 +23,6 @@ try:
     from pysolarcloud import Auth
 except ImportError:
     Auth = None
-    import sys
     # For local development if pysolarcloud is not installed but in path or similar
     # In a real environment, it should be installed via requirements.
 
@@ -84,12 +77,12 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auth(self, user_input: dict[str, Any] | None = None):
         """Handle the authorization step."""
         errors = {}
-        
+
         # Initialize Auth client
         if not self.auth_client:
             session = async_get_clientsession(self.hass)
             gateway_url = GATEWAYS[self.init_info[CONF_GATEWAY]]
-            
+
             # Ensure Auth is available
             if Auth is None:
                 # Fallback or error if library missing
@@ -128,7 +121,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # We need the base redirect URI without the flow_id param for the token exchange
                 # The code we get implies the user was redirected to: URI?flow_id=123&code=ABC
                 # For exchange, we must send the exact SAME redirect_uri sent in auth request.
-                
+
                 # Use the clean redirect URI without flow_id for the token exchange
                 # This ensures it matches exactly what was sent in the auth request
                 # (and prevents issues if the provider strips query params)
@@ -136,20 +129,20 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 _LOGGER.info("Authorizing with code: %s and redirect_uri: %s", code, redirect_uri_clean)
                 await self.auth_client.async_authorize(code, redirect_uri_clean)
-                
+
                 # Get the tokens
                 tokens = self.auth_client.tokens
                 _LOGGER.debug(f"Received tokens: {tokens}")
-                
+
                 if not tokens or not tokens.get("access_token"):
                     _LOGGER.error("Failed to retrieve tokens")
                     errors["base"] = "invalid_auth"
                 else:
                     # We can store tokens in the config entry data
                     data = {**self.init_info, "tokens": tokens}
-                    
+
                     return self.async_create_entry(
-                        title=f"Sungrow {self.init_info[CONF_APP_ID]}", 
+                        title=f"Sungrow {self.init_info[CONF_APP_ID]}",
                         data=data
                     )
 
@@ -162,7 +155,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Generate auth URL
         redirect_uri_clean = self.init_info[CONF_REDIRECT_URI]
-        
+
         # We use the clean URI (no flow_id) to potentially avoid provider issues with query params
         auth_url = self.auth_client.auth_url(redirect_uri_clean)
 

@@ -3,11 +3,8 @@ from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
-    CONF_AUTH_URL,
     CONF_GATEWAY,
-    CONF_PASSWORD,
     CONF_REDIRECT_URI,
-    CONF_USERNAME,
     DOMAIN,
     GATEWAYS,
 )

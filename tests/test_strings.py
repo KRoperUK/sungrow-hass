@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 STRINGS_PATH = Path(__file__).parent.parent / "custom_components" / "sungrow" / "strings.json"
 TRANSLATIONS_DIR = Path(__file__).parent.parent / "custom_components" / "sungrow" / "translations"
 

@@ -1,8 +1,6 @@
 """Tests for Sungrow component setup and the auth callback view."""
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
-from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -10,13 +8,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow import (
     SungrowAuthCallbackView,
     async_setup,
-    async_setup_entry,
-    async_unload_entry,
 )
 from custom_components.sungrow.const import DOMAIN
 
 from .conftest import MOCK_CONFIG_DATA
-
 
 # ---------------------------------------------------------------------------
 # async_setup (registers the HTTP callback view)
