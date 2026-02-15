@@ -7,6 +7,11 @@ dist/
 build/
 .pytest_cache/
 
+# Coverage
+coverage.xml
+htmlcov/
+.coverage
+
 # VS Code
 .vscode/
 

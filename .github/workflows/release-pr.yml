@@ -36,6 +36,13 @@ jobs:
                   skip-tag: true
                   skip-commit: true
 
+            - name: Sync version to pyproject.toml
+              if: steps.changelog.outputs.skipped != 'true'
+              run: |
+                  VERSION="${{ steps.changelog.outputs.version }}"
+                  sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" pyproject.toml
+                  echo "Updated pyproject.toml to version ${VERSION}"
+
             - name: Create release PR
               if: steps.changelog.outputs.skipped != 'true'
               uses: peter-evans/create-pull-request@v6
@@ -57,4 +64,5 @@ jobs:
                       release
                   add-paths: |
                       CHANGELOG.md
-                      custom_components/mozillion/manifest.json
+                      custom_components/sungrow/manifest.json
+                      pyproject.toml
