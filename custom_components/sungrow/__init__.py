@@ -1,4 +1,5 @@
 """The Sungrow iSolarCloud integration."""
+
 from __future__ import annotations
 
 import logging
@@ -18,10 +19,12 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Sungrow iSolarCloud component."""
     hass.http.register_view(SungrowAuthCallbackView())
     return True
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
@@ -34,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
@@ -59,24 +63,16 @@ class SungrowAuthCallbackView(HomeAssistantView):
 
         if not code or not flow_id:
             _LOGGER.warning("Callback received but missing code or flow_id. Params: %s", params)
-            return web.Response(
-                text="Missing code or flow_id parameters. Please try again.",
-                status=400
-            )
+            return web.Response(text="Missing code or flow_id parameters. Please try again.", status=400)
 
         _LOGGER.debug("Callback received with code: %s for flow_id: %s", code, flow_id)
 
         # Retrieve the flow and update it
         try:
-             await hass.config_entries.flow.async_configure(
-                flow_id=flow_id, user_input={"code": code}
-            )
+            await hass.config_entries.flow.async_configure(flow_id=flow_id, user_input={"code": code})
         except Exception as err:
             _LOGGER.error("Failed to pass code to config flow: %s", err)
-            return web.Response(
-                text=f"Error occurred while resuming flow: {err}",
-                status=500
-            )
+            return web.Response(text=f"Error occurred while resuming flow: {err}", status=500)
 
         return web.Response(
             text="Authorization successful! You can close this window and return to Home Assistant.",

@@ -31,14 +31,13 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=5)
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensor based on a config entry."""
 
     # helper to get gateway URL
     gateway_key = entry.data[CONF_GATEWAY]
-    host = GATEWAYS.get(gateway_key, "https://gateway.isolarcloud.eu") # Fallback to EU if mapping fails
+    host = GATEWAYS.get(gateway_key, "https://gateway.isolarcloud.eu")  # Fallback to EU if mapping fails
 
     # Reconstruct Auth
     session = async_get_clientsession(hass)
@@ -86,7 +85,7 @@ async def async_setup_entry(
         # Create a sensor for each data point returned by the API
         # The data structure is { "P_CODE": { "code": "...", "value": ..., "unit": "...", "name": "..." } }
         for point_code, point_data in coordinator.data.items():
-             entities.append(SungrowSensor(coordinator, point_code, plant_id, plant_name, point_data, entry.entry_id))
+            entities.append(SungrowSensor(coordinator, point_code, plant_id, plant_name, point_data, entry.entry_id))
 
     async_add_entities(entities)
 
@@ -108,13 +107,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API."""
         try:
-             # async_get_realtime_data returns a dict of plants, keyed by plant_id
-             # { "123": { "code1": {...}, "code2": {...} } }
-             all_plants_data = await self.plants_service.async_get_realtime_data([self.plant_id])
+            # async_get_realtime_data returns a dict of plants, keyed by plant_id
+            # { "123": { "code1": {...}, "code2": {...} } }
+            all_plants_data = await self.plants_service.async_get_realtime_data([self.plant_id])
 
-             if self.plant_id in all_plants_data:
-                 return all_plants_data[self.plant_id]
-             return {}
+            if self.plant_id in all_plants_data:
+                return all_plants_data[self.plant_id]
+            return {}
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
@@ -134,10 +133,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # The API often returns Chinese names even when locale is set to English
         # We assume point_code is a readable string identifier (e.g. 'total_active_power')
         if point_code.isdigit():
-             # Fallback if we only have a number, but ideally we should have a string key
-             sensor_name = init_data.get('name', f"Sensor {point_code}")
+            # Fallback if we only have a number, but ideally we should have a string key
+            sensor_name = init_data.get("name", f"Sensor {point_code}")
         else:
-             sensor_name = point_code.replace("_", " ").title()
+            sensor_name = point_code.replace("_", " ").title()
 
         # With has_entity_name = True, HA prefixes the device name automatically
         self._attr_name = sensor_name
@@ -159,22 +158,22 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
         # Simple inference for Power/Energy
         if self._attr_native_unit_of_measurement in ["kW", "W"]:
-             self._attr_device_class = SensorDeviceClass.POWER
-             self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_device_class = SensorDeviceClass.POWER
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         elif self._attr_native_unit_of_measurement in ["kWh"]:
-             self._attr_device_class = SensorDeviceClass.ENERGY
-             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            self._attr_device_class = SensorDeviceClass.ENERGY
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
         if self.coordinator.data and self.point_code in self.coordinator.data:
-             val = self.coordinator.data[self.point_code].get("value")
-             # Try convert to float if it looks like a number but is string
-             try:
-                 return float(val)
-             except (ValueError, TypeError):
-                 return val
+            val = self.coordinator.data[self.point_code].get("value")
+            # Try convert to float if it looks like a number but is string
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return val
         return None
 
     @property

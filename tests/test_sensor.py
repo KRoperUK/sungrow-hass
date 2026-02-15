@@ -1,4 +1,5 @@
 """Tests for the Sungrow sensor platform."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -207,9 +208,7 @@ class TestSungrowPlantCoordinator:
 # ---------------------------------------------------------------------------
 
 
-async def test_sensor_setup_creates_entities(
-    hass: HomeAssistant, mock_sensor_auth, mock_plants_service
-):
+async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
     """Test async_setup_entry creates sensors for each data point."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
@@ -268,10 +267,12 @@ async def test_sensor_setup_plant_fetch_fails(hass: HomeAssistant, mock_sensor_a
 async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
     """Test that plants returning empty data are skipped without creating entities."""
     # Return empty data for all plants — covers the `if not coordinator.data: continue` branch
-    mock_plants_service.async_get_realtime_data = AsyncMock(return_value={
-        "12345": {},
-        "67890": {},
-    })
+    mock_plants_service.async_get_realtime_data = AsyncMock(
+        return_value={
+            "12345": {},
+            "67890": {},
+        }
+    )
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
@@ -283,4 +284,3 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_s
 
     # Both plants had empty data, so no sensors should be created
     assert len(added_entities) == 0
-

@@ -1,4 +1,5 @@
 """Tests for Sungrow component setup and the auth callback view."""
+
 from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import make_mocked_request
@@ -132,9 +133,7 @@ class TestSungrowAuthCallbackView:
 
     async def test_callback_success(self, hass: HomeAssistant):
         """Test a successful callback configures the flow."""
-        mock_request = make_mocked_request(
-            "GET", "/api/sungrow_hass/callback?code=auth_code_123&flow_id=flow_abc"
-        )
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=auth_code_123&flow_id=flow_abc")
         mock_request.app["hass"] = hass
 
         with patch.object(
@@ -147,15 +146,11 @@ class TestSungrowAuthCallbackView:
 
         assert response.status == 200
         assert "Authorization successful" in response.text
-        mock_configure.assert_called_once_with(
-            flow_id="flow_abc", user_input={"code": "auth_code_123"}
-        )
+        mock_configure.assert_called_once_with(flow_id="flow_abc", user_input={"code": "auth_code_123"})
 
     async def test_callback_flow_error(self, hass: HomeAssistant):
         """Test callback returns 500 when flow configuration fails."""
-        mock_request = make_mocked_request(
-            "GET", "/api/sungrow_hass/callback?code=auth_code&flow_id=bad_flow"
-        )
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=auth_code&flow_id=bad_flow")
         mock_request.app["hass"] = hass
 
         with patch.object(

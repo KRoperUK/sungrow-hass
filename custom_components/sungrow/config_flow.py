@@ -1,4 +1,5 @@
 """Config flow for Sungrow iSolarCloud integration."""
+
 import logging
 from typing import Any
 
@@ -52,7 +53,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         try:
             base_url = get_url(self.hass, allow_internal=False, allow_external=True)
         except Exception:
-            base_url = "http://homeassistant.local:8123" # Fallback
+            base_url = "http://homeassistant.local:8123"  # Fallback
 
         default_redirect = f"{base_url}/api/sungrow_hass/callback"
 
@@ -71,7 +72,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_REDIRECT_URI, default=default_redirect): str,
                 }
             ),
-            errors=errors
+            errors=errors,
         )
 
     async def async_step_auth(self, user_input: dict[str, Any] | None = None):
@@ -102,19 +103,20 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 code_input = user_input["code"].strip()
                 if code_input.startswith("http"):
-                     from urllib.parse import parse_qs, urlparse
-                     parsed = urlparse(code_input)
-                     query = parse_qs(parsed.query)
-                     if "code" in query:
-                         code = query["code"][0]
-                     else:
-                         # Fallback if maybe it's in the fragment?
-                         query = parse_qs(parsed.fragment.split("?")[-1] if "?" in parsed.fragment else "")
-                         if "code" in query:
-                             code = query["code"][0]
-                         else:
-                             errors["base"] = "invalid_auth"
-                             raise ValueError("Could not find code in URL")
+                    from urllib.parse import parse_qs, urlparse
+
+                    parsed = urlparse(code_input)
+                    query = parse_qs(parsed.query)
+                    if "code" in query:
+                        code = query["code"][0]
+                    else:
+                        # Fallback if maybe it's in the fragment?
+                        query = parse_qs(parsed.fragment.split("?")[-1] if "?" in parsed.fragment else "")
+                        if "code" in query:
+                            code = query["code"][0]
+                        else:
+                            errors["base"] = "invalid_auth"
+                            raise ValueError("Could not find code in URL")
                 else:
                     code = code_input
 
@@ -141,10 +143,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # We can store tokens in the config entry data
                     data = {**self.init_info, "tokens": tokens}
 
-                    return self.async_create_entry(
-                        title=f"Sungrow {self.init_info[CONF_APP_ID]}",
-                        data=data
-                    )
+                    return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=data)
 
             except ClientError as e:
                 _LOGGER.warning("Client connection error in async_step_auth: %s", e)
