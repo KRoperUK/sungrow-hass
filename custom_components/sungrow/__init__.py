@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 
@@ -18,7 +18,21 @@ from .const import DOMAIN
 # PLATFORMS: list[Platform] = [Platform.SENSOR]
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
-CONFIG_SCHEMA = cv.config_entry_only_config_schema
+
+class IterableSchema(vol.Schema):
+    """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
+
+    def __iter__(self):
+        """Return an empty iterator."""
+        return iter([])
+
+    def __contains__(self, item):
+        """Return False for any item check."""
+        return False
+
+
+# Workaround for HA 2025.2+ treating the schema function/object as the config dict
+CONFIG_SCHEMA = IterableSchema({}, extra=vol.ALLOW_EXTRA)
 
 _LOGGER = logging.getLogger(__name__)
 
