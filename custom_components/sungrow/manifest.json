@@ -3,14 +3,14 @@
   "name": "Sungrow iSolarCloud",
   "codeowners": [],
   "config_flow": true,
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://github.com/KRoperUK/sungrow-hass",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/KRoperUK/sungrow-hass/issues",
   "requirements": [
     "pysolarcloud"
-  ],
-  "dependencies": [
-    "http"
   ],
   "version": "0.2.0"
 }

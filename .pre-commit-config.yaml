@@ -15,3 +15,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+
+  - repo: local
+    hooks:
+      - id: sort-manifest
+        name: Sort Manifest
+        entry: python3 scripts/sort_manifest.py
+        language: system
+        files: ^custom_components/sungrow/manifest\.json$
+        pass_filenames: false
+
