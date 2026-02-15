@@ -1,4 +1,5 @@
 """Tests validating strings.json / translations consistency."""
+
 import json
 from pathlib import Path
 
@@ -52,9 +53,7 @@ def test_strings_has_required_error_keys(strings_data):
     errors = strings_data["config"]["error"]
     # These error keys are used in config_flow.py
     required_errors = {"cannot_connect", "invalid_auth", "unknown"}
-    assert required_errors.issubset(set(errors.keys())), (
-        f"Missing error keys: {required_errors - set(errors.keys())}"
-    )
+    assert required_errors.issubset(set(errors.keys())), f"Missing error keys: {required_errors - set(errors.keys())}"
 
 
 def test_strings_error_messages_not_empty(strings_data):
@@ -85,13 +84,9 @@ def test_translations_en_matches_strings(strings_data):
     # Both should define the same step IDs
     strings_steps = set(strings_data["config"]["step"].keys())
     en_steps = set(en_data.get("config", {}).get("step", {}).keys())
-    assert strings_steps == en_steps, (
-        f"Step mismatch: strings.json={strings_steps}, en.json={en_steps}"
-    )
+    assert strings_steps == en_steps, f"Step mismatch: strings.json={strings_steps}, en.json={en_steps}"
 
     # Both should define the same error keys
     strings_errors = set(strings_data["config"]["error"].keys())
     en_errors = set(en_data.get("config", {}).get("error", {}).keys())
-    assert strings_errors == en_errors, (
-        f"Error key mismatch: strings.json={strings_errors}, en.json={en_errors}"
-    )
+    assert strings_errors == en_errors, f"Error key mismatch: strings.json={strings_errors}, en.json={en_errors}"

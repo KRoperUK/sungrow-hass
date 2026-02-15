@@ -1,4 +1,5 @@
 """Tests for constants module."""
+
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,

@@ -4,6 +4,7 @@ Run with:  pytest -m live
 Requires SUNGROW_APPKEY, SUNGROW_APPSECRET, SUNGROW_APP_ID environment variables
 (or a populated .env file).
 """
+
 import pytest
 
 # Guard import so the test module itself loads even when pysolarcloud

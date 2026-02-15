@@ -1,4 +1,5 @@
 """Fixtures for Sungrow tests."""
+
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 

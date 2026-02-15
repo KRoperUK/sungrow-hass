@@ -1,4 +1,5 @@
 """Tests for the Sungrow iSolarCloud config flow."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,9 +33,7 @@ def mock_client_session():
 
 async def test_user_step_shows_form(hass: HomeAssistant):
     """Test the initial user step shows a form."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
     assert result["errors"] == {}
@@ -42,9 +41,7 @@ async def test_user_step_shows_form(hass: HomeAssistant):
 
 async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):
     """Test submitting user form advances to the auth step."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
@@ -65,9 +62,7 @@ async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):
 async def test_auth_step_success(hass: HomeAssistant, mock_auth):
     """Test a full successful flow: user → auth → entry created."""
     # Step 1: init
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
     # Step 2: submit user info
     result2 = await hass.config_entries.flow.async_configure(
@@ -97,9 +92,7 @@ async def test_auth_step_success(hass: HomeAssistant, mock_auth):
 
 async def test_auth_step_extracts_code_from_url(hass: HomeAssistant, mock_auth):
     """Test that pasting a full callback URL extracts the code automatically."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -127,9 +120,7 @@ async def test_auth_step_extracts_code_from_url(hass: HomeAssistant, mock_auth):
 
 async def test_auth_step_no_tokens(hass: HomeAssistant, mock_auth_no_tokens):
     """Test auth step when tokens are empty/missing."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -148,9 +139,7 @@ async def test_auth_step_connection_error(hass: HomeAssistant, mock_auth):
     """Test auth step handles connection errors."""
     mock_auth.async_authorize = AsyncMock(side_effect=ClientError("Connection failed"))
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -169,9 +158,7 @@ async def test_auth_step_unexpected_error(hass: HomeAssistant, mock_auth):
     """Test auth step handles unexpected exceptions."""
     mock_auth.async_authorize = AsyncMock(side_effect=RuntimeError("Boom"))
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -194,9 +181,7 @@ async def test_auth_step_unexpected_error(hass: HomeAssistant, mock_auth):
 async def test_auth_step_library_missing(hass: HomeAssistant):
     """Test abort when pysolarcloud Auth is not installed."""
     with patch("custom_components.sungrow.config_flow.Auth", None):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input=MOCK_USER_INPUT,
@@ -213,9 +198,7 @@ async def test_auth_step_library_missing(hass: HomeAssistant):
 
 async def test_auth_step_code_in_url_without_code_param(hass: HomeAssistant, mock_auth):
     """Test that pasting a URL without a 'code' query param falls back to fragment parsing."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -238,9 +221,7 @@ async def test_auth_step_code_in_url_without_code_param(hass: HomeAssistant, moc
 
 async def test_auth_step_url_without_code_anywhere(hass: HomeAssistant, mock_auth):
     """Test that a URL with no code param in query OR fragment returns invalid_auth."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=MOCK_USER_INPUT,
@@ -255,4 +236,3 @@ async def test_auth_step_url_without_code_anywhere(hass: HomeAssistant, mock_aut
 
     assert result3["type"] == data_entry_flow.FlowResultType.FORM
     assert result3["errors"]["base"] == "unknown"
-
