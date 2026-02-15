@@ -1,4 +1,4 @@
-## [0.2.1](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.0...v0.2.1) (2026-02-15)
+## [0.2.2](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.1...v0.2.2) (2026-02-15)
 
 
 ### Features
@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+* resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
 * resolved hassfest warnings ([74dc412](https://github.com/KRoperUK/sungrow-hass/commit/74dc4123499d2dc1d3cebec0e4597e84488bb81c))
 * resolved hassfest warnings ([44fe5dd](https://github.com/KRoperUK/sungrow-hass/commit/44fe5dd5ee630ed191f25ee63a3c56a648137800))
 * resolved hassfest warnings ([990fce2](https://github.com/KRoperUK/sungrow-hass/commit/990fce2292a68b95790e12745d3ee3b0b29da69b))
