@@ -1,12 +1,12 @@
-pytest-homeassistant-custom-component==0.13.206
+pytest-homeassistant-custom-component
 
 # Additional test utilities
-pytest-cov>=6.0.0
-pytest-sugar>=1.0.0
-python-dotenv>=1.0.1
+pytest-cov
+pytest-sugar
+python-dotenv
 
 # Linting & formatting (match pre-commit versions)
-ruff>=0.3.4
+ruff
 
 # Component dependencies
 pysolarcloud
