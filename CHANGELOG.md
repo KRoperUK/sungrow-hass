@@ -1,7 +1,7 @@
-## 1.2.0 (2026-02-15)
+## 0.1.0 (2026-02-15)
 
 
-### Features
+### Features @[# Components] 
 
 * config flow improvement ([fedd9f7](https://github.com/KRoperUK/sungrow-hass/commit/fedd9f76b7b6649089d1fca55004994c3eee8b33))
 
