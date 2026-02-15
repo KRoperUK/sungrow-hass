@@ -1,5 +1,4 @@
 """Tests for the Sungrow iSolarCloud config flow."""
-import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,9 +9,6 @@ from homeassistant.core import HomeAssistant
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
-    CONF_APP_SECRET,
-    CONF_GATEWAY,
-    CONF_REDIRECT_URI,
     DOMAIN,
 )
 

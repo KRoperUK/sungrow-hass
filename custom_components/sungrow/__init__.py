@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from aiohttp import web
 
+from aiohttp import web
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.components.http import HomeAssistantView
 
 from .const import DOMAIN
 
@@ -60,7 +60,7 @@ class SungrowAuthCallbackView(HomeAssistantView):
         if not code or not flow_id:
             _LOGGER.warning("Callback received but missing code or flow_id. Params: %s", params)
             return web.Response(
-                text="Missing code or flow_id parameters. Please try again.", 
+                text="Missing code or flow_id parameters. Please try again.",
                 status=400
             )
 
@@ -74,7 +74,7 @@ class SungrowAuthCallbackView(HomeAssistantView):
         except Exception as err:
             _LOGGER.error("Failed to pass code to config flow: %s", err)
             return web.Response(
-                text=f"Error occurred while resuming flow: {err}", 
+                text=f"Error occurred while resuming flow: {err}",
                 status=500
             )
 

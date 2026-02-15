@@ -9,7 +9,7 @@ import pytest
 # Guard import so the test module itself loads even when pysolarcloud
 # is not installed in the test environment.
 pysolarcloud = pytest.importorskip("pysolarcloud")
-from pysolarcloud import Auth
+Auth = pysolarcloud.Auth
 
 
 @pytest.mark.live

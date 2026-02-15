@@ -3,27 +3,27 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower, UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntryType
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
     UpdateFailed,
 )
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
 from pysolarcloud import Auth
 from pysolarcloud.plants import Plants
 
 from .const import (
-    DOMAIN,
+    CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
-    CONF_APP_ID,
     CONF_GATEWAY,
+    DOMAIN,
     GATEWAYS,
 )
 
@@ -35,7 +35,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Sungrow sensor based on a config entry."""
-    
+
     # helper to get gateway URL
     gateway_key = entry.data[CONF_GATEWAY]
     host = GATEWAYS.get(gateway_key, "https://gateway.isolarcloud.eu") # Fallback to EU if mapping fails
@@ -49,7 +49,7 @@ async def async_setup_entry(
         app_id=entry.data[CONF_APP_ID],
         websession=session,
     )
-    
+
     # Restore tokens
     if "tokens" in entry.data:
         auth.tokens = entry.data["tokens"]
@@ -71,11 +71,11 @@ async def async_setup_entry(
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
         plant_name = plant_info["ps_name"]
-        
+
         _LOGGER.debug(f"Setting up plant: {plant_name} ({plant_id})")
 
         coordinator = SungrowPlantCoordinator(hass, plants_service, plant_id, plant_name)
-        
+
         # Determine available sensors by doing a first refresh
         await coordinator.async_config_entry_first_refresh()
 
@@ -86,7 +86,7 @@ async def async_setup_entry(
         # Create a sensor for each data point returned by the API
         # The data structure is { "P_CODE": { "code": "...", "value": ..., "unit": "...", "name": "..." } }
         for point_code, point_data in coordinator.data.items():
-             entities.append(SungrowSensor(coordinator, point_code, plant_id, plant_name, point_data))
+             entities.append(SungrowSensor(coordinator, point_code, plant_id, plant_name, point_data, entry.entry_id))
 
     async_add_entities(entities)
 
@@ -111,18 +111,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
              # async_get_realtime_data returns a dict of plants, keyed by plant_id
              # { "123": { "code1": {...}, "code2": {...} } }
              all_plants_data = await self.plants_service.async_get_realtime_data([self.plant_id])
-             
+
              if self.plant_id in all_plants_data:
                  return all_plants_data[self.plant_id]
              return {}
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}")
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
 
 
 class SungrowSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Sungrow Sensor."""
 
-    def __init__(self, coordinator, point_code, plant_id, plant_name, init_data):
+    has_entity_name = True
+
+    def __init__(self, coordinator, point_code, plant_id, plant_name, init_data, entry_id):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.point_code = point_code
@@ -137,14 +139,24 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         else:
              sensor_name = point_code.replace("_", " ").title()
 
-        self._attr_name = f"{plant_name} {sensor_name}"
-        _LOGGER.debug(f"Created sensor: {self._attr_name} (code: {point_code})")
+        # With has_entity_name = True, HA prefixes the device name automatically
+        self._attr_name = sensor_name
+        _LOGGER.debug(f"Created sensor: {plant_name} {sensor_name} (code: {point_code})")
         self._attr_unique_id = f"{plant_id}_{point_code}"
         self._attr_icon = "mdi:solar-power-variant"
-        
+
+        # Group sensors under a device per plant
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, plant_id)},
+            name=plant_name,
+            manufacturer="Sungrow",
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://isolarcloud.eu",
+        )
+
         # Attempt to infer device class and unit
         self._attr_native_unit_of_measurement = init_data.get("unit")
-        
+
         # Simple inference for Power/Energy
         if self._attr_native_unit_of_measurement in ["kW", "W"]:
              self._attr_device_class = SensorDeviceClass.POWER
