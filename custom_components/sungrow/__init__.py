@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from aiohttp import web
+from homeassistant import config_validation as cv
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -16,6 +17,8 @@ from .const import DOMAIN
 # For your initial example we don't have sensors yet but usually:
 # PLATFORMS: list[Platform] = [Platform.SENSOR]
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema
 
 _LOGGER = logging.getLogger(__name__)
 

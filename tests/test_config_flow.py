@@ -37,6 +37,9 @@ async def test_user_step_shows_form(hass: HomeAssistant):
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
     assert result["errors"] == {}
+    assert "description_placeholders" in result
+    assert result["description_placeholders"]["url"] == "https://developer-api.isolarcloud.com/#/application"
+    assert "app_id_url" in result["description_placeholders"]
 
 
 async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):

@@ -9,6 +9,8 @@
   "requirements": [
     "pysolarcloud"
   ],
-  "version": "0.2.0",
-  "icon": "mdi:solar-power"
+  "dependencies": [
+    "http"
+  ],
+  "version": "0.2.0"
 }
