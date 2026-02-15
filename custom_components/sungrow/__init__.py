@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 
 from aiohttp import web
-from homeassistant import config_validation as cv
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 
