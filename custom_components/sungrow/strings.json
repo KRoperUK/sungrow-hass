@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to iSolarCloud",
-        "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud](https://developer-api.isolarcloud.com/#/application)",
+        "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud]({url})",
         "data": {
           "gateway": "Gateway Region",
           "app_key": "AppKey",
@@ -14,7 +14,7 @@
         "data_description": {
           "app_key": "AppKey from iSolarCloud Developer Platform.",
           "app_secret": "AppSecret from iSolarCloud Developer Platform.",
-          "app_id": "App ID from iSolarCloud Developer Platform. To find this, go to your application and look for 'id' within the URL like so: https://developer-api.isolarcloud.com/#/editApplication?id=1234."
+          "app_id": "App ID from iSolarCloud Developer Platform. To find this, go to your application and look for 'id' within the URL like so: {app_id_url}."
         }
       },
       "auth": {

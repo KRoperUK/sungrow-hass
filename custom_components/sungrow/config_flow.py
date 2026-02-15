@@ -61,8 +61,14 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "app_id": user_input.get(CONF_APP_ID, "YourAppID") if user_input else "YourAppID"
         }
 
+        description_placeholders = {
+            "url": "https://developer-api.isolarcloud.com/#/application",
+            "app_id_url": "https://developer-api.isolarcloud.com/#/editApplication?id=1234",
+        }
+
         return self.async_show_form(
             step_id="user",
+            description_placeholders=description_placeholders,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_APP_KEY): str,
