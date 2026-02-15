@@ -1,6 +1,4 @@
-# Core test dependency — pulls in pytest, pytest-asyncio, homeassistant, etc.
-# 0.13.206+ requires Python 3.13, so cap for Python 3.12 compat
-pytest-homeassistant-custom-component>=0.13.205,<0.13.206
+pytest-homeassistant-custom-component==0.13.206
 
 # Additional test utilities
 pytest-cov>=6.0.0
