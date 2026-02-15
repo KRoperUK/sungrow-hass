@@ -153,6 +153,12 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             configuration_url="https://isolarcloud.eu",
         )
 
+        # Programmatically hide sensors that are "Unknown" at first setup
+        # This prevents UI clutter for unsupported attributes (e.g. meters/batteries not present)
+        initial_value = init_data.get("value")
+        if initial_value is None or str(initial_value).strip() == "" or str(initial_value).lower() == "unknown":
+            self._attr_entity_registry_enabled_default = False
+
         # Attempt to infer device class and unit
         self._attr_native_unit_of_measurement = init_data.get("unit")
 
