@@ -120,7 +120,11 @@ class ISolarCloudAPI:
 
         Returns a list of plant dicts with at least ps_id and ps_name.
         """
-        payload = self._base_payload()
+        payload = {
+            **self._base_payload(),
+            "curPage": 1,
+            "size": 100,
+        }
 
         data = await self._post("getPowerStationList", payload)
         result_data = data.get("result_data", {})
@@ -140,6 +144,8 @@ class ISolarCloudAPI:
         payload = {
             **self._base_payload(),
             "ps_id": str(ps_id),
+            "curPage": 1,
+            "size": 100,
         }
 
         data = await self._post("getDeviceList", payload)
