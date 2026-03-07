@@ -1,5 +1,5 @@
 {
-  "domain": "sungrow",
+  "domain": "sungrow_api_v1",
   "name": "Sungrow iSolarCloud (API v1)",
   "codeowners": [],
   "config_flow": true,
