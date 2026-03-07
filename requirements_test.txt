@@ -9,4 +9,4 @@ python-dotenv
 ruff
 
 # Component dependencies
-pysolarcloud
+# (no external dependencies - API client is built-in)

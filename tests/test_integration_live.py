@@ -1,45 +1,50 @@
-"""Live integration tests against iSolarCloud API.
+"""Live integration tests against iSolarCloud API v1.
 
 Run with:  pytest -m live
-Requires SUNGROW_APPKEY, SUNGROW_APPSECRET, SUNGROW_APP_ID environment variables
-(or a populated .env file).
+Requires SUNGROW_APPKEY, SUNGROW_APPSECRET, SUNGROW_USERNAME, SUNGROW_PASSWORD
+environment variables (or a populated .env file).
 """
 
 import pytest
 
-# Guard import so the test module itself loads even when pysolarcloud
-# is not installed in the test environment.
-pysolarcloud = pytest.importorskip("pysolarcloud")
-Auth = pysolarcloud.Auth
+from custom_components.sungrow.isolarcloud_api import ISolarCloudAPI
 
 
 @pytest.mark.live
-async def test_api_auth_init(live_credentials):
-    """Test Auth can be instantiated with live credentials without errors."""
-    auth = Auth(
-        host=live_credentials["host"],
-        appkey=live_credentials["app_key"],
-        access_key=live_credentials["app_secret"],
-        app_id=live_credentials["app_id"],
-    )
-    # Just verify the auth object was created and has expected attributes
-    assert auth is not None
-    assert hasattr(auth, "auth_url")
-    assert hasattr(auth, "tokens")
+async def test_api_login(live_credentials):
+    """Test login with live credentials."""
+    import aiohttp
+
+    async with aiohttp.ClientSession() as session:
+        api = ISolarCloudAPI(
+            host=live_credentials["host"],
+            appkey=live_credentials["app_key"],
+            access_key=live_credentials["app_secret"],
+            user_account=live_credentials["username"],
+            user_password=live_credentials["password"],
+            websession=session,
+        )
+
+        result = await api.async_login()
+        assert api.token is not None
+        assert len(api.token) > 0
 
 
 @pytest.mark.live
-async def test_auth_url_generation(live_credentials):
-    """Test that auth URL can be generated from live credentials."""
-    auth = Auth(
-        host=live_credentials["host"],
-        appkey=live_credentials["app_key"],
-        access_key=live_credentials["app_secret"],
-        app_id=live_credentials["app_id"],
-    )
+async def test_api_get_plants(live_credentials):
+    """Test fetching plant list with live credentials."""
+    import aiohttp
 
-    redirect_uri = "http://localhost:8123/api/sungrow_hass/callback"
-    url = auth.auth_url(redirect_uri)
-    assert isinstance(url, str)
-    assert url.startswith("http")
-    assert len(url) > 50  # Should be a full URL, not empty
+    async with aiohttp.ClientSession() as session:
+        api = ISolarCloudAPI(
+            host=live_credentials["host"],
+            appkey=live_credentials["app_key"],
+            access_key=live_credentials["app_secret"],
+            user_account=live_credentials["username"],
+            user_password=live_credentials["password"],
+            websession=session,
+        )
+
+        await api.async_login()
+        plants = await api.async_get_plant_list()
+        assert isinstance(plants, list)

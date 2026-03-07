@@ -9,11 +9,11 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow.const import (
-    CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
     CONF_GATEWAY,
-    CONF_REDIRECT_URI,
+    CONF_PASSWORD,
+    CONF_USERNAME,
     DOMAIN,
 )
 
@@ -28,22 +28,19 @@ load_dotenv()
 MOCK_CONFIG_DATA = {
     CONF_APP_KEY: "test_app_key",
     CONF_APP_SECRET: "test_app_secret",
-    CONF_APP_ID: "test_app_id",
+    CONF_USERNAME: "test@example.com",
+    CONF_PASSWORD: "test_password",
     CONF_GATEWAY: "Europe",
-    CONF_REDIRECT_URI: "http://homeassistant.local:8123/api/sungrow_hass/callback",
-    "tokens": {
-        "access_token": "test_access_token",
-        "refresh_token": "test_refresh_token",
-        "token_type": "bearer",
-    },
+    "token": "test_token_123",
+    "user_id": "12345",
 }
 
 MOCK_USER_INPUT = {
     CONF_APP_KEY: "test_app_key",
     CONF_APP_SECRET: "test_app_secret",
-    CONF_APP_ID: "test_app_id",
+    CONF_USERNAME: "test@example.com",
+    CONF_PASSWORD: "test_password",
     CONF_GATEWAY: "Europe",
-    CONF_REDIRECT_URI: "http://homeassistant.local:8123/api/sungrow_hass/callback",
 }
 
 MOCK_PLANT_LIST = [
@@ -52,64 +49,52 @@ MOCK_PLANT_LIST = [
 ]
 
 MOCK_REALTIME_DATA = {
-    "12345": {
-        "total_active_power": {
-            "code": "total_active_power",
-            "value": "5.23",
-            "unit": "kW",
-            "name": "Total Active Power",
-        },
-        "daily_energy": {
-            "code": "daily_energy",
-            "value": "12.45",
-            "unit": "kWh",
-            "name": "Daily Energy",
-        },
-        "device_status": {
-            "code": "device_status",
-            "value": "Running",
-            "unit": "",
-            "name": "Device Status",
-        },
+    "total_active_power": {
+        "code": "total_active_power",
+        "value": "5.23",
+        "unit": "kW",
+        "name": "Total Active Power",
     },
-    "67890": {
-        "total_active_power": {
-            "code": "total_active_power",
-            "value": "3.10",
-            "unit": "kW",
-            "name": "Total Active Power",
-        },
+    "daily_energy": {
+        "code": "daily_energy",
+        "value": "12.45",
+        "unit": "kWh",
+        "name": "Daily Energy",
+    },
+    "device_status": {
+        "code": "device_status",
+        "value": "Running",
+        "unit": "",
+        "name": "Device Status",
+    },
+}
+
+MOCK_REALTIME_DATA_SECOND_PLANT = {
+    "total_active_power": {
+        "code": "total_active_power",
+        "value": "3.10",
+        "unit": "kW",
+        "name": "Total Active Power",
     },
 }
 
 
 @pytest.fixture(autouse=True)
 def patch_async_drop_config_annotations():
-    """Patch async_drop_config_annotations to handle IntegrationConfigInfo.
-
-    HA 2025.2+ passes IntegrationConfigInfo to this function, but the implementation
-    expects a dict. This patch unwraps it.
-    """
+    """Patch async_drop_config_annotations to handle IntegrationConfigInfo."""
     from homeassistant import config as ha_config
 
     original_func = ha_config.async_drop_config_annotations
 
     def side_effect(config, integration):
-        # HA 2025.2's async_drop_config_annotations expects an object with .config attribute
-
-        # Case 1: Config is a dict (from tests) -> Wrap it
         if isinstance(config, dict):
             from types import SimpleNamespace
 
             return original_func(SimpleNamespace(config=config, exception_info_list=[]), integration)
 
-        # Case 2: Config is IntegrationConfigInfo (from setup.py)
-        # If internal config is NOT a dict (e.g. validator function), return empty dict
-        # to avoid TypeError in async_drop_config_annotations
         if hasattr(config, "config") and not isinstance(config.config, dict):
             return {}
 
-        # Pass through otherwise
         return original_func(config, integration)
 
     with patch("homeassistant.config.async_drop_config_annotations", side_effect=side_effect):
@@ -129,12 +114,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 @pytest.fixture(autouse=True)
 def auto_mock_hass_http(hass: HomeAssistant):
-    """Mock hass.http so that async_setup can register views without crashing.
-
-    The test HA instance doesn't have an HTTP server, so hass.http is None.
-    This also prevents thread leaks from the HTTP server in teardown checks.
-    """
-    print(f"DEBUG: hass.config type: {type(hass.config)}")
+    """Mock hass.http for tests."""
     hass.http = MagicMock()
     yield
 
@@ -145,58 +125,55 @@ def mock_config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
         data=MOCK_CONFIG_DATA.copy(),
-        title="Sungrow test_app_id",
-        unique_id="test_app_id",
+        title="Sungrow test@example.com",
+        unique_id="test@example.com",
     )
 
 
 # ---------------------------------------------------------------------------
-# pysolarcloud mocks
+# API client mocks
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def mock_auth():
-    """Create a mock Auth instance matching the real pysolarcloud.Auth interface."""
-    with patch("custom_components.sungrow.config_flow.Auth") as mock_auth_cls:
-        auth_instance = MagicMock()
-        auth_instance.auth_url.return_value = "https://isolarcloud.eu/oauth?client_id=test"
-        auth_instance.async_authorize = AsyncMock(return_value=None)
-        auth_instance.tokens = {
-            "access_token": "test_access_token",
-            "refresh_token": "test_refresh_token",
-            "token_type": "bearer",
-        }
-        mock_auth_cls.return_value = auth_instance
-        yield auth_instance
+def mock_api():
+    """Create a mock ISolarCloudAPI instance for config_flow tests."""
+    with patch("custom_components.sungrow.config_flow.ISolarCloudAPI") as mock_api_cls:
+        api_instance = MagicMock()
+        api_instance.async_login = AsyncMock(return_value={"token": "test_token_123", "user_id": "12345"})
+        api_instance.token = "test_token_123"
+        api_instance.user_id = "12345"
+        mock_api_cls.return_value = api_instance
+        yield api_instance
 
 
 @pytest.fixture
-def mock_auth_no_tokens(mock_auth):
-    """Auth mock where token retrieval returns empty (failed auth)."""
-    mock_auth.tokens = {}
-    return mock_auth
+def mock_api_invalid_auth():
+    """Create a mock ISolarCloudAPI that raises on login."""
+    with patch("custom_components.sungrow.config_flow.ISolarCloudAPI") as mock_api_cls:
+        from custom_components.sungrow.isolarcloud_api import ISolarCloudError
+
+        api_instance = MagicMock()
+        api_instance.async_login = AsyncMock(side_effect=ISolarCloudError("Invalid credentials"))
+        mock_api_cls.return_value = api_instance
+        yield api_instance
 
 
 @pytest.fixture
-def mock_plants_service():
-    """Create a mock Plants service."""
-    with patch("custom_components.sungrow.sensor.Plants") as mock_plants_cls:
-        plants_instance = MagicMock()
-        plants_instance.async_get_plants = AsyncMock(return_value=MOCK_PLANT_LIST)
-        plants_instance.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
-        mock_plants_cls.return_value = plants_instance
-        yield plants_instance
-
-
-@pytest.fixture
-def mock_sensor_auth():
-    """Create a mock Auth instance for sensor setup (patches sensor module)."""
-    with patch("custom_components.sungrow.sensor.Auth") as mock_auth_cls:
-        auth_instance = MagicMock()
-        auth_instance.tokens = MOCK_CONFIG_DATA["tokens"]
-        mock_auth_cls.return_value = auth_instance
-        yield auth_instance
+def mock_sensor_api():
+    """Create a mock ISolarCloudAPI for sensor setup."""
+    with patch("custom_components.sungrow.sensor.ISolarCloudAPI") as mock_api_cls:
+        api_instance = MagicMock()
+        api_instance.token = "test_token_123"
+        api_instance.user_id = "12345"
+        api_instance.async_login = AsyncMock(return_value={})
+        api_instance.async_get_plant_list = AsyncMock(return_value=MOCK_PLANT_LIST)
+        api_instance.async_get_plant_realtime_data = AsyncMock(side_effect=lambda ps_id: {
+            "12345": MOCK_REALTIME_DATA,
+            "67890": MOCK_REALTIME_DATA_SECOND_PLANT,
+        }.get(str(ps_id), {}))
+        mock_api_cls.return_value = api_instance
+        yield api_instance
 
 
 # ---------------------------------------------------------------------------
@@ -209,15 +186,17 @@ def live_credentials():
     """Return credentials for live tests if available."""
     app_key = os.getenv("SUNGROW_APPKEY")
     app_secret = os.getenv("SUNGROW_APPSECRET")
-    app_id = os.getenv("SUNGROW_APP_ID")
+    username = os.getenv("SUNGROW_USERNAME")
+    password = os.getenv("SUNGROW_PASSWORD")
     host = os.getenv("SUNGROW_HOST", "https://gateway.isolarcloud.eu")
 
-    if not all([app_key, app_secret, app_id]):
+    if not all([app_key, app_secret, username, password]):
         pytest.skip("Live test credentials not found in environment variables or .env")
 
     return {
         "app_key": app_key,
         "app_secret": app_secret,
-        "app_id": app_id,
+        "username": username,
+        "password": password,
         "host": host,
     }
