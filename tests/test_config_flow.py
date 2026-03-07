@@ -58,7 +58,7 @@ async def test_user_step_success(hass: HomeAssistant, mock_api):
         await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result2["title"] == f"Sungrow {MOCK_USER_INPUT[CONF_USERNAME]}"
+    assert result2["title"] == f"Sungrow v1 {MOCK_USER_INPUT[CONF_USERNAME]}"
     assert result2["data"]["token"] == "test_token_123"
     assert result2["data"][CONF_APP_KEY] == MOCK_USER_INPUT[CONF_APP_KEY]
 

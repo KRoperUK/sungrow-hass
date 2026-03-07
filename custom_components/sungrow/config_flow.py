@@ -57,7 +57,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
-                    title=f"Sungrow {user_input[CONF_USERNAME]}",
+                    title=f"Sungrow v1 {user_input[CONF_USERNAME]}",
                     data=data,
                 )
 

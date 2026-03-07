@@ -125,7 +125,7 @@ def mock_config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
         data=MOCK_CONFIG_DATA.copy(),
-        title="Sungrow test@example.com",
+        title="Sungrow v1 test@example.com",
         unique_id="test@example.com",
     )
 
