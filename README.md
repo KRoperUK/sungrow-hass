@@ -1,16 +1,20 @@
-# Sungrow iSolarCloud Integration for Home Assistant
+# Sungrow iSolarCloud Integration for Home Assistant (API v1)
 
 [![HACS][hacs-badge]][hacs-url]
 [![CI][ci-badge]][ci-url]
 [![GitHub Release][release-badge]][release-url]
 
-Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`pysolarcloud`](https://pypi.org/project/pysolarcloud/) library.
+Custom component that integrates Sungrow inverters via the **iSolarCloud API v1** (non-OAuth, username/password) into Home Assistant.
+
+> **Note:** This version uses iSolarCloud API **v1** which authenticates with your username and password — no OAuth redirect flow required. If you need the OAuth-based v2 integration, see the [original repository](https://github.com/KRoperUK/sungrow-hass).
 
 ## Features
 
-- **Cloud Polling** — fetches real-time data from the iSolarCloud API.
-- **Auto-Discovery** — automatically finds all plants linked to your account.
+- **API v1 (non-OAuth)** — simple username/password authentication, no redirect flow needed.
+- **Cloud Polling** — fetches real-time data from the iSolarCloud API every 5 minutes.
+- **Auto-Discovery** — automatically finds all plants and devices linked to your account.
 - **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.).
+- **Auto Re-login** — automatically refreshes the session token when it expires.
 - **Config Flow** — set up entirely through the Home Assistant UI.
 
 ## Installation
@@ -23,8 +27,8 @@ Or manually:
 
 1. Open **HACS** → **Integrations**.
 2. Click the three-dot menu → **Custom repositories**.
-3. Add `https://github.com/KRoperUK/sungrow-hass` as an **Integration**.
-4. Search for **Sungrow iSolarCloud** and install.
+3. Add this repository URL as an **Integration**.
+4. Search for **Sungrow iSolarCloud (API v1)** and install.
 5. Restart Home Assistant.
 
 ### Manual
@@ -36,23 +40,39 @@ Or manually:
 ## Configuration
 
 1. Go to **Settings** → **Devices & Services**.
-2. Click **Add Integration** and search for **Sungrow iSolarCloud**.
-3. Enter your iSolarCloud API credentials:
+2. Click **Add Integration** and search for **Sungrow iSolarCloud (API v1)**.
+3. Enter your credentials:
 
 | Field | Description |
 |---|---|
-| **Gateway** | Your region (Europe, Australia, China, etc.) |
-| **App Key** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
-| **App Secret** | AppSecret from the Developer Platform |
-| **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
-| **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
+| **AppKey** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
+| **App Secret** | App Secret (x-access-key) from the Developer Platform |
+| **Username / Email** | Your iSolarCloud account email or username |
+| **Password** | Your iSolarCloud account password |
+| **Gateway Region** | Your region (Europe, Australia, China, International) |
 
-4. Click **Submit** — you'll be shown an authorisation URL.
-5. Visit the URL, log in, and paste the returned **code** back into Home Assistant.
+4. Click **Submit** — the integration will log in and create sensors for all your plants.
 
-### Obtaining Credentials
+### Obtaining API Credentials
 
-Register an application on the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) to get your App Key, App Secret, and App ID.
+1. Go to the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application).
+2. Register / log in and create an application.
+3. **Important:** When creating the app, select **V1 (non-OAuth)** access.
+4. Wait for approval (may take a few days).
+5. Once approved, note your **AppKey** and **App Secret**.
+
+## API Endpoints Used
+
+This integration calls the following iSolarCloud OpenAPI v1 endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /openapi/login` | Authenticate and obtain session token |
+| `POST /openapi/getPowerStationList` | List all plants on the account |
+| `POST /openapi/getDeviceList` | List devices for a specific plant |
+| `POST /openapi/getDeviceRealTimeData` | Fetch real-time data points for devices |
+
+All requests include the `x-access-key` header (App Secret) and `appkey` in the body.
 
 ## Development
 
@@ -71,7 +91,8 @@ To run live tests against the real iSolarCloud API:
    ```env
    SUNGROW_APPKEY="your_app_key"
    SUNGROW_APPSECRET="your_app_secret"
-   SUNGROW_APP_ID="your_app_id"
+   SUNGROW_USERNAME="your_email"
+   SUNGROW_PASSWORD="your_password"
    ```
 
 2. Run the live tests:
