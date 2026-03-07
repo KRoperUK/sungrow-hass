@@ -1,12 +1,9 @@
 """Constants for the Sungrow iSolarCloud integration."""
 
-DOMAIN = "sungrow"
+DOMAIN = "sungrow_api_v1"
 CONF_APP_KEY = "app_key"
 CONF_APP_SECRET = "app_secret"
-CONF_APP_ID = "app_id"
-CONF_AUTH_URL = "auth_url_input"
 CONF_GATEWAY = "gateway"
-CONF_REDIRECT_URI = "redirect_uri"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 

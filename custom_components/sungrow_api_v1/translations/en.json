@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to iSolarCloud (API v1)",
+        "description": "Enter your iSolarCloud API credentials and account details. You can get your API keys here: [iSolarCloud Developer Portal]({url})",
+        "data": {
+          "gateway": "Gateway Region",
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "username": "Username / Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "app_key": "AppKey from iSolarCloud Developer Platform (V1, non-OAuth).",
+          "app_secret": "App Secret (x-access-key) from iSolarCloud Developer Platform.",
+          "username": "Your iSolarCloud account email / username.",
+          "password": "Your iSolarCloud account password."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication - check your credentials",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This account is already configured"
+    }
+  }
+}

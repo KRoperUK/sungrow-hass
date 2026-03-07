@@ -1,3 +1,5 @@
+"""Sensor platform for Sungrow iSolarCloud integration (API v1)."""
+
 from __future__ import annotations
 
 import logging
@@ -15,17 +17,17 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
-from pysolarcloud import Auth
-from pysolarcloud.plants import Plants
 
 from .const import (
-    CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
     CONF_GATEWAY,
+    CONF_PASSWORD,
+    CONF_USERNAME,
     DOMAIN,
     GATEWAYS,
 )
+from .isolarcloud_api import ISolarCloudAPI, ISolarCloudError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,33 +36,42 @@ SCAN_INTERVAL = timedelta(minutes=5)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensor based on a config entry."""
-
-    # helper to get gateway URL
     gateway_key = entry.data[CONF_GATEWAY]
-    host = GATEWAYS.get(gateway_key, "https://gateway.isolarcloud.eu")  # Fallback to EU if mapping fails
+    host = GATEWAYS.get(gateway_key, "https://gateway.isolarcloud.eu")
 
-    # Reconstruct Auth
     session = async_get_clientsession(hass)
-    auth = Auth(
+    api = ISolarCloudAPI(
         host=host,
         appkey=entry.data[CONF_APP_KEY],
         access_key=entry.data[CONF_APP_SECRET],
-        app_id=entry.data[CONF_APP_ID],
+        user_account=entry.data[CONF_USERNAME],
+        user_password=entry.data[CONF_PASSWORD],
         websession=session,
     )
 
-    # Restore tokens
-    if "tokens" in entry.data:
-        auth.tokens = entry.data["tokens"]
+    # Restore token if available, otherwise login
+    if "token" in entry.data:
+        api.token = entry.data["token"]
+        api.user_id = entry.data.get("user_id")
     else:
-        _LOGGER.error("No tokens found in config entry")
-        return
-
-    plants_service = Plants(auth)
+        try:
+            await api.async_login()
+        except Exception as err:
+            _LOGGER.error("Failed to login to iSolarCloud: %s", err)
+            return
 
     # Fetch plants
     try:
-        plant_list = await plants_service.async_get_plants()
+        plant_list = await api.async_get_plant_list()
+    except ISolarCloudError:
+        # Token may be expired, try re-login
+        _LOGGER.info("Token may be expired, attempting re-login")
+        try:
+            await api.async_login()
+            plant_list = await api.async_get_plant_list()
+        except Exception as err:
+            _LOGGER.error("Failed to fetch plants: %s", err)
+            return
     except Exception as err:
         _LOGGER.error("Failed to fetch plants: %s", err)
         return
@@ -68,22 +79,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities = []
 
     for plant_info in plant_list:
-        plant_id = str(plant_info["ps_id"])
-        plant_name = plant_info["ps_name"]
+        plant_id = str(plant_info.get("ps_id", plant_info.get("id", "")))
+        plant_name = plant_info.get("ps_name", plant_info.get("name", f"Plant {plant_id}"))
 
-        _LOGGER.debug(f"Setting up plant: {plant_name} ({plant_id})")
+        if not plant_id:
+            continue
 
-        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name)
+        _LOGGER.debug("Setting up plant: %s (%s)", plant_name, plant_id)
 
-        # Determine available sensors by doing a first refresh
+        coordinator = SungrowPlantCoordinator(hass, entry, api, plant_id, plant_name)
+
         await coordinator.async_config_entry_first_refresh()
 
         if not coordinator.data:
-            _LOGGER.warning(f"No data received for plant {plant_name}")
+            _LOGGER.warning("No data received for plant %s", plant_name)
             continue
 
-        # Create a sensor for each data point returned by the API
-        # The data structure is { "P_CODE": { "code": "...", "value": ..., "unit": "...", "name": "..." } }
         for point_code, point_data in coordinator.data.items():
             entities.append(SungrowSensor(coordinator, point_code, plant_id, plant_name, point_data, entry.entry_id))
 
@@ -93,28 +104,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class SungrowPlantCoordinator(DataUpdateCoordinator):
     """Coordinator to manage fetching data from single plant."""
 
-    def __init__(self, hass, config_entry, plants_service, plant_id, plant_name):
+    def __init__(self, hass, config_entry, api: ISolarCloudAPI, plant_id, plant_name):
         """Initialize."""
         super().__init__(
             hass,
             _LOGGER,
             name=f"Sungrow Plant {plant_name}",
             update_interval=SCAN_INTERVAL,
-            config_entry=config_entry,
         )
-        self.plants_service = plants_service
+        self.config_entry = config_entry
+        self.api = api
         self.plant_id = plant_id
 
     async def _async_update_data(self):
         """Fetch data from API."""
         try:
-            # async_get_realtime_data returns a dict of plants, keyed by plant_id
-            # { "123": { "code1": {...}, "code2": {...} } }
-            all_plants_data = await self.plants_service.async_get_realtime_data([self.plant_id])
-
-            if self.plant_id in all_plants_data:
-                return all_plants_data[self.plant_id]
-            return {}
+            return await self.api.async_get_plant_realtime_data(self.plant_id)
+        except ISolarCloudError as err:
+            # Try re-login on auth errors
+            try:
+                await self.api.async_login()
+                return await self.api.async_get_plant_realtime_data(self.plant_id)
+            except Exception as login_err:
+                raise UpdateFailed(f"Error communicating with API: {err}") from login_err
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
@@ -130,22 +142,15 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         self.point_code = point_code
         self.plant_id = plant_id
 
-        # Prefer generating name from code to avoid Chinese names from API
-        # The API often returns Chinese names even when locale is set to English
-        # We assume point_code is a readable string identifier (e.g. 'total_active_power')
         if point_code.isdigit():
-            # Fallback if we only have a number, but ideally we should have a string key
             sensor_name = init_data.get("name", f"Sensor {point_code}")
         else:
             sensor_name = point_code.replace("_", " ").title()
 
-        # With has_entity_name = True, HA prefixes the device name automatically
         self._attr_name = sensor_name
-        _LOGGER.debug(f"Created sensor: {plant_name} {sensor_name} (code: {point_code})")
         self._attr_unique_id = f"{plant_id}_{point_code}"
         self._attr_icon = "mdi:solar-power-variant"
 
-        # Group sensors under a device per plant
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, plant_id)},
             name=plant_name,
@@ -154,16 +159,12 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             configuration_url="https://isolarcloud.eu",
         )
 
-        # Programmatically hide sensors that are "Unknown" at first setup
-        # This prevents UI clutter for unsupported attributes (e.g. meters/batteries not present)
         initial_value = init_data.get("value")
         if initial_value is None or str(initial_value).strip() == "" or str(initial_value).lower() == "unknown":
             self._attr_entity_registry_enabled_default = False
 
-        # Attempt to infer device class and unit
         self._attr_native_unit_of_measurement = init_data.get("unit")
 
-        # Simple inference for Power/Energy
         if self._attr_native_unit_of_measurement in ["kW", "W"]:
             self._attr_device_class = SensorDeviceClass.POWER
             self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -176,7 +177,6 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         if self.coordinator.data and self.point_code in self.coordinator.data:
             val = self.coordinator.data[self.point_code].get("value")
-            # Try convert to float if it looks like a number but is string
             try:
                 return float(val)
             except (ValueError, TypeError):

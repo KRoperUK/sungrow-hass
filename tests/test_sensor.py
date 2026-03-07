@@ -1,4 +1,4 @@
-"""Tests for the Sungrow sensor platform."""
+"""Tests for the Sungrow sensor platform (API v1)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -198,34 +198,65 @@ class TestSungrowPlantCoordinator:
 
     async def test_update_data_success(self, hass: HomeAssistant):
         """Test successful data fetch returns plant data."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+        mock_api = MagicMock()
+        mock_api.async_get_plant_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
         mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_api, "12345", "Test Plant")
         data = await coordinator._async_update_data()
 
         assert "total_active_power" in data
         assert data["total_active_power"]["value"] == "5.23"
 
-    async def test_update_data_missing_plant(self, hass: HomeAssistant):
-        """Test returns empty dict when plant_id is not in response."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(return_value={"99999": {}})
+    async def test_update_data_empty(self, hass: HomeAssistant):
+        """Test returns empty dict when no data."""
+        mock_api = MagicMock()
+        mock_api.async_get_plant_realtime_data = AsyncMock(return_value={})
         mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_api, "12345", "Test Plant")
         data = await coordinator._async_update_data()
 
         assert data == {}
 
-    async def test_update_data_api_error(self, hass: HomeAssistant):
-        """Test API error raises UpdateFailed."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(side_effect=Exception("API down"))
+    async def test_update_data_api_error_with_relogin(self, hass: HomeAssistant):
+        """Test API error triggers re-login attempt."""
+        from custom_components.sungrow.isolarcloud_api import ISolarCloudError
+
+        mock_api = MagicMock()
+        mock_api.async_get_plant_realtime_data = AsyncMock(
+            side_effect=[ISolarCloudError("Token expired"), MOCK_REALTIME_DATA]
+        )
+        mock_api.async_login = AsyncMock(return_value={})
         mock_entry = MagicMock()
 
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_api, "12345", "Test Plant")
+        data = await coordinator._async_update_data()
+
+        assert "total_active_power" in data
+        mock_api.async_login.assert_called_once()
+
+    async def test_update_data_api_error_relogin_fails(self, hass: HomeAssistant):
+        """Test API error raises UpdateFailed when re-login also fails."""
+        from custom_components.sungrow.isolarcloud_api import ISolarCloudError
+
+        mock_api = MagicMock()
+        mock_api.async_get_plant_realtime_data = AsyncMock(side_effect=ISolarCloudError("Token expired"))
+        mock_api.async_login = AsyncMock(side_effect=ISolarCloudError("Login failed"))
+        mock_entry = MagicMock()
+
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_api, "12345", "Test Plant")
+
+        with pytest.raises(UpdateFailed, match="Error communicating with API"):
+            await coordinator._async_update_data()
+
+    async def test_update_data_generic_error(self, hass: HomeAssistant):
+        """Test generic error raises UpdateFailed."""
+        mock_api = MagicMock()
+        mock_api.async_get_plant_realtime_data = AsyncMock(side_effect=Exception("Network error"))
+        mock_entry = MagicMock()
+
+        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_api, "12345", "Test Plant")
 
         with pytest.raises(UpdateFailed, match="Error communicating with API"):
             await coordinator._async_update_data()
@@ -236,11 +267,10 @@ class TestSungrowPlantCoordinator:
 # ---------------------------------------------------------------------------
 
 
-async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
+async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_api):
     """Test async_setup_entry creates sensors for each data point."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
-    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
     entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
 
     hass.data.setdefault(DOMAIN, {})
@@ -256,58 +286,19 @@ async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_au
     # Plant 12345 has 3 data points, plant 67890 has 1
     assert len(added_entities) == 4
 
-    # Check that we have the expected sensors
     names = [e._attr_name for e in added_entities]
     assert "Total Active Power" in names
     assert "Daily Energy" in names
     assert "Device Status" in names
-    # Second plant also has Total Active Power — check we have 2
     assert names.count("Total Active Power") == 2
 
 
-async def test_sensor_setup_no_tokens(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test async_setup_entry returns early when no tokens in config."""
+async def test_sensor_setup_no_token(hass: HomeAssistant, mock_sensor_api):
+    """Test async_setup_entry works when no token in config (triggers login)."""
     data = MOCK_CONFIG_DATA.copy()
-    del data["tokens"]
+    del data["token"]
     entry = MockConfigEntry(domain=DOMAIN, data=data)
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
-
-    added_entities = []
-    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
-
-    assert len(added_entities) == 0
-
-
-async def test_sensor_setup_plant_fetch_fails(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test async_setup_entry handles plant fetch failure gracefully."""
-    mock_plants_service.async_get_plants = AsyncMock(side_effect=Exception("Network error"))
-
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
-    entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
-
-    added_entities = []
-    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
-
-    assert len(added_entities) == 0
-
-
-async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test that plants returning empty data are skipped without creating entities."""
-    # Return empty data for all plants — covers the `if not coordinator.data: continue` branch
-    mock_plants_service.async_get_realtime_data = AsyncMock(
-        return_value={
-            "12345": {},
-            "67890": {},
-        }
-    )
-
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
-    entry.add_to_hass(hass)
-    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
     entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
 
     hass.data.setdefault(DOMAIN, {})
@@ -316,5 +307,37 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_s
     added_entities = []
     await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
 
-    # Both plants had empty data, so no sensors should be created
+    # Should still work because mock_sensor_api handles login
+    assert len(added_entities) == 4
+
+
+async def test_sensor_setup_plant_fetch_fails(hass: HomeAssistant, mock_sensor_api):
+    """Test async_setup_entry handles plant fetch failure gracefully."""
+    mock_sensor_api.async_get_plant_list = AsyncMock(side_effect=Exception("Network error"))
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    added_entities = []
+    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
+
+    assert len(added_entities) == 0
+
+
+async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_sensor_api):
+    """Test that plants returning empty data are skipped without creating entities."""
+    mock_sensor_api.async_get_plant_realtime_data = AsyncMock(return_value={})
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    added_entities = []
+    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
+
     assert len(added_entities) == 0

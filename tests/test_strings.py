@@ -30,28 +30,20 @@ def test_strings_has_required_steps(strings_data):
     """Test config flow steps match what the code defines."""
     steps = strings_data["config"]["step"]
     assert "user" in steps, "Missing 'user' step"
-    assert "auth" in steps, "Missing 'auth' step"
 
 
 def test_strings_user_step_has_required_fields(strings_data):
     """Test the user step defines all form fields used by the config flow."""
     user_data = strings_data["config"]["step"]["user"]["data"]
-    required_fields = {"gateway", "app_key", "app_secret", "app_id", "redirect_uri"}
+    required_fields = {"gateway", "app_key", "app_secret", "username", "password"}
     assert required_fields.issubset(
         set(user_data.keys())
     ), f"Missing form fields: {required_fields - set(user_data.keys())}"
 
 
-def test_strings_auth_step_has_code_field(strings_data):
-    """Test the auth step defines the 'code' field."""
-    auth_data = strings_data["config"]["step"]["auth"]["data"]
-    assert "code" in auth_data
-
-
 def test_strings_has_required_error_keys(strings_data):
     """Test that all error keys used by the config flow are defined."""
     errors = strings_data["config"]["error"]
-    # These error keys are used in config_flow.py
     required_errors = {"cannot_connect", "invalid_auth", "unknown"}
     assert required_errors.issubset(set(errors.keys())), f"Missing error keys: {required_errors - set(errors.keys())}"
 
@@ -81,12 +73,10 @@ def test_translations_en_matches_strings(strings_data):
 
     en_data = json.loads(en_path.read_text())
 
-    # Both should define the same step IDs
     strings_steps = set(strings_data["config"]["step"].keys())
     en_steps = set(en_data.get("config", {}).get("step", {}).keys())
     assert strings_steps == en_steps, f"Step mismatch: strings.json={strings_steps}, en.json={en_steps}"
 
-    # Both should define the same error keys
     strings_errors = set(strings_data["config"]["error"].keys())
     en_errors = set(en_data.get("config", {}).get("error", {}).keys())
     assert strings_errors == en_errors, f"Error key mismatch: strings.json={strings_errors}, en.json={en_errors}"
