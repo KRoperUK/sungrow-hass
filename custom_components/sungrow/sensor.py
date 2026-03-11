@@ -167,7 +167,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if self._attr_native_unit_of_measurement in ["kW", "W"]:
             self._attr_device_class = SensorDeviceClass.POWER
             self._attr_state_class = SensorStateClass.MEASUREMENT
-        elif self._attr_native_unit_of_measurement in ["kWh"]:
+        elif self._attr_native_unit_of_measurement in ["Wh", "kWh", "MWh"]:
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
