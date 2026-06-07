@@ -26,7 +26,7 @@ jobs:
 
             - name: Conventional Changelog / Dev Tag
               id: changelog
-              uses: TriPSs/conventional-changelog-action@v5
+              uses: TriPSs/conventional-changelog-action@v6
               with:
                   github-token: ${{ github.token }}
                   output-file: CHANGELOG.md
