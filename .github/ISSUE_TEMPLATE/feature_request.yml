@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an idea or new capability for the integration
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: A clear description of the use case or limitation you've hit.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen. Include API param codes / register numbers if known.
+    validations:
+      required: false
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware / setup details
+      description: Inverter model, dongle, battery, plant type, API plan — anything relevant.
+    validations:
+      required: false
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to help test an implementation.
+        - label: I am willing to submit a pull request.
