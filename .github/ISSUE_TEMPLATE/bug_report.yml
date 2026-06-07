@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a problem with the Sungrow iSolarCloud integration
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        **Before opening:** if you are seeing *"Invalid authentication"*, *"Operation failed"*,
+        or entities going *unavailable after a reboot*, please read the
+        [Troubleshooting guide](https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md)
+        first — many of these are configuration or upstream API issues.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I have read the Troubleshooting guide.
+          required: true
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I am running the latest released version of this integration.
+          required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "e.g. 0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "e.g. 2026.5.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: gateway
+    attributes:
+      label: Gateway region
+      options:
+        - Europe
+        - International
+        - China
+        - Australia
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the problem is and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >
+        Enable debug logging (see Troubleshooting guide) and paste the relevant
+        `custom_components.sungrow` log lines. Redact any tokens, app keys or secrets.
+      render: shell
+    validations:
+      required: false
