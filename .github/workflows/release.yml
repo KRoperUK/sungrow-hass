@@ -43,26 +43,21 @@ jobs:
                   git-user-email: "41898282+github-actions[bot]@users.noreply.github.com"
                   create-release: false
 
-            - name: Sync version to pyproject.toml
+            # NOTE: This job intentionally does NOT push commits to `main`.
+            # `main` is a protected branch (PRs + status checks required), so the
+            # version bump / CHANGELOG commit happens via the Release PR workflow
+            # (`release-pr.yml`). Here we only move a lightweight dev tag, which is
+            # not blocked by branch protection. This also avoids the self-retrigger
+            # loop a `chore(release)` commit pushed back to `main` would cause.
+            - name: Create dev tag
               if: steps.changelog.outputs.skipped != 'true'
               run: |
-                  VERSION="${{ steps.changelog.outputs.version }}"
-                  sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" pyproject.toml
-                  echo "Updated pyproject.toml to version ${VERSION}"
-
-            - name: Commit and tag
-              if: steps.changelog.outputs.skipped != 'true'
-              run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git add CHANGELOG.md custom_components/sungrow/manifest.json pyproject.toml
-                  git commit -m "chore(release): dev-v${{ steps.changelog.outputs.version }}"
-                  git tag "dev-v${{ steps.changelog.outputs.version }}"
-                  git push --follow-tags
+                  git tag -f "dev-v${{ steps.changelog.outputs.version }}"
+                  git push -f origin "dev-v${{ steps.changelog.outputs.version }}"
 
             - name: Show dev tag summary
               if: steps.changelog.outputs.skipped != 'true'
               run: |
                   echo "Dev Version: ${{ steps.changelog.outputs.version }}"
                   echo "Dev Tag: dev-v${{ steps.changelog.outputs.version }}"
-                  echo "Changelog file updated (commit not auto-pushed; awaiting PR approval)."
+                  echo "No commit pushed to main — releases are cut via release-pr.yml."

@@ -10,8 +10,10 @@ Custom component that integrates Sungrow inverters via the iSolarCloud API into 
 
 - **Cloud Polling** — fetches real-time data from the iSolarCloud API.
 - **Auto-Discovery** — automatically finds all plants linked to your account.
-- **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.).
+- **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.) with correct device/state classes for the Energy dashboard.
 - **Config Flow** — set up entirely through the Home Assistant UI.
+- **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay available across restarts; if credentials expire you're prompted to re-authorize in place (no delete & re-add).
+- **Configurable polling interval** — tune how often data is fetched via the integration options.
 
 ## Installation
 
@@ -54,12 +56,29 @@ Or manually:
 
 Register an application on the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) to get your App Key, App Secret, and App ID.
 
+> **Note:** New developer applications must be **approved by Sungrow** (and have **OAuth 2.0** enabled) before authorization will work — this can take up to a week.
+
+### Options
+
+After setup, go to **Settings → Devices & Services → Sungrow → Configure** to change the **polling interval** (default 5 minutes).
+
+## Troubleshooting
+
+Having trouble authorizing, or entities showing as *unavailable*? See the
+[Troubleshooting guide](docs/TROUBLESHOOTING.md) — it covers the common
+"Invalid authentication" / "Operation failed" setup errors and the
+unavailable-after-reboot problem.
+
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer setup and guidelines.
 
 ### Running Tests
 
 ```bash
 pip install -r requirements_test.txt
+ruff check custom_components/
+ruff format --check custom_components/
 pytest
 ```
 
