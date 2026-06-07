@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Authentication / setup help
+    url: https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md
+    about: "Most \"Invalid authentication\", \"Operation failed\" and \"unavailable after reboot\" problems are covered here. Please read before opening an issue."
+  - name: Questions & discussions
+    url: https://github.com/KRoperUK/sungrow-hass/discussions
+    about: Ask questions about sensors, automations, or general usage here.
