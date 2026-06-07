@@ -87,6 +87,24 @@ class TestSungrowSensor:
         assert sensor._attr_device_class == SensorDeviceClass.ENERGY
         assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
 
+    def test_sensor_device_class_energy_wh(self):
+        """Test Wh unit infers ENERGY device class."""
+        coordinator = self._make_coordinator()
+        init_data = {"code": "energy", "value": "12000", "unit": "Wh", "name": "Energy"}
+        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data, "test_entry")
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENERGY
+        assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+
+    def test_sensor_device_class_energy_mwh(self):
+        """Test MWh unit infers ENERGY device class."""
+        coordinator = self._make_coordinator()
+        init_data = {"code": "energy", "value": "0.012", "unit": "MWh", "name": "Energy"}
+        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data, "test_entry")
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENERGY
+        assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+
     def test_sensor_device_class_unknown_unit(self):
         """Test unknown unit doesn't set device class."""
         coordinator = self._make_coordinator()
