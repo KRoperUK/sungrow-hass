@@ -10,13 +10,25 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pysolarcloud.plants import Plants
 
-from .const import DOMAIN
+from .auth import SungrowAuth
+from .const import (
+    CONF_APP_ID,
+    CONF_APP_KEY,
+    CONF_APP_SECRET,
+    CONF_GATEWAY,
+    DEFAULT_HOST,
+    DOMAIN,
+    GATEWAYS,
+)
+from .coordinator import SungrowPlantCoordinator, is_auth_error
 
-# TODO List the platforms that you want to support.
-# For your initial example we don't have sensors yet but usually:
-# PLATFORMS: list[Platform] = [Platform.SENSOR]
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class IterableSchema(vol.Schema):
@@ -34,8 +46,6 @@ class IterableSchema(vol.Schema):
 # Workaround for HA 2025.2+ treating the schema function/object as the config dict
 CONFIG_SCHEMA = IterableSchema({}, extra=vol.ALLOW_EXTRA)
 
-_LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Sungrow iSolarCloud component."""
@@ -45,13 +55,52 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
+    if "tokens" not in entry.data:
+        # Nothing to authenticate with — ask the user to re-authorize.
+        raise ConfigEntryAuthFailed("No stored tokens; re-authorization required")
 
-    # TODO: Initialize the API client here using entry.data
-    # For now, just store the config so we know it's loaded
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    session = async_get_clientsession(hass)
+    host = GATEWAYS.get(entry.data[CONF_GATEWAY], DEFAULT_HOST)
+
+    def _save_tokens(tokens: dict) -> None:
+        """Persist refreshed/rotated tokens back to the config entry."""
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "tokens": tokens})
+
+    auth = SungrowAuth(
+        host=host,
+        appkey=entry.data[CONF_APP_KEY],
+        access_key=entry.data[CONF_APP_SECRET],
+        app_id=entry.data[CONF_APP_ID],
+        websession=session,
+        token_updater=_save_tokens,
+    )
+    # Restore previously stored tokens (a copy so we never mutate entry.data in place).
+    auth.tokens = dict(entry.data["tokens"])
+
+    plants_service = Plants(auth)
+
+    try:
+        plant_list = await plants_service.async_get_plants()
+    except Exception as err:
+        if is_auth_error(err):
+            raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+        raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
+
+    coordinators: list[SungrowPlantCoordinator] = []
+    for plant_info in plant_list:
+        plant_id = str(plant_info["ps_id"])
+        plant_name = plant_info["ps_name"]
+        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name)
+        # Raises ConfigEntryNotReady / ConfigEntryAuthFailed as classified by the coordinator.
+        await coordinator.async_config_entry_first_refresh()
+        coordinators.append(coordinator)
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload the entry when its options (e.g. scan interval) change.
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
 
@@ -62,6 +111,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when its options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 class SungrowAuthCallbackView(HomeAssistantView):

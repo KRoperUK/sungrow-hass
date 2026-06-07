@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import make_mocked_request
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -10,7 +11,7 @@ from custom_components.sungrow import (
     SungrowAuthCallbackView,
     async_setup,
 )
-from custom_components.sungrow.const import DOMAIN
+from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
 
 from .conftest import MOCK_CONFIG_DATA
 
@@ -24,7 +25,6 @@ async def test_async_setup_registers_callback_view(hass: HomeAssistant):
     result = await async_setup(hass, {})
 
     assert result is True
-    # Verify register_view was called with a SungrowAuthCallbackView instance
     hass.http.register_view.assert_called_once()
     view_arg = hass.http.register_view.call_args[0][0]
     assert isinstance(view_arg, SungrowAuthCallbackView)
@@ -35,54 +35,90 @@ async def test_async_setup_registers_callback_view(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_async_setup_entry(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test a successful setup entry stores data and forwards platforms."""
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+async def test_async_setup_entry_success(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A successful setup stores coordinators and creates entities."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.sungrow.sensor.async_setup_entry",
-        return_value=True,
-    ):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
-    assert DOMAIN in hass.data
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert entry.state is ConfigEntryState.LOADED
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    # MOCK_PLANT_LIST has two plants.
+    assert len(coordinators) == 2
+    # Entities were created for the data points.
+    assert hass.states.async_all("sensor")
 
 
-async def test_async_unload_entry(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test successful unload removes data."""
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Test successful unload removes stored data."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.sungrow.sensor.async_setup_entry",
-        return_value=True,
-    ):
-        await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert entry.state is ConfigEntryState.NOT_LOADED
 
 
-async def test_async_setup_entry_stores_data(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test that setup stores entry data under hass.data[DOMAIN][entry_id]."""
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+async def test_setup_entry_no_tokens_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Missing tokens should raise ConfigEntryAuthFailed (reauth)."""
+    data = MOCK_CONFIG_DATA.copy()
+    del data["tokens"]
+    entry = MockConfigEntry(domain=DOMAIN, data=data, unique_id="test_app_id")
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.sungrow.sensor.async_setup_entry",
-        return_value=True,
-    ):
-        await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
-    stored = hass.data[DOMAIN][entry.entry_id]
-    assert stored == MOCK_CONFIG_DATA
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_setup_entry_connection_error_is_retried(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A transient connection failure raises ConfigEntryNotReady (retry)."""
+    mock_plants_service.async_get_plants = AsyncMock(side_effect=ConnectionError("network down"))
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A failed token refresh (KeyError) raises ConfigEntryAuthFailed (reauth)."""
+    # pysolarcloud raises KeyError when the refresh response has no access_token.
+    mock_plants_service.async_get_plants = AsyncMock(side_effect=KeyError("access_token"))
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Updating options should reload the entry and apply the new scan interval."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 15})
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    assert coordinators[0].update_interval.total_seconds() == 15 * 60
 
 
 # ---------------------------------------------------------------------------
