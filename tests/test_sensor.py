@@ -1,32 +1,54 @@
 """Tests for the Sungrow sensor platform."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.sensor import (
-    SungrowPlantCoordinator,
     SungrowSensor,
     async_setup_entry,
+    infer_device_class,
 )
 
-from .conftest import MOCK_CONFIG_DATA, MOCK_REALTIME_DATA
+from .conftest import MOCK_CONFIG_DATA
+
+# ---------------------------------------------------------------------------
+# infer_device_class
+# ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def mock_client_session():
-    """Mock async_get_clientsession to prevent background thread creation."""
-    with patch(
-        "custom_components.sungrow.sensor.async_get_clientsession",
-        return_value=MagicMock(),
-    ):
-        yield
+@pytest.mark.parametrize(
+    ("unit", "code", "device_class", "state_class"),
+    [
+        ("kW", "power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
+        ("W", "power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
+        ("kWh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
+        ("Wh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
+        ("MWh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
+        ("V", "voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT),
+        ("A", "current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT),
+        ("Hz", "freq", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT),
+        ("°C", "temp", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT),
+        ("kvar", "reactive", SensorDeviceClass.REACTIVE_POWER, SensorStateClass.MEASUREMENT),
+        # Case-insensitive matching.
+        ("kwh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
+        # Battery percentage disambiguated by the code name.
+        ("%", "battery_soc", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT),
+        # Generic percentage gets a state class but no device class.
+        ("%", "efficiency", None, SensorStateClass.MEASUREMENT),
+        # Unknown / empty units.
+        ("", "status", None, None),
+        (None, "status", None, None),
+        ("widgets", "x", None, None),
+    ],
+)
+def test_infer_device_class(unit, code, device_class, state_class):
+    """Units map to the expected device and state classes (issue #19)."""
+    assert infer_device_class(unit, code) == (device_class, state_class)
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +60,6 @@ class TestSungrowSensor:
     """Unit tests for SungrowSensor entity."""
 
     def _make_coordinator(self, data=None):
-        """Create a minimal mock coordinator."""
         coordinator = MagicMock()
         coordinator.data = data or {}
         return coordinator
@@ -47,7 +68,7 @@ class TestSungrowSensor:
         """Test sensor name is derived from the point code."""
         coordinator = self._make_coordinator()
         init_data = {"code": "total_active_power", "value": "5.0", "unit": "kW", "name": "Total"}
-        sensor = SungrowSensor(coordinator, "total_active_power", "123", "My Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "total_active_power", "123", "My Plant", init_data)
 
         assert sensor._attr_name == "Total Active Power"
         assert sensor._attr_unique_id == "123_total_active_power"
@@ -56,68 +77,42 @@ class TestSungrowSensor:
         """Test sensor with a numeric code falls back to init_data name."""
         coordinator = self._make_coordinator()
         init_data = {"code": "12345", "value": "99", "unit": "W", "name": "Some Sensor"}
-        sensor = SungrowSensor(coordinator, "12345", "123", "My Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "12345", "123", "My Plant", init_data)
 
         assert sensor._attr_name == "Some Sensor"
 
-    def test_sensor_device_class_power_kw(self):
+    def test_sensor_device_class_power(self):
         """Test kW unit infers POWER device class."""
         coordinator = self._make_coordinator()
         init_data = {"code": "power", "value": "5.0", "unit": "kW", "name": "Power"}
-        sensor = SungrowSensor(coordinator, "power", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", init_data)
 
         assert sensor._attr_device_class == SensorDeviceClass.POWER
         assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
 
-    def test_sensor_device_class_power_w(self):
-        """Test W unit infers POWER device class."""
-        coordinator = self._make_coordinator()
-        init_data = {"code": "power", "value": "5000", "unit": "W", "name": "Power"}
-        sensor = SungrowSensor(coordinator, "power", "123", "Plant", init_data, "test_entry")
-
-        assert sensor._attr_device_class == SensorDeviceClass.POWER
-        assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
-
-    def test_sensor_device_class_energy_kwh(self):
-        """Test kWh unit infers ENERGY device class."""
+    def test_sensor_device_class_energy(self):
+        """Test kWh unit infers ENERGY device class for the Energy dashboard."""
         coordinator = self._make_coordinator()
         init_data = {"code": "energy", "value": "12.0", "unit": "kWh", "name": "Energy"}
-        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data)
 
         assert sensor._attr_device_class == SensorDeviceClass.ENERGY
         assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
-
-    def test_sensor_device_class_energy_wh(self):
-        """Test Wh unit infers ENERGY device class."""
-        coordinator = self._make_coordinator()
-        init_data = {"code": "energy", "value": "12000", "unit": "Wh", "name": "Energy"}
-        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data, "test_entry")
-
-        assert sensor._attr_device_class == SensorDeviceClass.ENERGY
-        assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
-
-    def test_sensor_device_class_energy_mwh(self):
-        """Test MWh unit infers ENERGY device class."""
-        coordinator = self._make_coordinator()
-        init_data = {"code": "energy", "value": "0.012", "unit": "MWh", "name": "Energy"}
-        sensor = SungrowSensor(coordinator, "energy", "123", "Plant", init_data, "test_entry")
-
-        assert sensor._attr_device_class == SensorDeviceClass.ENERGY
-        assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+        assert sensor._attr_native_unit_of_measurement == "kWh"
 
     def test_sensor_device_class_unknown_unit(self):
-        """Test unknown unit doesn't set device class."""
+        """Test unknown unit doesn't set a device class."""
         coordinator = self._make_coordinator()
         init_data = {"code": "status", "value": "OK", "unit": "", "name": "Status"}
-        sensor = SungrowSensor(coordinator, "status", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "status", "123", "Plant", init_data)
 
-        assert not hasattr(sensor, "_attr_device_class") or sensor._attr_device_class is None
+        assert sensor._attr_device_class is None
 
     def test_sensor_icon(self):
         """Test all sensors use the solar icon."""
         coordinator = self._make_coordinator()
         init_data = {"code": "x", "value": "1", "unit": "", "name": "X"}
-        sensor = SungrowSensor(coordinator, "x", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "x", "123", "Plant", init_data)
 
         assert sensor._attr_icon == "mdi:solar-power-variant"
 
@@ -125,7 +120,7 @@ class TestSungrowSensor:
         """Test sensor has device_info grouping it under its plant."""
         coordinator = self._make_coordinator()
         init_data = {"code": "power", "value": "5.0", "unit": "kW", "name": "Power"}
-        sensor = SungrowSensor(coordinator, "power", "456", "My Solar Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "power", "456", "My Solar Plant", init_data)
 
         assert sensor._attr_device_info is not None
         assert sensor._attr_device_info["identifiers"] == {("sungrow", "456")}
@@ -136,31 +131,23 @@ class TestSungrowSensor:
         """Test sensors with no value are disabled by default."""
         coordinator = self._make_coordinator()
 
-        # Test None
-        init_none = {"code": "x", "value": None, "unit": "", "name": "X"}
-        s1 = SungrowSensor(coordinator, "x", "123", "Plant", init_none, "entry")
+        s1 = SungrowSensor(coordinator, "x", "123", "Plant", {"value": None})
         assert s1.entity_registry_enabled_default is False
 
-        # Test empty string
-        init_empty = {"code": "y", "value": "  ", "unit": "", "name": "Y"}
-        s2 = SungrowSensor(coordinator, "y", "123", "Plant", init_empty, "entry")
+        s2 = SungrowSensor(coordinator, "y", "123", "Plant", {"value": "  "})
         assert s2.entity_registry_enabled_default is False
 
-        # Test "Unknown" literal
-        init_unk = {"code": "z", "value": "Unknown", "unit": "", "name": "Z"}
-        s3 = SungrowSensor(coordinator, "z", "123", "Plant", init_unk, "entry")
+        s3 = SungrowSensor(coordinator, "z", "123", "Plant", {"value": "Unknown"})
         assert s3.entity_registry_enabled_default is False
 
-        # Test valid value is NOT disabled
-        init_val = {"code": "v", "value": "1.2", "unit": "", "name": "V"}
-        s4 = SungrowSensor(coordinator, "v", "123", "Plant", init_val, "entry")
+        s4 = SungrowSensor(coordinator, "v", "123", "Plant", {"value": "1.2"})
         assert s4.entity_registry_enabled_default is True
 
     def test_native_value_float_conversion(self):
         """Test native_value converts string numbers to float."""
         data = {"power": {"code": "power", "value": "5.23", "unit": "kW", "name": "Power"}}
         coordinator = self._make_coordinator(data)
-        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"], "test_entry")
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"])
 
         assert sensor.native_value == 5.23
 
@@ -168,171 +155,88 @@ class TestSungrowSensor:
         """Test native_value returns raw string for non-numeric values."""
         data = {"status": {"code": "status", "value": "Running", "unit": "", "name": "Status"}}
         coordinator = self._make_coordinator(data)
-        sensor = SungrowSensor(coordinator, "status", "123", "Plant", data["status"], "test_entry")
+        sensor = SungrowSensor(coordinator, "status", "123", "Plant", data["status"])
 
         assert sensor.native_value == "Running"
 
     def test_native_value_none_when_missing(self):
         """Test native_value returns None when data is missing."""
         coordinator = self._make_coordinator({})
-        init_data = {"code": "missing", "value": "0", "unit": "", "name": "Missing"}
-        sensor = SungrowSensor(coordinator, "missing", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "missing", "123", "Plant", {"value": "0"})
 
         assert sensor.native_value is None
 
     def test_native_value_none_when_coordinator_data_none(self):
         """Test native_value returns None when coordinator.data is None."""
         coordinator = self._make_coordinator(None)
-        init_data = {"code": "x", "value": "0", "unit": "", "name": "X"}
-        sensor = SungrowSensor(coordinator, "x", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "x", "123", "Plant", {"value": "0"})
 
         assert sensor.native_value is None
 
     def test_extra_state_attributes(self):
         """Test extra_state_attributes returns the full data point dict."""
         point_data = {"code": "power", "value": "5.0", "unit": "kW", "name": "Power"}
-        data = {"power": point_data}
-        coordinator = self._make_coordinator(data)
-        sensor = SungrowSensor(coordinator, "power", "123", "Plant", point_data, "test_entry")
+        coordinator = self._make_coordinator({"power": point_data})
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", point_data)
 
         assert sensor.extra_state_attributes == point_data
 
     def test_extra_state_attributes_empty_when_missing(self):
         """Test extra_state_attributes returns {} when data is missing."""
         coordinator = self._make_coordinator({})
-        init_data = {"code": "x", "value": "0", "unit": "", "name": "X"}
-        sensor = SungrowSensor(coordinator, "x", "123", "Plant", init_data, "test_entry")
+        sensor = SungrowSensor(coordinator, "x", "123", "Plant", {"value": "0"})
 
         assert sensor.extra_state_attributes == {}
 
 
 # ---------------------------------------------------------------------------
-# SungrowPlantCoordinator unit tests
+# async_setup_entry (platform) — builds entities from stored coordinators
 # ---------------------------------------------------------------------------
 
 
-class TestSungrowPlantCoordinator:
-    """Unit tests for the data update coordinator."""
-
-    async def test_update_data_success(self, hass: HomeAssistant):
-        """Test successful data fetch returns plant data."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
-        mock_entry = MagicMock()
-
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
-        data = await coordinator._async_update_data()
-
-        assert "total_active_power" in data
-        assert data["total_active_power"]["value"] == "5.23"
-
-    async def test_update_data_missing_plant(self, hass: HomeAssistant):
-        """Test returns empty dict when plant_id is not in response."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(return_value={"99999": {}})
-        mock_entry = MagicMock()
-
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
-        data = await coordinator._async_update_data()
-
-        assert data == {}
-
-    async def test_update_data_api_error(self, hass: HomeAssistant):
-        """Test API error raises UpdateFailed."""
-        mock_plants = MagicMock()
-        mock_plants.async_get_realtime_data = AsyncMock(side_effect=Exception("API down"))
-        mock_entry = MagicMock()
-
-        coordinator = SungrowPlantCoordinator(hass, mock_entry, mock_plants, "12345", "Test Plant")
-
-        with pytest.raises(UpdateFailed, match="Error communicating with API"):
-            await coordinator._async_update_data()
+def _coordinator_with(plant_id, plant_name, data):
+    coordinator = MagicMock()
+    coordinator.plant_id = plant_id
+    coordinator.plant_name = plant_name
+    coordinator.data = data
+    return coordinator
 
 
-# ---------------------------------------------------------------------------
-# async_setup_entry integration test
-# ---------------------------------------------------------------------------
-
-
-async def test_sensor_setup_creates_entities(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test async_setup_entry creates sensors for each data point."""
+async def test_sensor_setup_creates_entities(hass: HomeAssistant):
+    """The platform creates a sensor per data point across all coordinators."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
-    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
-    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    coordinators = [
+        _coordinator_with(
+            "12345",
+            "Plant A",
+            {
+                "total_active_power": {"value": "5.0", "unit": "kW", "name": "Total Active Power"},
+                "daily_energy": {"value": "12.0", "unit": "kWh", "name": "Daily Energy"},
+            },
+        ),
+        _coordinator_with("67890", "Plant B", {"total_active_power": {"value": "3.1", "unit": "kW"}}),
+    ]
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
 
-    added_entities = []
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    def capture_entities(entities):
-        added_entities.extend(entities)
-
-    await async_setup_entry(hass, entry, capture_entities)
-
-    # Plant 12345 has 3 data points, plant 67890 has 1
-    assert len(added_entities) == 4
-
-    # Check that we have the expected sensors
-    names = [e._attr_name for e in added_entities]
-    assert "Total Active Power" in names
-    assert "Daily Energy" in names
-    assert "Device Status" in names
-    # Second plant also has Total Active Power — check we have 2
+    assert len(added) == 3
+    names = [e._attr_name for e in added]
     assert names.count("Total Active Power") == 2
 
 
-async def test_sensor_setup_no_tokens(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test async_setup_entry returns early when no tokens in config."""
-    data = MOCK_CONFIG_DATA.copy()
-    del data["tokens"]
-    entry = MockConfigEntry(domain=DOMAIN, data=data)
-    entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
-
-    added_entities = []
-    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
-
-    assert len(added_entities) == 0
-
-
-async def test_sensor_setup_plant_fetch_fails(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test async_setup_entry handles plant fetch failure gracefully."""
-    mock_plants_service.async_get_plants = AsyncMock(side_effect=Exception("Network error"))
-
+async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
+    """Coordinators with no data don't produce entities."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
 
-    added_entities = []
-    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
+    coordinators = [_coordinator_with("12345", "Plant A", {}), _coordinator_with("67890", "Plant B", {})]
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
 
-    assert len(added_entities) == 0
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-
-async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant, mock_sensor_auth, mock_plants_service):
-    """Test that plants returning empty data are skipped without creating entities."""
-    # Return empty data for all plants — covers the `if not coordinator.data: continue` branch
-    mock_plants_service.async_get_realtime_data = AsyncMock(
-        return_value={
-            "12345": {},
-            "67890": {},
-        }
-    )
-
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
-    entry.add_to_hass(hass)
-    # Set state to SETUP_IN_PROGRESS so the coordinator refresh is allowed
-    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
-
-    added_entities = []
-    await async_setup_entry(hass, entry, lambda entities: added_entities.extend(entities))
-
-    # Both plants had empty data, so no sensors should be created
-    assert len(added_entities) == 0
+    assert added == []

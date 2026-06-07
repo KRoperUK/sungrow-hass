@@ -9,4 +9,4 @@ python-dotenv
 ruff
 
 # Component dependencies
-pysolarcloud
+pysolarcloud==0.4.0

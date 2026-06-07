@@ -180,8 +180,8 @@ def mock_auth_no_tokens(mock_auth):
 
 @pytest.fixture
 def mock_plants_service():
-    """Create a mock Plants service."""
-    with patch("custom_components.sungrow.sensor.Plants") as mock_plants_cls:
+    """Mock the Plants service used during entry setup (patches __init__ module)."""
+    with patch("custom_components.sungrow.Plants") as mock_plants_cls:
         plants_instance = MagicMock()
         plants_instance.async_get_plants = AsyncMock(return_value=MOCK_PLANT_LIST)
         plants_instance.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
@@ -190,11 +190,14 @@ def mock_plants_service():
 
 
 @pytest.fixture
-def mock_sensor_auth():
-    """Create a mock Auth instance for sensor setup (patches sensor module)."""
-    with patch("custom_components.sungrow.sensor.Auth") as mock_auth_cls:
+def mock_setup_auth():
+    """Mock the SungrowAuth client used during entry setup, plus the HTTP session."""
+    with (
+        patch("custom_components.sungrow.SungrowAuth") as mock_auth_cls,
+        patch("custom_components.sungrow.async_get_clientsession", return_value=MagicMock()),
+    ):
         auth_instance = MagicMock()
-        auth_instance.tokens = MOCK_CONFIG_DATA["tokens"]
+        auth_instance.tokens = dict(MOCK_CONFIG_DATA["tokens"])
         mock_auth_cls.return_value = auth_instance
         yield auth_instance
 

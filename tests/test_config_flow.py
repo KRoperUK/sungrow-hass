@@ -6,14 +6,16 @@ import pytest
 from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
+    CONF_SCAN_INTERVAL,
     DOMAIN,
 )
 
-from .conftest import MOCK_USER_INPUT
+from .conftest import MOCK_CONFIG_DATA, MOCK_USER_INPUT
 
 
 @pytest.fixture(autouse=True)
@@ -239,3 +241,71 @@ async def test_auth_step_url_without_code_anywhere(hass: HomeAssistant, mock_aut
 
     assert result3["type"] == data_entry_flow.FlowResultType.FORM
     assert result3["errors"]["base"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate prevention (unique_id)
+# ---------------------------------------------------------------------------
+
+
+async def test_user_step_aborts_if_already_configured(hass: HomeAssistant, mock_auth):
+    """Adding the same App ID twice aborts as already_configured."""
+    existing = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    existing.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+    result3 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={"code": "auth_code_from_provider"},
+    )
+
+    assert result3["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result3["reason"] == "already_configured"
+
+
+# ---------------------------------------------------------------------------
+# Reauth flow
+# ---------------------------------------------------------------------------
+
+
+async def test_reauth_flow_updates_entry(hass: HomeAssistant, mock_auth, mock_setup_auth, mock_plants_service):
+    """Reauth re-runs authorization and updates the existing entry in place (#14)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reauth_flow(hass)
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "auth"
+
+    # Provide a fresh authorization code.
+    mock_auth.tokens = {"access_token": "fresh_token", "refresh_token": "fresh_refresh", "expires_at": 9999999999}
+    result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"code": "fresh_code"})
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "reauth_successful"
+    assert entry.data["tokens"]["access_token"] == "fresh_token"
+
+
+# ---------------------------------------------------------------------------
+# Options flow
+# ---------------------------------------------------------------------------
+
+
+async def test_options_flow_sets_scan_interval(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """The options flow stores a custom polling interval (#21)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(result["flow_id"], user_input={CONF_SCAN_INTERVAL: 10})
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_SCAN_INTERVAL] == 10

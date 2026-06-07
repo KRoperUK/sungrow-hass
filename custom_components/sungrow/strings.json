@@ -32,7 +32,19 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sungrow Options",
+        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota.",
+        "data": {
+          "scan_interval": "Polling interval (minutes)"
+        }
+      }
     }
   }
 }

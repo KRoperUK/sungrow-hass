@@ -10,9 +10,20 @@ CONF_REDIRECT_URI = "redirect_uri"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
+# Options
+CONF_SCAN_INTERVAL = "scan_interval"
+
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",
     "International": "https://gateway.isolarcloud.com.hk",
     "China": "https://gateway.isolarcloud.com",
     "Australia": "https://augateway.isolarcloud.com",
 }
+
+DEFAULT_HOST = GATEWAYS["Europe"]
+
+# Polling interval (minutes). iSolarCloud allows ~2000 calls/hour, so the default
+# is deliberately conservative; users can tune it via the integration options.
+DEFAULT_SCAN_INTERVAL = 5
+MIN_SCAN_INTERVAL = 1
+MAX_SCAN_INTERVAL = 1440
