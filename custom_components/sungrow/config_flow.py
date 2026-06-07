@@ -5,7 +5,9 @@ from typing import Any
 
 import voluptuous as vol
 from aiohttp import ClientError
-from homeassistant import config_entries
+from homeassistant import config_entries, data_entry_flow
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
 
@@ -15,8 +17,12 @@ from .const import (
     CONF_APP_SECRET,
     CONF_GATEWAY,
     CONF_REDIRECT_URI,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GATEWAYS,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
 )
 
 # Try to import pysolarcloud, handle if missing gracefully for development
@@ -39,6 +45,24 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.init_info = {}
         self.auth_client = None
+        self._reauth_entry: ConfigEntry | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> "SungrowOptionsFlow":
+        """Return the options flow handler."""
+        return SungrowOptionsFlow()
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]):
+        """Handle re-authentication when the stored tokens are no longer valid."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        # Reuse the credentials already stored on the entry; only the tokens are stale.
+        self.init_info = {k: v for k, v in entry_data.items() if k != "tokens"}
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+        """Confirm re-authentication by re-running the authorization step."""
+        return await self.async_step_auth(user_input)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step."""
@@ -149,8 +173,18 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # We can store tokens in the config entry data
                     data = {**self.init_info, "tokens": tokens}
 
+                    if self._reauth_entry is not None:
+                        # Update the existing entry in place and reload it, so the user
+                        # never has to delete and re-add the integration (issue #14).
+                        return self.async_update_reload_and_abort(self._reauth_entry, data=data)
+
+                    await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
+                    self._abort_if_unique_id_configured()
                     return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=data)
 
+            except data_entry_flow.AbortFlow:
+                # Let HA handle flow aborts (e.g. already_configured) normally.
+                raise
             except ClientError as e:
                 _LOGGER.warning("Client connection error in async_step_auth: %s", e)
                 errors["base"] = "cannot_connect"
@@ -169,4 +203,26 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"auth_url": auth_url},
             data_schema=vol.Schema({vol.Optional("code"): str}),
             errors=errors,
+        )
+
+
+class SungrowOptionsFlow(config_entries.OptionsFlow):
+    """Handle Sungrow integration options (e.g. polling interval)."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Manage the integration options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SCAN_INTERVAL, default=current): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                    )
+                }
+            ),
         )
