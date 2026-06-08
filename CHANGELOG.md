@@ -1,4 +1,4 @@
-## [0.2.2](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.1...v0.2.2) (2026-02-15)
+## [0.2.3](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.2...v0.2.3) (2026-06-07)
 
 
 ### Features
@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+* persist refreshed tokens and harden setup ([#23](https://github.com/KRoperUK/sungrow-hass/issues/23)) ([2d579fd](https://github.com/KRoperUK/sungrow-hass/commit/2d579fd3af9ca2ba3836fe3ccaa2963683d69d7b)), closes [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21)
 * resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
 * resolved hassfest warnings ([74dc412](https://github.com/KRoperUK/sungrow-hass/commit/74dc4123499d2dc1d3cebec0e4597e84488bb81c))
 * resolved hassfest warnings ([44fe5dd](https://github.com/KRoperUK/sungrow-hass/commit/44fe5dd5ee630ed191f25ee63a3c56a648137800))
