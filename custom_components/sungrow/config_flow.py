@@ -146,17 +146,31 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.debug("Initialized Auth client for Sungrow iSolarCloud")
         return True
 
-    def _auth_url_with_flow_id(self) -> str:
-        """Build the iSolarCloud authorization URL including this flow's ID.
+    def _redirect_uri(self) -> str:
+        """Canonical redirect URI used for BOTH the auth request and token exchange.
 
-        The flow_id lets the callback view resume the correct config flow when
-        iSolarCloud redirects back to /api/sungrow_hass/callback.
+        iSolarCloud validates that the ``redirect_uri`` sent to the token endpoint
+        matches the one from the authorization request, so they must be byte-for-byte
+        identical — hence a single source here (trailing slash normalised).
+
+        We deliberately do NOT append a ``flow_id``: iSolarCloud strips extra query
+        params from the redirect, so it never round-tripped anyway (the callback view
+        resolves the pending flow via its single-flow fallback). Appending it only
+        broke the token exchange, which uses the bare URI, with "invalid
+        authentication".
         """
-        redirect_uri = self.init_info[CONF_REDIRECT_URI].rstrip("/")
-        # Preserve any existing query params on the configured redirect URI.
-        separator = "&" if "?" in redirect_uri else "?"
-        callback_redirect = f"{redirect_uri}{separator}flow_id={self.flow_id}"
-        return self.auth_client.auth_url(callback_redirect)
+        return self.init_info[CONF_REDIRECT_URI].rstrip("/")
+
+    def _auth_url(self) -> str:
+        """Build the iSolarCloud authorization URL for the canonical redirect URI.
+
+        Always called at render time (never cached), so every screen that shows the
+        link — the progress wait, the manual-entry form, and the error-retry form —
+        displays a freshly generated, current URL. The URL no longer embeds a
+        per-flow ``flow_id`` that could go stale, so it stays valid for the whole
+        flow and each visit yields a fresh authorization code from iSolarCloud.
+        """
+        return self.auth_client.auth_url(self._redirect_uri())
 
     async def async_step_auth(self, user_input: dict[str, Any] | None = None):
         """Begin authorization by automatically waiting for the OAuth redirect.
@@ -196,7 +210,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         future: asyncio.Future[str] = asyncio.Future()
         flows[self.flow_id] = future
 
-        auth_url = self._auth_url_with_flow_id()
+        auth_url = self._auth_url()
 
         async def _wait_for_callback() -> None:
             """Resume the flow once the OAuth callback delivers a code."""
@@ -263,7 +277,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception in async_step_auth_manual: %s", e)
                 errors["base"] = "unknown"
 
-        auth_url = self._auth_url_with_flow_id()
+        auth_url = self._auth_url()
         return self.async_show_form(
             step_id="auth_manual",
             description_placeholders={"auth_url": auth_url},
@@ -277,7 +291,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Both the automatic and manual paths land here on failure; showing the
         manual form lets the user paste a fresh code or full redirect URL.
         """
-        auth_url = self._auth_url_with_flow_id()
+        auth_url = self._auth_url()
         return self.async_show_form(
             step_id="auth_manual",
             description_placeholders={"auth_url": auth_url},
@@ -297,7 +311,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="missing_code")
 
         try:
-            redirect_uri_clean = self.init_info[CONF_REDIRECT_URI]
+            redirect_uri_clean = self._redirect_uri()
             # Never log the authorization code or tokens — they are credentials.
             _LOGGER.debug("Authorizing with redirect_uri: %s", redirect_uri_clean)
             await self.auth_client.async_authorize(code, redirect_uri_clean)
