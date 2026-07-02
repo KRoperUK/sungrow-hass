@@ -24,12 +24,40 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v7
               with:
-                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+                  # On a branch (not the detached SHA) so the changelog action's
+                  # `git pull --tags --ff-only` works, and with full history so it
+                  # can compute the next version from the commit log.
+                  ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+                  fetch-depth: 0
+
+            # Compute the next (unreleased) version from conventional commits, the
+            # same way the release PR does, so a dev build is a pre-release of the
+            # *upcoming* version (e.g. dev-v1.1.0-N while main is still at 1.0.0).
+            - name: Compute next version
+              id: nextver
+              uses: TriPSs/conventional-changelog-action@v6
+              with:
+                  github-token: ${{ github.token }}
+                  version-file: custom_components/sungrow/manifest.json
+                  version-path: version
+                  tag-prefix: v
+                  preset: conventionalcommits
+                  skip-on-empty: true
+                  skip-version-file: true
+                  skip-commit: true
+                  skip-tag: true
+                  output-file: false
 
             - name: Build dev tag
               id: tag
               run: |
-                  VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+                  # No releasable commits since the last release -> no bump; fall
+                  # back to the current manifest version.
+                  if [ "${{ steps.nextver.outputs.skipped }}" = "true" ]; then
+                    VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+                  else
+                    VERSION="${{ steps.nextver.outputs.version }}"
+                  fi
                   TAG="dev-v${VERSION}-${{ github.run_number }}"
                   echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 

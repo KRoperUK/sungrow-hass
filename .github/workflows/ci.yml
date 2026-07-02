@@ -107,6 +107,29 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Check out the PR branch (same-repo only, per the job guard) so we are
+          # on a real branch — the changelog action's `git pull --tags --ff-only`
+          # fails in detached HEAD — and with full history to compute the version.
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      # Compute the next (unreleased) version from conventional commits so the PR
+      # dev build is a pre-release of the upcoming version.
+      - name: Compute next version
+        id: nextver
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          github-token: ${{ github.token }}
+          version-file: custom_components/sungrow/manifest.json
+          version-path: version
+          tag-prefix: v
+          preset: conventionalcommits
+          skip-on-empty: true
+          skip-version-file: true
+          skip-commit: true
+          skip-tag: true
+          output-file: false
 
       - name: Build dev tag
         id: tag
@@ -115,7 +138,12 @@ jobs:
         env:
           BRANCH_RAW: ${{ github.head_ref }}
         run: |
-          VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+          # No releasable commits -> no bump; fall back to the manifest version.
+          if [ "${{ steps.nextver.outputs.skipped }}" = "true" ]; then
+            VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+          else
+            VERSION="${{ steps.nextver.outputs.version }}"
+          fi
           SHA="${GITHUB_SHA::7}"
           BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
           TAG="dev-${BRANCH}-v${VERSION}-${SHA}"
