@@ -147,12 +147,14 @@ jobs:
         env:
           BRANCH_RAW: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIPPED: ${{ steps.nextver.outputs.skipped }}
+          NEXT_VERSION: ${{ steps.nextver.outputs.version }}
         run: |
           # No releasable commits -> no bump; fall back to the manifest version.
-          if [ "${{ steps.nextver.outputs.skipped }}" = "true" ]; then
+          if [ "$SKIPPED" = "true" ]; then
             VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
           else
-            VERSION="${{ steps.nextver.outputs.version }}"
+            VERSION="$NEXT_VERSION"
           fi
           SHA="${HEAD_SHA::7}"
           BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
