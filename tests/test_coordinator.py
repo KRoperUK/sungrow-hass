@@ -128,16 +128,16 @@ async def test_update_data_unrelated_keyerror_raises_update_failed(hass: HomeAss
 
 
 async def test_scan_interval_uses_default(hass: HomeAssistant):
-    """Default scan interval is applied when no option is set."""
+    """Default scan interval is 300 seconds."""
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "1", "P")
-    assert coordinator.update_interval.total_seconds() == 5 * 60
+    assert coordinator.update_interval.total_seconds() == 300
 
 
 async def test_scan_interval_from_options(hass: HomeAssistant):
-    """Scan interval option overrides the default."""
+    """Scan interval option (in seconds) overrides the default."""
     entry = _make_entry({CONF_SCAN_INTERVAL: 30})
     coordinator = SungrowPlantCoordinator(hass, entry, MagicMock(), "1", "P")
-    assert coordinator.update_interval.total_seconds() == 30 * 60
+    assert coordinator.update_interval.total_seconds() == 30
 
 
 async def test_extra_measure_points_passed_to_api(hass: HomeAssistant):
