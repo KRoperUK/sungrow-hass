@@ -4,21 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from . import SungrowConfigEntry, SungrowData
 
 
-async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SungrowConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry.
 
     Tokens and secrets are redacted; raw coordinator data and device lists are
     included to help identify unsupported point IDs (e.g. EV chargers).
     """
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    coordinators = entry_data.get("coordinators", [])
-    devices_by_plant = entry_data.get("devices", {})
+    data = getattr(entry, "runtime_data", None)
+    coordinators = data.coordinators if isinstance(data, SungrowData) else []
+    devices_by_plant = data.devices if isinstance(data, SungrowData) else {}
 
     plant_data: dict[str, dict[str, Any]] = {}
     for coordinator in coordinators:

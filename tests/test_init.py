@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import (
     SungrowAuthCallbackView,
+    SungrowData,
     async_setup,
     async_start_heartbeat,
     async_stop_heartbeat,
@@ -48,8 +49,7 @@ async def test_async_setup_entry_success(hass: HomeAssistant, mock_setup_auth, m
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinators = entry_data["coordinators"]
+    coordinators = entry.runtime_data.coordinators
     # MOCK_PLANT_LIST has two plants.
     assert len(coordinators) == 2
     # Entities were created for the data points.
@@ -67,7 +67,6 @@ async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_pla
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 
@@ -83,12 +82,7 @@ def _entry_with_heartbeats(hass: HomeAssistant) -> MockConfigEntry:
     control = MagicMock()
     # A realistic loop: block until the stop event is set.
     control.heartbeat_loop = lambda uuid, interval, stop_event: stop_event.wait()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinators": [],
-        "control": control,
-        "devices": {},
-        "heartbeats": {},
-    }
+    entry.runtime_data = SungrowData(coordinators=[], control=control, devices={})
     return entry
 
 
@@ -97,7 +91,7 @@ async def test_start_heartbeat_creates_tracked_task(hass: HomeAssistant):
     entry = _entry_with_heartbeats(hass)
     await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
 
-    heartbeats = hass.data[DOMAIN][entry.entry_id]["heartbeats"]
+    heartbeats = entry.runtime_data.heartbeats
     assert "12345" in heartbeats
     stop_event, task = heartbeats["12345"]
     assert isinstance(stop_event, asyncio.Event)
@@ -113,10 +107,10 @@ async def test_restart_heartbeat_stops_previous_loop(hass: HomeAssistant):
     """Restarting stops and awaits the previous loop before starting a new one (no double-run)."""
     entry = _entry_with_heartbeats(hass)
     await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
-    first_event, first_task = hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"]
+    first_event, first_task = entry.runtime_data.heartbeats["12345"]
 
     await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
-    second_event, second_task = hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"]
+    second_event, second_task = entry.runtime_data.heartbeats["12345"]
 
     assert first_event.is_set()
     assert first_task.done()
@@ -139,12 +133,11 @@ async def test_stop_heartbeat_cancels_stubborn_loop(hass: HomeAssistant):
     async def _stubborn(uuid, interval, stop_event):
         await asyncio.sleep(3600)
 
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    entry_data["control"].heartbeat_loop = _stubborn
+    entry.runtime_data.control.heartbeat_loop = _stubborn
 
     with patch("custom_components.sungrow.HEARTBEAT_STOP_TIMEOUT", 0.01):
         await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
-        _, task = entry_data["heartbeats"]["12345"]
+        _, task = entry.runtime_data.heartbeats["12345"]
         await async_stop_heartbeat(hass, entry, "12345")
 
     with contextlib.suppress(asyncio.CancelledError):
@@ -161,7 +154,7 @@ async def test_unload_cancels_running_heartbeat(hass: HomeAssistant, mock_setup_
 
     stop_event = asyncio.Event()
     task = entry.async_create_background_task(hass, stop_event.wait(), name="test-heartbeat")
-    hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"] = (stop_event, task)
+    entry.runtime_data.heartbeats["12345"] = (stop_event, task)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -221,8 +214,7 @@ async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinators = entry_data["coordinators"]
+    coordinators = entry.runtime_data.coordinators
     assert coordinators[0].update_interval.total_seconds() == 15
 
 

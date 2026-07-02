@@ -7,6 +7,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sungrow import SungrowData
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.sensor import (
     SungrowSensor,
@@ -252,12 +253,7 @@ async def test_sensor_setup_creates_entities(hass: HomeAssistant):
         ),
         _coordinator_with("67890", "Plant B", {"total_active_power": {"value": "3.1", "unit": "kW"}}),
     ]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinators": coordinators,
-        "control": MagicMock(),
-        "devices": {},
-        "heartbeats": {},
-    }
+    entry.runtime_data = SungrowData(coordinators=coordinators, control=MagicMock(), devices={})
 
     added = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -273,12 +269,7 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
     entry.add_to_hass(hass)
 
     coordinators = [_coordinator_with("12345", "Plant A", {}), _coordinator_with("67890", "Plant B", {})]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinators": coordinators,
-        "control": MagicMock(),
-        "devices": {},
-        "heartbeats": {},
-    }
+    entry.runtime_data = SungrowData(coordinators=coordinators, control=MagicMock(), devices={})
 
     added = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
