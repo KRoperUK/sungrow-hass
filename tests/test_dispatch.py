@@ -82,6 +82,30 @@ async def test_number_setup_no_devices(hass: HomeAssistant):
     assert added == []
 
 
+async def test_number_setup_skips_device_without_uuid(hass: HomeAssistant):
+    """A discovered device with no uuid is skipped (no entities created)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"device_type": "ENERGY_STORAGE_SYSTEM", "device_name": "No UUID"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert added == []
+
+
+async def test_select_setup_skips_device_without_uuid(hass: HomeAssistant):
+    """A discovered device with no uuid is skipped (no select entities created)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"device_type": "ENERGY_STORAGE_SYSTEM", "device_name": "No UUID"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert added == []
+
+
 async def test_number_set_value_calls_control(hass: HomeAssistant):
     """Setting a number entity writes the parameter via Control."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
