@@ -1,9 +1,10 @@
 name: Release PR
 
 on:
-    push:
-        branches:
-            - main
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+        branches: [main]
     workflow_dispatch: {}
 
 permissions:
@@ -17,14 +18,17 @@ concurrency:
 
 jobs:
     release-pr:
-        if: |
-            !contains(github.event.head_commit.message, 'chore: release') &&
-            !contains(github.event.head_commit.message, '[skip ci]')
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            (github.event.workflow_run.conclusion == 'success' &&
+             !contains(github.event.workflow_run.head_commit.message, 'chore: release') &&
+             !contains(github.event.workflow_run.head_commit.message, '[skip ci]'))
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
               uses: actions/checkout@v7
               with:
+                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
                   fetch-depth: 0
 
             - name: Conventional Changelog (no tag/release)

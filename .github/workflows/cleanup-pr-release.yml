@@ -11,6 +11,7 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Delete pre-releases for this branch
         env:
@@ -21,7 +22,7 @@ jobs:
           BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
           TAG_PREFIX="dev-${BRANCH}-v"
           echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
-          gh release list --json tagName,isPrerelease \
+          gh release list --limit 1000 --json tagName,isPrerelease \
             --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
           | while read -r tag; do
               echo "Deleting release and tag: ${tag}"
