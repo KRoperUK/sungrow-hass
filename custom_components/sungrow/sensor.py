@@ -27,6 +27,7 @@ SENSOR_ALIASES: dict[str, str] = {
     "daily_field_discharge_capacity": "Battery Daily Discharge Capacity",
     "energy_storage_active_power_ems": "EMS Battery Power",
     "energy_storage_soc_ems": "EMS Battery SOC",
+    "battery_level_soc": "Battery State of Charge",
 }
 
 # Per-issue custom codes that users commonly request. If the point_id is configured
@@ -155,7 +156,6 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = sensor_name
         _LOGGER.debug("Created sensor: %s %s (code: %s)", plant_name, sensor_name, point_code)
         self._attr_unique_id = f"{plant_id}_{point_code}"
-        self._attr_icon = "mdi:solar-power-variant"
 
         # Group sensors under a device per plant
         self._attr_device_info = DeviceInfo(
@@ -179,6 +179,11 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         device_class, state_class = infer_device_class(init_data.get("unit"), point_code)
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+
+        # Let HA choose the icon automatically for sensors with a known device class
+        # (e.g. mdi:battery for BATTERY, mdi:lightning-bolt for POWER/ENERGY).
+        # Fall back to the solar panel icon only for unclassified sensors.
+        self._attr_icon = None if device_class else "mdi:solar-power-variant"
 
     @property
     def native_value(self):
