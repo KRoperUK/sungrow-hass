@@ -1,6 +1,9 @@
 name: Release PR
 
 on:
+    push:
+        branches:
+            - main
     workflow_dispatch: {}
 
 permissions:
@@ -14,6 +17,9 @@ concurrency:
 
 jobs:
     release-pr:
+        if: |
+            !contains(github.event.head_commit.message, 'chore: release') &&
+            !contains(github.event.head_commit.message, '[skip ci]')
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
@@ -23,6 +29,11 @@ jobs:
 
             - name: Conventional Changelog (no tag/release)
               id: changelog
+              # Version bump rules with the conventionalcommits preset:
+              #   feat! / fix! / BREAKING CHANGE -> major
+              #   feat                             -> minor
+              #   fix                              -> patch
+              #   chore / docs / style / refactor / test / ci / build -> no release
               uses: TriPSs/conventional-changelog-action@v6
               with:
                   github-token: ${{ github.token }}
