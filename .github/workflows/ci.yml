@@ -39,18 +39,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # Project supports 3.12+, so test the full supported range.
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          # Home Assistant requires Python >=3.13, so that's the only supported
+          # runtime for this integration.
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements_test.txt
 
@@ -69,8 +66,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          # Matrix jobs must not share an artifact name (upload-artifact v4+ errors).
-          name: coverage-report-${{ matrix.python-version }}
+          name: coverage-report
           path: coverage.xml
 
       - name: Upload coverage to Codecov
