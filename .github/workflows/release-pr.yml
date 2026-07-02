@@ -56,6 +56,9 @@ jobs:
                   # Redundant with fetch-depth: 0 and the exact call that fails in
                   # detached HEAD — skip it.
                   skip-git-pull: true
+                  # The release PR is pushed by create-pull-request below, not by
+                  # this action.
+                  git-push: false
 
             - name: Sync versions to manifest and pyproject
               if: steps.changelog.outputs.skipped != 'true'
