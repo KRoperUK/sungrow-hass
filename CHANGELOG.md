@@ -1,3 +1,22 @@
+## [1.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v1.1.0) (2026-07-02)
+
+
+### Features
+
+* auto-start OAuth redirect with manual code/URL fallback ([#46](https://github.com/KRoperUK/sungrow-hass/issues/46)) ([492fa4a](https://github.com/KRoperUK/sungrow-hass/commit/492fa4a5e85d47a2b1fb52922a9296d3a982bb6b))
+* **diagnostics:** capture all devices + per-device realtime for [#18](https://github.com/KRoperUK/sungrow-hass/issues/18) ([#67](https://github.com/KRoperUK/sungrow-hass/issues/67)) ([4d4dd54](https://github.com/KRoperUK/sungrow-hass/commit/4d4dd546ba6509ad9f96f5741ec7d8be57a6c690))
+* harden OAuth callback, expand tests, add repo hygiene ([#38](https://github.com/KRoperUK/sungrow-hass/issues/38)) ([ebb9968](https://github.com/KRoperUK/sungrow-hass/commit/ebb9968e68416678eaca2a1081e3010f85334e7f)), closes [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)
+* Home Assistant quality-scale compliance (Batch B) ([#62](https://github.com/KRoperUK/sungrow-hass/issues/62)) ([c956194](https://github.com/KRoperUK/sungrow-hass/commit/c9561943f656448d0c9ceaff4a4b55bd3e365643)), closes [#50](https://github.com/KRoperUK/sungrow-hass/issues/50)
+* sub-minute polling intervals (seconds, min 10 s) ([#43](https://github.com/KRoperUK/sungrow-hass/issues/43)) ([f180ad1](https://github.com/KRoperUK/sungrow-hass/commit/f180ad1fbf4105dc2dca8c4f58a97d7751186cae)), closes [#40](https://github.com/KRoperUK/sungrow-hass/issues/40)
+
+
+### Bug Fixes
+
+* correct icon and alias for battery SoC sensor ([#39](https://github.com/KRoperUK/sungrow-hass/issues/39)) ([#45](https://github.com/KRoperUK/sungrow-hass/issues/45)) ([077b49a](https://github.com/KRoperUK/sungrow-hass/commit/077b49aacc52ec9a05863fb1c3b7bfa94d6cfdb5))
+* **dispatch:** select ESS device when device_type is a DeviceType enum ([#68](https://github.com/KRoperUK/sungrow-hass/issues/68)) ([6919bf3](https://github.com/KRoperUK/sungrow-hass/commit/6919bf3448fd88925a24d2e3f50e3f421e283df0))
+* handle OAuth callback when iSolarCloud strips flow_id query param ([#41](https://github.com/KRoperUK/sungrow-hass/issues/41)) ([cf5ef83](https://github.com/KRoperUK/sungrow-hass/commit/cf5ef83de298370cd3689feb495c7b5bc03826e1))
+* harden heartbeat lifecycle, entity availability, and secret logging ([#48](https://github.com/KRoperUK/sungrow-hass/issues/48)) ([51dee14](https://github.com/KRoperUK/sungrow-hass/commit/51dee1448cd866f110e41c5f6675bbdbc8274f9a))
+
 ## [1.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.3...v1.0.0) (2026-07-02)
 
 
@@ -11,11 +30,6 @@
 * dispatch control, extra measure points, sensor aliases, forked API client ([#33](https://github.com/KRoperUK/sungrow-hass/issues/33)) ([a30e4f2](https://github.com/KRoperUK/sungrow-hass/commit/a30e4f220aaf8dfeab420d61903854cb763a4f96)), closes [#7](https://github.com/KRoperUK/sungrow-hass/issues/7) [#17](https://github.com/KRoperUK/sungrow-hass/issues/17) [#31](https://github.com/KRoperUK/sungrow-hass/issues/31) [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)
 
 ## [0.2.3](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.2...v0.2.3) (2026-06-08)
-
-
-### Features
-
-* **sensor:** hide sensors with unknown or empty initial values ([afa908b](https://github.com/KRoperUK/sungrow-hass/commit/afa908b7227db92c4929fa576393c2d81654470f))
 
 
 ### Bug Fixes
