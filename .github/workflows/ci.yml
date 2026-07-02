@@ -53,7 +53,12 @@ jobs:
         run: pip install -r requirements_test.txt
 
       - name: Run tests with coverage
-        run: pytest tests/ --cov=custom_components/sungrow --cov-branch --cov-report=xml --cov-report=term-missing -v
+        run: >-
+          pytest tests/
+          --cov=custom_components/sungrow --cov-branch
+          --cov-report=xml --cov-report=term-missing
+          --junitxml=junit.xml -o junit_family=legacy
+          -v
 
       - name: Upload coverage report
         if: always()
@@ -69,6 +74,13 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
 
   hacs_validate:
     runs-on: ubuntu-latest
