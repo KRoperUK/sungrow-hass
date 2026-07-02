@@ -31,6 +31,10 @@ from .coordinator import SungrowPlantCoordinator, is_auth_error
 
 PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 
+# How long to wait for a heartbeat loop to observe its stop event and exit
+# before force-cancelling it.
+HEARTBEAT_STOP_TIMEOUT = 10
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -127,7 +131,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinators": coordinators,
         "control": control_service,
         "devices": devices_by_plant,
-        "heartbeat_stop": {},
+        # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
+        "heartbeats": {},
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -141,8 +146,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-    for stop_event in entry_data.get("heartbeat_stop", {}).values():
-        stop_event.set()
+    heartbeats = entry_data.get("heartbeats", {})
+    for heartbeat in list(heartbeats.values()):
+        await _stop_heartbeat(heartbeat)
+    heartbeats.clear()
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
@@ -155,30 +162,53 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task]) -> None:
+    """Signal a heartbeat loop to stop and wait for it to actually exit."""
+    stop_event, task = heartbeat
+    stop_event.set()
+    try:
+        async with asyncio.timeout(HEARTBEAT_STOP_TIMEOUT):
+            await task
+    except TimeoutError:
+        _LOGGER.warning("Heartbeat loop did not stop within %ss; cancelling", HEARTBEAT_STOP_TIMEOUT)
+        task.cancel()
+    except asyncio.CancelledError:
+        pass
+    except Exception:  # pylint: disable=broad-except
+        _LOGGER.exception("Heartbeat loop raised while stopping")
+
+
 async def async_start_heartbeat(
     hass: HomeAssistant, entry: ConfigEntry, plant_id: str, device_uuid: str, interval: int
 ) -> None:
     """Start (or restart) the EMS heartbeat loop for a plant/device."""
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    stops = entry_data["heartbeat_stop"]
+    heartbeats = entry_data["heartbeats"]
 
-    # Stop any existing loop for this plant before starting a new one.
-    if plant_id in stops:
-        stops[plant_id].set()
-        await asyncio.sleep(0)
+    # Stop any existing loop for this plant and wait for it to exit before
+    # starting a new one, so two loops never run for the same device.
+    existing = heartbeats.pop(plant_id, None)
+    if existing is not None:
+        await _stop_heartbeat(existing)
 
     stop_event = asyncio.Event()
-    stops[plant_id] = stop_event
     control: Control = entry_data["control"]
-    asyncio.create_task(control.heartbeat_loop(device_uuid, interval, stop_event))
+    # Tracked by the config entry so HA cancels it automatically on unload.
+    task = entry.async_create_background_task(
+        hass,
+        control.heartbeat_loop(device_uuid, interval, stop_event),
+        name=f"sungrow-heartbeat-{plant_id}",
+    )
+    heartbeats[plant_id] = (stop_event, task)
 
 
 async def async_stop_heartbeat(hass: HomeAssistant, entry: ConfigEntry, plant_id: str) -> None:
     """Stop the EMS heartbeat loop for a plant."""
     entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-    stops = entry_data.get("heartbeat_stop", {})
-    if plant_id in stops:
-        stops[plant_id].set()
+    heartbeats = entry_data.get("heartbeats", {})
+    heartbeat = heartbeats.pop(plant_id, None)
+    if heartbeat is not None:
+        await _stop_heartbeat(heartbeat)
 
 
 class SungrowAuthCallbackView(HomeAssistantView):

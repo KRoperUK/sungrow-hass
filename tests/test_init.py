@@ -1,6 +1,8 @@
 """Tests for Sungrow component setup and the auth callback view."""
 
-from unittest.mock import AsyncMock
+import asyncio
+import contextlib
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
@@ -10,6 +12,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow import (
     SungrowAuthCallbackView,
     async_setup,
+    async_start_heartbeat,
+    async_stop_heartbeat,
 )
 from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
 
@@ -65,6 +69,105 @@ async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_pla
 
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat lifecycle
+# ---------------------------------------------------------------------------
+
+
+def _entry_with_heartbeats(hass: HomeAssistant) -> MockConfigEntry:
+    """Create a minimal entry whose heartbeat_loop waits on its stop event."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    control = MagicMock()
+    # A realistic loop: block until the stop event is set.
+    control.heartbeat_loop = lambda uuid, interval, stop_event: stop_event.wait()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinators": [],
+        "control": control,
+        "devices": {},
+        "heartbeats": {},
+    }
+    return entry
+
+
+async def test_start_heartbeat_creates_tracked_task(hass: HomeAssistant):
+    """Starting a heartbeat stores a (stop_event, task) pair and runs the loop."""
+    entry = _entry_with_heartbeats(hass)
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+
+    heartbeats = hass.data[DOMAIN][entry.entry_id]["heartbeats"]
+    assert "12345" in heartbeats
+    stop_event, task = heartbeats["12345"]
+    assert isinstance(stop_event, asyncio.Event)
+    assert not task.done()
+
+    await async_stop_heartbeat(hass, entry, "12345")
+    assert stop_event.is_set()
+    assert task.done()
+    assert "12345" not in heartbeats
+
+
+async def test_restart_heartbeat_stops_previous_loop(hass: HomeAssistant):
+    """Restarting stops and awaits the previous loop before starting a new one (no double-run)."""
+    entry = _entry_with_heartbeats(hass)
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    first_event, first_task = hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"]
+
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    second_event, second_task = hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"]
+
+    assert first_event.is_set()
+    assert first_task.done()
+    assert second_task is not first_task
+    assert not second_task.done()
+
+    await async_stop_heartbeat(hass, entry, "12345")
+
+
+async def test_stop_heartbeat_absent_is_noop(hass: HomeAssistant):
+    """Stopping a heartbeat that isn't running does not raise."""
+    entry = _entry_with_heartbeats(hass)
+    await async_stop_heartbeat(hass, entry, "nonexistent")
+
+
+async def test_stop_heartbeat_cancels_stubborn_loop(hass: HomeAssistant):
+    """A loop that ignores its stop event is force-cancelled after the timeout."""
+    entry = _entry_with_heartbeats(hass)
+
+    async def _stubborn(uuid, interval, stop_event):
+        await asyncio.sleep(3600)
+
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    entry_data["control"].heartbeat_loop = _stubborn
+
+    with patch("custom_components.sungrow.HEARTBEAT_STOP_TIMEOUT", 0.01):
+        await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+        _, task = entry_data["heartbeats"]["12345"]
+        await async_stop_heartbeat(hass, entry, "12345")
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert task.done()
+
+
+async def test_unload_cancels_running_heartbeat(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Unloading the entry signals and awaits any running heartbeat loop."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    stop_event = asyncio.Event()
+    task = entry.async_create_background_task(hass, stop_event.wait(), name="test-heartbeat")
+    hass.data[DOMAIN][entry.entry_id]["heartbeats"]["12345"] = (stop_event, task)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert stop_event.is_set()
+    assert task.done()
 
 
 async def test_setup_entry_no_tokens_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):

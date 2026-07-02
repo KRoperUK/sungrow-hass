@@ -256,7 +256,7 @@ async def test_sensor_setup_creates_entities(hass: HomeAssistant):
         "coordinators": coordinators,
         "control": MagicMock(),
         "devices": {},
-        "heartbeat_stop": {},
+        "heartbeats": {},
     }
 
     added = []
@@ -277,7 +277,7 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
         "coordinators": coordinators,
         "control": MagicMock(),
         "devices": {},
-        "heartbeat_stop": {},
+        "heartbeats": {},
     }
 
     added = []
