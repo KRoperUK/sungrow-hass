@@ -114,28 +114,51 @@ def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceC
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensors from the coordinators created during entry setup."""
     coordinators = entry.runtime_data.coordinators
+    devices_by_plant = entry.runtime_data.devices
     # Point the device "Visit" link at the region's iSolarCloud web console.
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY), DEFAULT_CONSOLE_URL)
 
     entities: list[SungrowSensor] = []
     for coordinator in coordinators:
-        if not coordinator.data:
-            _LOGGER.warning("No data received for plant %s", coordinator.plant_name)
-            continue
-
+        # Plant-level sensors.
         # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
-        for point_code, point_data in coordinator.data.items():
-            entities.append(
-                SungrowSensor(
-                    coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
+        if coordinator.data:
+            for point_code, point_data in coordinator.data.items():
+                entities.append(
+                    SungrowSensor(
+                        coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
+                    )
                 )
-            )
+        else:
+            _LOGGER.warning("No data received for plant %s", coordinator.plant_name)
+
+        # Per-device sensors (opt-in, issue #74): surface points reported per device
+        # (EV chargers, meters, extra batteries). Points already present at the plant
+        # level are skipped so enabling this doesn't just duplicate every plant sensor
+        # under the inverter.
+        if coordinator.enable_device_sensors and coordinator.device_data:
+            plant_codes = set(coordinator.data or {})
+            device_names = {
+                str(d.get("uuid")): (d.get("device_name") or d.get("device_model_name") or coordinator.plant_name)
+                for d in devices_by_plant.get(coordinator.plant_id, [])
+                if d.get("uuid")
+            }
+            for uuid, points in coordinator.device_data.items():
+                device_name = device_names.get(uuid, f"Device {uuid}")
+                for point_code, point_data in points.items():
+                    if point_code in plant_codes:
+                        continue
+                    entities.append(
+                        SungrowDeviceSensor(
+                            coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data
+                        )
+                    )
 
     async_add_entities(entities)
 
 
 class SungrowSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a Sungrow Sensor."""
+    """Representation of a plant-level Sungrow sensor."""
 
     has_entity_name = True
 
@@ -144,26 +167,9 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self.point_code = point_code
         self.plant_id = plant_id
-
-        # Prefer generating name from code to avoid Chinese names from API
-        # The API often returns Chinese names even when locale is set to English
-        # We assume point_code is a readable string identifier (e.g. 'total_active_power')
-        if point_code.isdigit():
-            # Fallback if we only have a number, but ideally we should have a string key
-            sensor_name = init_data.get("name", f"Sensor {point_code}")
-        else:
-            sensor_name = point_code.replace("_", " ").title()
-
-        # Apply friendly aliases for known opaque codes, including user-configured
-        # extra measure points that have a documented alias.
-        sensor_name = EXTRA_CODE_ALIASES.get(point_code, SENSOR_ALIASES.get(point_code, sensor_name))
-
-        # With has_entity_name = True, HA prefixes the device name automatically
-        self._attr_name = sensor_name
-        _LOGGER.debug("Created sensor: %s %s (code: %s)", plant_name, sensor_name, point_code)
         self._attr_unique_id = f"{plant_id}_{point_code}"
 
-        # Group sensors under a device per plant
+        # Group sensors under a device per plant.
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, plant_id)},
             name=plant_name,
@@ -171,9 +177,30 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             entry_type=DeviceEntryType.SERVICE,
             configuration_url=console_url,
         )
+        self._apply_point_metadata(point_code, init_data, plant_name)
 
-        # Programmatically hide sensors that are "Unknown" at first setup
-        # This prevents UI clutter for unsupported attributes (e.g. meters/batteries not present)
+    def _apply_point_metadata(self, point_code, init_data, label):
+        """Set the name, unit and device/state class from a point payload.
+
+        Shared by plant-level and per-device sensors so both name and classify points
+        the same way.
+        """
+        # Prefer generating the name from the code to avoid Chinese names from the API
+        # (the API often returns Chinese names even when locale is English). We assume
+        # point_code is a readable string identifier (e.g. 'total_active_power').
+        if point_code.isdigit():
+            sensor_name = init_data.get("name", f"Sensor {point_code}")
+        else:
+            sensor_name = point_code.replace("_", " ").title()
+        # Apply friendly aliases for known opaque / user-configured extra codes.
+        sensor_name = EXTRA_CODE_ALIASES.get(point_code, SENSOR_ALIASES.get(point_code, sensor_name))
+
+        # With has_entity_name = True, HA prefixes the device name automatically.
+        self._attr_name = sensor_name
+        _LOGGER.debug("Created sensor: %s %s (code: %s)", label, sensor_name, point_code)
+
+        # Hide points that are "Unknown" at first setup to reduce UI clutter
+        # (e.g. meters/batteries not present).
         initial_value = init_data.get("value")
         if initial_value is None or str(initial_value).strip() == "" or str(initial_value).lower() == "unknown":
             self._attr_entity_registry_enabled_default = False
@@ -186,26 +213,61 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = device_class
         self._attr_state_class = state_class
 
-        # Let HA choose the icon automatically for sensors with a known device class
-        # (e.g. mdi:battery for BATTERY, mdi:lightning-bolt for POWER/ENERGY).
-        # Fall back to the solar panel icon only for unclassified sensors.
+        # Let HA choose the icon for sensors with a known device class; fall back to
+        # the solar panel icon only for unclassified sensors.
         self._attr_icon = None if device_class else "mdi:solar-power-variant"
+
+    def _current_point(self):
+        """Return the current point payload for this sensor (plant-level source)."""
+        data = self.coordinator.data
+        if data and self.point_code in data:
+            return data[self.point_code]
+        return None
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        if self.coordinator.data and self.point_code in self.coordinator.data:
-            val = self.coordinator.data[self.point_code].get("value")
-            # Try convert to float if it looks like a number but is string
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return val
-        return None
+        point = self._current_point()
+        if point is None:
+            return None
+        val = point.get("value")
+        # Convert to float if it looks numeric but is a string.
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return val
 
     @property
     def extra_state_attributes(self):
         """Return attributes."""
-        if self.coordinator.data and self.point_code in self.coordinator.data:
-            return self.coordinator.data[self.point_code]
-        return {}
+        return self._current_point() or {}
+
+
+class SungrowDeviceSensor(SungrowSensor):
+    """A sensor for a specific device (EV charger, meter, extra battery) under a plant.
+
+    Reads from the coordinator's per-device realtime data and is grouped under its own
+    device, linked to the plant device via ``via_device`` (issue #74).
+    """
+
+    def __init__(self, coordinator, point_code, plant_id, device_uuid, device_name, init_data):
+        """Initialize a device-scoped sensor."""
+        # Skip SungrowSensor.__init__ (it builds the plant device); reuse the shared
+        # metadata helper but with a device-scoped identity and data source.
+        CoordinatorEntity.__init__(self, coordinator)
+        self.point_code = point_code
+        self.plant_id = plant_id
+        self.device_uuid = device_uuid
+        self._attr_unique_id = f"{plant_id}_{device_uuid}_{point_code}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_uuid)},
+            name=device_name,
+            manufacturer="Sungrow",
+            via_device=(DOMAIN, plant_id),
+        )
+        self._apply_point_metadata(point_code, init_data, device_name)
+
+    def _current_point(self):
+        """Return the current point payload from the coordinator's per-device data."""
+        device_data = getattr(self.coordinator, "device_data", None) or {}
+        return device_data.get(self.device_uuid, {}).get(self.point_code)

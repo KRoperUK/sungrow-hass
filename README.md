@@ -68,6 +68,7 @@ After setup, go to **Settings → Devices & Services → Sungrow → Configure**
 
 - **Polling interval** (default 5 minutes)
 - **Extra measure points** — add custom `point_id=code` pairs to request additional data points from iSolarCloud
+- **Create per-device sensors** — off by default. When enabled, each discovered device (EV charger, meter, extra battery) is polled for its own realtime points and exposed as sensors under its own device card, grouped beneath the plant. Combine with **Extra measure points** to surface device-specific point IDs (e.g. an EV charger). Adds extra API calls, so leave it off if you only need plant-level data.
 
 ### Sensor mapping
 

@@ -115,11 +115,13 @@ To help map it:
      type, so any reachable charger points show up here.
 2. **Attach that JSON to [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)**
    so the point IDs can be added to the default mapping.
-3. **Stopgap — surface points yourself.** If you already know a point ID (from the
-   iSolarCloud Developer Portal's *Common Measuring Point Enumeration*), add it
-   under **Configure → Extra measure points** as `point_id=code` (for example
-   `<id>=ev_charger_power`). Recognised codes like `ev_charger_power` /
-   `ev_charger_energy` get a friendly name automatically.
+3. **Surface the device's own sensors.** Enable **Configure → Create per-device
+   sensors**. Each discovered device is then polled for its own realtime points and
+   gets sensors under its own device card. Combine with **Extra measure points**
+   (`point_id=code`, e.g. `<id>=ev_charger_power`) if the charger's points aren't
+   returned by default — recognised codes like `ev_charger_power` /
+   `ev_charger_energy` get a friendly name automatically. Leave the option off if
+   you only need plant-level data (it adds extra API calls).
 
 ---
 

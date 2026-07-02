@@ -7,8 +7,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pysolarcloud import PySolarCloudException
+from pysolarcloud.plants import DeviceType
 
-from custom_components.sungrow.const import CONF_EXTRA_MEASURE_POINTS, CONF_SCAN_INTERVAL
+from custom_components.sungrow.const import (
+    CONF_ENABLE_DEVICE_SENSORS,
+    CONF_EXTRA_MEASURE_POINTS,
+    CONF_SCAN_INTERVAL,
+)
 from custom_components.sungrow.coordinator import SungrowPlantCoordinator, is_auth_error
 
 from .conftest import MOCK_REALTIME_DATA
@@ -163,3 +168,84 @@ async def test_extra_measure_points_empty_passes_none(hass: HomeAssistant):
     await coordinator._async_update_data()
 
     plants.async_get_realtime_data.assert_awaited_once_with(["12345"], extra_measure_points=None)
+
+
+# ---------------------------------------------------------------------------
+# Per-device realtime (issue #74)
+# ---------------------------------------------------------------------------
+
+
+async def test_device_data_fetched_when_enabled(hass: HomeAssistant):
+    """With the option on, per-device realtime is fetched and stored on the coordinator."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(
+        return_value={"chg-1": {"ev_charger_power": {"code": "ev_charger_power", "value": "7.2"}}}
+    )
+    devices = [{"uuid": "chg-1", "device_type": 999}]  # unknown type left as raw int
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    assert coordinator.device_data["chg-1"]["ev_charger_power"]["value"] == "7.2"
+    plants.async_get_device_realtime.assert_awaited_once()
+
+
+async def test_device_data_not_fetched_when_disabled(hass: HomeAssistant):
+    """With the option off, per-device realtime is never requested."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "chg-1", "device_type": 999}]
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    assert coordinator.device_data == {}
+    plants.async_get_device_realtime.assert_not_awaited()
+
+
+async def test_device_data_best_effort_on_error(hass: HomeAssistant):
+    """A failing device type is skipped without failing the whole update."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+
+    async def _realtime(plant_id, device_type, **kwargs):
+        if getattr(device_type, "value", device_type) == 999:
+            raise RuntimeError("charger endpoint down")
+        return {"inv-1": {"foo": {"code": "foo", "value": "1"}}}
+
+    plants.async_get_device_realtime = AsyncMock(side_effect=_realtime)
+    devices = [
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER},
+        {"uuid": "chg-1", "device_type": 999},
+    ]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    # Must not raise even though one device type errors.
+    await coordinator._async_update_data()
+
+    assert "inv-1" in coordinator.device_data
+    assert "chg-1" not in coordinator.device_data
+
+
+async def test_device_data_dedupes_device_types(hass: HomeAssistant):
+    """Two devices of the same type trigger a single per-type fetch."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER},
+        {"uuid": "inv-2", "device_type": DeviceType.INVERTER},
+    ]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    plants.async_get_device_realtime.assert_awaited_once()

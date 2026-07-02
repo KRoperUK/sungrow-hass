@@ -67,14 +67,15 @@ def _matches_device_type(device: dict, target: DeviceType) -> bool:
 def select_dispatch_device(devices: list[dict]) -> dict | None:
     """Pick the device to attach dispatch (number/select) entities to.
 
-    Prefer an energy-storage system — that's what accepts charge/discharge dispatch
-    — and fall back to the first discovered device otherwise. Returns ``None`` when
-    there are no devices.
+    Only inverters and energy-storage systems accept charge/discharge dispatch, so
+    ignore any other discovered devices (meters, EV chargers, ...). Prefer an ESS,
+    then fall back to an inverter. Returns ``None`` when neither is present.
     """
-    if not devices:
-        return None
     ess = [d for d in devices if _matches_device_type(d, DeviceType.ENERGY_STORAGE_SYSTEM)]
-    return ess[0] if ess else devices[0]
+    if ess:
+        return ess[0]
+    inverters = [d for d in devices if _matches_device_type(d, DeviceType.INVERTER)]
+    return inverters[0] if inverters else None
 
 
 class IterableSchema(vol.Schema):
@@ -166,22 +167,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
         plant_name = plant_info["ps_name"]
-        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name)
+
+        # Discover ALL devices first (not just inverter/ESS): dispatch filters down to
+        # the dispatch-capable ones, while per-device sensors (issue #74) can use any
+        # of them. Failures here are non-fatal — the plant still works on plant-level
+        # data, just without device discovery.
+        try:
+            devices = await plants_service.async_get_plant_devices(plant_id)
+        except Exception as err:
+            _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
+            devices = []
+        devices_by_plant[plant_id] = devices
+
+        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name, devices)
         # Raises ConfigEntryNotReady / ConfigEntryAuthFailed as classified by the coordinator.
         await coordinator.async_config_entry_first_refresh()
         coordinators.append(coordinator)
-
-        # Discover dispatch-capable devices (inverters / ESS) for this plant. Failures here are
-        # non-fatal — dispatch entities simply won't be created for this plant.
-        try:
-            devices = await plants_service.async_get_plant_devices(
-                plant_id,
-                device_types=[DeviceType.INVERTER, DeviceType.ENERGY_STORAGE_SYSTEM],
-            )
-            devices_by_plant[plant_id] = devices
-        except Exception as err:
-            _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
-            devices_by_plant[plant_id] = []
 
     entry.runtime_data = SungrowData(
         coordinators=coordinators,
