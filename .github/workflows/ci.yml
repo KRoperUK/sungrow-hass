@@ -45,6 +45,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
+          # Home Assistant requires Python >=3.13, so that's the only supported
+          # runtime for this integration.
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements_test.txt
@@ -121,7 +123,7 @@ jobs:
       # dev build is a pre-release of the upcoming version.
       - name: Compute next version
         id: nextver
-        uses: TriPSs/conventional-changelog-action@v6
+        uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
         with:
           github-token: ${{ github.token }}
           version-file: custom_components/sungrow/manifest.json

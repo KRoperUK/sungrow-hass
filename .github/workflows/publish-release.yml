@@ -16,9 +16,13 @@ concurrency:
 
 jobs:
     publish:
+        # Only publish for a merged release PR (label 'release' AND a release/v*
+        # head branch) so an unrelated PR that happens to carry the label can't
+        # trigger a real release.
         if: |
             github.event.pull_request.merged == true &&
-            contains(github.event.pull_request.labels.*.name, 'release')
+            contains(github.event.pull_request.labels.*.name, 'release') &&
+            startsWith(github.event.pull_request.head.ref, 'release/v')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
@@ -30,16 +34,31 @@ jobs:
             - name: Extract version from manifest
               id: version
               run: |
-                  VERSION=$(grep '"version":' custom_components/sungrow/manifest.json | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
-                  echo "version=${VERSION}" >> $GITHUB_OUTPUT
+                  VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+                  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
                   echo "Version extracted: ${VERSION}"
 
+            - name: Extract latest changelog section
+              run: |
+                  # Publish only the newest version's notes, not the whole CHANGELOG.
+                  # Print from the first version heading ("## [x.y.z]") up to the next.
+                  awk '
+                    /^#{1,2} \[[0-9]/ { n++; if (n > 1) exit }
+                    n == 1 { print }
+                  ' CHANGELOG.md > release_notes.md
+                  if [ ! -s release_notes.md ]; then
+                    echo "No version section matched; falling back to full CHANGELOG."
+                    cp CHANGELOG.md release_notes.md
+                  fi
+                  echo "----- release notes -----"
+                  cat release_notes.md
+
             - name: Create release tag and GitHub release
-              uses: softprops/action-gh-release@v3
+              uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
               with:
                   tag_name: v${{ steps.version.outputs.version }}
                   name: Release v${{ steps.version.outputs.version }}
-                  body_path: CHANGELOG.md
+                  body_path: release_notes.md
                   draft: false
                   prerelease: false
                   token: ${{ github.token }}
