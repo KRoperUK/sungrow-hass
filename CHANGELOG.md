@@ -1,9 +1,20 @@
-## [0.2.3](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.2...v0.2.3) (2026-06-07)
+## [1.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.3...v1.0.0) (2026-07-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* automatic OAuth callback handling (#35)
+
+### Features
+
+* automatic OAuth callback handling ([#35](https://github.com/KRoperUK/sungrow-hass/issues/35)) ([5b17efe](https://github.com/KRoperUK/sungrow-hass/commit/5b17efeeed3abbf1e3398833aeb07777b136625f)), closes [#34](https://github.com/KRoperUK/sungrow-hass/issues/34)
+* dispatch control, extra measure points, sensor aliases, forked API client ([#33](https://github.com/KRoperUK/sungrow-hass/issues/33)) ([a30e4f2](https://github.com/KRoperUK/sungrow-hass/commit/a30e4f220aaf8dfeab420d61903854cb763a4f96)), closes [#7](https://github.com/KRoperUK/sungrow-hass/issues/7) [#17](https://github.com/KRoperUK/sungrow-hass/issues/17) [#31](https://github.com/KRoperUK/sungrow-hass/issues/31) [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)
+
+## [0.2.3](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.2...v0.2.3) (2026-06-08)
 
 
 ### Features
 
-* config flow improvement ([fedd9f7](https://github.com/KRoperUK/sungrow-hass/commit/fedd9f76b7b6649089d1fca55004994c3eee8b33))
 * **sensor:** hide sensors with unknown or empty initial values ([afa908b](https://github.com/KRoperUK/sungrow-hass/commit/afa908b7227db92c4929fa576393c2d81654470f))
 
 
