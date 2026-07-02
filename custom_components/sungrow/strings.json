@@ -17,21 +17,13 @@
           "app_id": "App ID from iSolarCloud Developer Platform. To find this, go to your application and look for 'id' within the URL like so: {app_id_url}."
         }
       },
-      "auth": {
-        "title": "Authorize App",
-        "description": "Please visit the URL below to authorize the application:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in.\n2. You will be redirected back to Home Assistant automatically.\n3. If the redirect does not work, choose **Enter code manually** and paste the code from the URL.",
-        "menu_options": {
-          "auth_callback": "Authorize automatically (recommended)",
-          "auth_manual": "Enter code manually"
-        }
-      },
       "auth_callback": {
         "title": "Waiting for authorization",
-        "description": "A new window should have opened for:\n\n{auth_url}\n\nAfter you log in and authorize the app, this screen will update automatically."
+        "description": "Open the link below to authorize the application:\n\n{auth_url}\n\nAfter you log in and approve the app, you will be redirected back and this screen will update automatically.\n\nIf the redirect does not complete (for example the page shows an error), wait a moment and you will be able to paste the code manually."
       },
       "auth_manual": {
         "title": "Enter Authorization Code",
-        "description": "Please visit the URL below to authorize the application:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in.\n2. You will be redirected (page may show an error).\n3. Copy the **code** parameter from the URL address bar.\n4. Paste it below.",
+        "description": "The automatic redirect did not complete. Finish authorizing manually:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in (skip if you already did).\n2. You will be redirected (the page may show an error).\n3. Copy the **code** parameter from the URL address bar.\n4. Paste the code — or the full redirect URL — below.",
         "data": {
           "code": "Authorization Code or full redirect URL"
         }
@@ -46,7 +38,6 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "callback_timeout": "Authorization callback was not received in time. Please try again and choose Enter code manually if the redirect does not complete.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful"
     }
