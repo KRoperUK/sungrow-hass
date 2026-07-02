@@ -99,7 +99,6 @@ class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
     """Number entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
-    _attr_available = False
 
     def __init__(
         self,
@@ -131,11 +130,12 @@ class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return the current parameter value if known."""
-        # Parameters are not polled continuously; they are read once at setup if desired.
-        # For now we keep the entity available once the coordinator is running.
-        if self.coordinator.last_update_success:
-            self._attr_available = True
+        """Return the current parameter value.
+
+        Dispatch parameters are write-only here (not polled back from the API),
+        so there is no meaningful value to report. Availability is inherited from
+        CoordinatorEntity (tracks ``coordinator.last_update_success``).
+        """
         return None
 
     async def async_set_native_value(self, value: float) -> None:
