@@ -76,7 +76,6 @@ class SungrowDispatchSelect(CoordinatorEntity, SelectEntity):
     """Select entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
-    _attr_available = False
 
     def __init__(
         self,
@@ -106,9 +105,12 @@ class SungrowDispatchSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        """Return the current option (unknown until the user sets it)."""
-        if self.coordinator.last_update_success:
-            self._attr_available = True
+        """Return the current option.
+
+        Dispatch commands are write-only (not polled back from the API), so the
+        current option is unknown. Availability is inherited from
+        CoordinatorEntity (tracks ``coordinator.last_update_success``).
+        """
         return None
 
     async def async_select_option(self, option: str) -> None:
