@@ -17,9 +17,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # Pass the branch name via env — never inline ${{ github.head_ref }}
+          # into the script (shell-injection via a crafted branch name).
+          BRANCH_RAW: ${{ github.head_ref }}
         run: |
-          BRANCH="${{ github.head_ref }}"
-          BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
+          BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
           TAG_PREFIX="dev-${BRANCH}-v"
           echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
           gh release list --limit 1000 --json tagName,isPrerelease \
