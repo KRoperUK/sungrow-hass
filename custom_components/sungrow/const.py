@@ -10,6 +10,10 @@ CONF_REDIRECT_URI = "redirect_uri"
 # Options
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_EXTRA_MEASURE_POINTS = "extra_measure_points"
+# Opt-in: also poll each discovered device (charger, meter, extra battery) for its
+# own realtime points and expose them as sensors under that device. Off by default
+# to avoid extra API calls / entity clutter for users who only need plant data.
+CONF_ENABLE_DEVICE_SENSORS = "enable_device_sensors"
 
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",

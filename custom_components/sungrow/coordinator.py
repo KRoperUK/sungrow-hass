@@ -13,7 +13,12 @@ from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import Plants
 
 from .auth import AUTH_ERRORS
-from .const import CONF_EXTRA_MEASURE_POINTS, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+from .const import (
+    CONF_ENABLE_DEVICE_SENSORS,
+    CONF_EXTRA_MEASURE_POINTS,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         plants_service: Plants,
         plant_id: str,
         plant_name: str,
+        devices: list[dict] | None = None,
     ) -> None:
         """Initialize the coordinator."""
         scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -56,7 +62,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         self.plants_service = plants_service
         self.plant_id = plant_id
         self.plant_name = plant_name
+        self.devices: list[dict] = list(devices or [])
         self.extra_measure_points: dict[str, str] = dict(config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {}))
+        self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
+        # uuid -> { code: point } for per-device realtime (populated when enabled).
+        self.device_data: dict[str, dict] = {}
 
     async def _async_update_data(self):
         """Fetch data from the API for this plant."""
@@ -71,4 +81,40 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
             raise UpdateFailed(f"Error communicating with iSolarCloud API: {err}") from err
 
+        if self.enable_device_sensors:
+            self.device_data = await self._async_fetch_device_data()
+
         return all_plants_data.get(self.plant_id, {})
+
+    async def _async_fetch_device_data(self) -> dict[str, dict]:
+        """Fetch per-device realtime for each distinct device type (best effort).
+
+        The plant realtime endpoint only returns the plant-level points, so devices
+        like EV chargers or meters need a per-device fetch (issue #74). This is
+        best-effort: a device type whose endpoint is unavailable or errors simply
+        contributes nothing rather than failing the whole update. Any user-configured
+        extra measure points are requested here too, so newly identified charger/meter
+        point IDs surface without a code change.
+        """
+        merged: dict[str, dict] = {}
+        seen_types: set = set()
+        for device in self.devices:
+            device_type = device.get("device_type")
+            if device_type is None:
+                continue
+            type_id = getattr(device_type, "value", device_type)
+            if type_id in seen_types:
+                continue
+            seen_types.add(type_id)
+            try:
+                result = await self.plants_service.async_get_device_realtime(
+                    self.plant_id,
+                    device_type,
+                    extra_measure_points=self.extra_measure_points or None,
+                )
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
+                continue
+            for uuid, points in (result or {}).items():
+                merged.setdefault(str(uuid), {}).update(points)
+        return merged

@@ -16,6 +16,7 @@ from .const import (
     CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
+    CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_REDIRECT_URI,
@@ -388,6 +389,7 @@ class SungrowOptionsFlow(config_entries.OptionsFlow):
 
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         current_extras = self.config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {})
+        current_device_sensors = self.config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False)
         extras_str = ",".join(f"{pid}={code}" for pid, code in current_extras.items())
         return self.async_show_form(
             step_id="init",
@@ -402,6 +404,7 @@ class SungrowOptionsFlow(config_entries.OptionsFlow):
                         default=extras_str,
                         description={"suggested_value": extras_str},
                     ): str,
+                    vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
                 }
             ),
             errors=errors,
