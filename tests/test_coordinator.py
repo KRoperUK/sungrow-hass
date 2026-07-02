@@ -26,8 +26,13 @@ def _make_entry(options=None):
 
 
 def test_is_auth_error_keyerror():
-    """A KeyError (failed refresh) is treated as an auth error."""
+    """A KeyError for access_token (failed refresh) is treated as an auth error."""
     assert is_auth_error(KeyError("access_token")) is True
+
+
+def test_is_auth_error_unrelated_keyerror():
+    """An unrelated KeyError is not treated as an auth error."""
+    assert is_auth_error(KeyError("some_other_key")) is False
 
 
 def test_is_auth_error_known_pysolarcloud_error():
@@ -84,6 +89,36 @@ async def test_update_data_auth_error_raises_config_entry_auth_failed(hass: Home
 
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
     with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_update_data_pysolarcloud_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant):
+    """A pysolarcloud invalid_token error raises ConfigEntryAuthFailed."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "invalid_token"}))
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_update_data_pysolarcloud_transient_error_raises_update_failed(hass: HomeAssistant):
+    """A pysolarcloud server_busy error raises UpdateFailed."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "server_busy"}))
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+
+async def test_update_data_unrelated_keyerror_raises_update_failed(hass: HomeAssistant):
+    """A KeyError unrelated to tokens is treated as a transient UpdateFailed."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=KeyError("some_other_key"))
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
 
 

@@ -170,7 +170,11 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         The callback view extracts the authorization code and calls
         async_configure, which re-enters this step with user_input={"code": ...}.
+        If the callback does not arrive within five minutes, the flow aborts so
+        the user can restart and choose the manual code entry option.
         """
+        if self.context.get("callback_timeout"):
+            return self.async_abort(reason="callback_timeout")
         if user_input is not None and user_input.get("code"):
             self.context["code"] = user_input["code"]
             return self.async_show_progress_done(next_step_id="finish")
@@ -185,7 +189,15 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         async def _wait_for_callback() -> None:
             """Resume the flow once the OAuth callback delivers a code."""
             try:
-                code = await future
+                code = await asyncio.wait_for(future, timeout=300)
+            except TimeoutError:
+                _LOGGER.warning("OAuth callback not received within timeout for flow %s", self.flow_id)
+                self.context["callback_timeout"] = True
+                try:
+                    await self.hass.config_entries.flow.async_configure(flow_id=self.flow_id, user_input={})
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to resume config flow after callback timeout")
+                return
             except asyncio.CancelledError:
                 return
             finally:

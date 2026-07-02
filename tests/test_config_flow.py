@@ -359,6 +359,32 @@ async def test_callback_view_rejects_unknown_flow(hass: HomeAssistant, mock_auth
     assert response.status == 400
 
 
+async def test_auth_callback_timeout_aborts_flow(hass: HomeAssistant, mock_auth):
+    """Test that a missing callback within the timeout aborts the flow."""
+    from unittest.mock import patch
+
+    async def _fake_wait_for(*args, **kwargs):
+        """Yield control so the progress step is returned, then time out."""
+        await asyncio.sleep(0)
+        raise TimeoutError
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+
+    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_fake_wait_for):
+        result3 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={"next_step_id": "auth_callback"}
+        )
+        assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+        # Wait for the background task to process the timeout.
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+
+    # The flow should have been aborted by the timeout handler.
+    with pytest.raises(data_entry_flow.UnknownFlow):
+        hass.config_entries.flow.async_get(result["flow_id"])
+
+
 async def test_reauth_flow_updates_entry(hass: HomeAssistant, mock_auth, mock_setup_auth, mock_plants_service):
     """Reauth re-runs authorization and updates the existing entry in place (#14)."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
