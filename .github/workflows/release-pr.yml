@@ -28,7 +28,10 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v7
               with:
-                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+                  # Check out the branch, NOT the triggering SHA: the changelog
+                  # action runs `git pull --tags --ff-only`, which fails in a
+                  # detached HEAD ("You are not currently on a branch").
+                  ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
                   fetch-depth: 0
 
             - name: Conventional Changelog (no tag/release)
