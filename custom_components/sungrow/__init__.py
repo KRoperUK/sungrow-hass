@@ -22,6 +22,7 @@ from .const import (
     CONF_APP_KEY,
     CONF_APP_SECRET,
     CONF_GATEWAY,
+    CONF_SCAN_INTERVAL,
     DEFAULT_HOST,
     DOMAIN,
     GATEWAYS,
@@ -52,6 +53,17 @@ CONFIG_SCHEMA = IterableSchema({}, extra=vol.ALLOW_EXTRA)
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Sungrow iSolarCloud component."""
     hass.http.register_view(SungrowAuthCallbackView())
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old config entry versions to the current schema."""
+    if config_entry.version == 1:
+        # v1 stored scan_interval in minutes; v2 uses seconds.
+        old_interval = config_entry.options.get(CONF_SCAN_INTERVAL, 5)
+        new_options = {**config_entry.options, CONF_SCAN_INTERVAL: old_interval * 60}
+        hass.config_entries.async_update_entry(config_entry, options=new_options, version=2)
+        _LOGGER.info("Migrated scan_interval from %d minutes to %d seconds", old_interval, old_interval * 60)
     return True
 
 
