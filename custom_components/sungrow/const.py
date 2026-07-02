@@ -12,6 +12,7 @@ CONF_PASSWORD = "password"
 
 # Options
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_EXTRA_MEASURE_POINTS = "extra_measure_points"
 
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",

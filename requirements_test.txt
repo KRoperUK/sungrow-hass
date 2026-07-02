@@ -9,4 +9,4 @@ python-dotenv
 ruff
 
 # Component dependencies
-pysolarcloud==0.4.0
+sungrow-isolarcloud==0.5.0

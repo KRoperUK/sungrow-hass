@@ -13,7 +13,7 @@ from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import Plants
 
 from .auth import AUTH_ERRORS
-from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+from .const import CONF_EXTRA_MEASURE_POINTS, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,13 +54,16 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         self.plants_service = plants_service
         self.plant_id = plant_id
         self.plant_name = plant_name
+        self.extra_measure_points: dict[str, str] = dict(config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {}))
 
     async def _async_update_data(self):
         """Fetch data from the API for this plant."""
         try:
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
             # { "123": { "code1": {...}, "code2": {...} } }
-            all_plants_data = await self.plants_service.async_get_realtime_data([self.plant_id])
+            all_plants_data = await self.plants_service.async_get_realtime_data(
+                [self.plant_id], extra_measure_points=self.extra_measure_points or None
+            )
         except Exception as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err

@@ -8,7 +8,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pysolarcloud import PySolarCloudException
 
-from custom_components.sungrow.const import CONF_SCAN_INTERVAL
+from custom_components.sungrow.const import CONF_EXTRA_MEASURE_POINTS, CONF_SCAN_INTERVAL
 from custom_components.sungrow.coordinator import SungrowPlantCoordinator, is_auth_error
 
 from .conftest import MOCK_REALTIME_DATA
@@ -103,3 +103,28 @@ async def test_scan_interval_from_options(hass: HomeAssistant):
     entry = _make_entry({CONF_SCAN_INTERVAL: 30})
     coordinator = SungrowPlantCoordinator(hass, entry, MagicMock(), "1", "P")
     assert coordinator.update_interval.total_seconds() == 30 * 60
+
+
+async def test_extra_measure_points_passed_to_api(hass: HomeAssistant):
+    """Extra measure points from options are forwarded to pysolarcloud."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
+
+    entry = _make_entry({CONF_EXTRA_MEASURE_POINTS: {"99999": "battery_charge_power"}})
+    coordinator = SungrowPlantCoordinator(hass, entry, plants, "12345", "Test Plant")
+    await coordinator._async_update_data()
+
+    plants.async_get_realtime_data.assert_awaited_once_with(
+        ["12345"], extra_measure_points={"99999": "battery_charge_power"}
+    )
+
+
+async def test_extra_measure_points_empty_passes_none(hass: HomeAssistant):
+    """When no extra measure points are configured, None is passed to the API."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    await coordinator._async_update_data()
+
+    plants.async_get_realtime_data.assert_awaited_once_with(["12345"], extra_measure_points=None)

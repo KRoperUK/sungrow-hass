@@ -71,6 +71,12 @@ MOCK_REALTIME_DATA = {
             "unit": "",
             "name": "Device Status",
         },
+        "total_field_energy_storage_active_power": {
+            "code": "total_field_energy_storage_active_power",
+            "value": "-1.4",
+            "unit": "kW",
+            "name": "Total Field Energy Storage Active Power",
+        },
     },
     "67890": {
         "total_active_power": {
@@ -180,12 +186,23 @@ def mock_auth_no_tokens(mock_auth):
 
 @pytest.fixture
 def mock_plants_service():
-    """Mock the Plants service used during entry setup (patches __init__ module)."""
-    with patch("custom_components.sungrow.Plants") as mock_plants_cls:
+    """Mock the Plants and Control services used during entry setup."""
+    with (
+        patch("custom_components.sungrow.Plants") as mock_plants_cls,
+        patch("custom_components.sungrow.Control") as mock_control_cls,
+    ):
         plants_instance = MagicMock()
         plants_instance.async_get_plants = AsyncMock(return_value=MOCK_PLANT_LIST)
         plants_instance.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+        plants_instance.async_get_plant_devices = AsyncMock(return_value=[])
         mock_plants_cls.return_value = plants_instance
+
+        control_instance = MagicMock()
+        control_instance.async_update_parameters = AsyncMock(return_value=[])
+        control_instance.async_heartbeat = AsyncMock()
+        control_instance.heartbeat_loop = AsyncMock()
+        mock_control_cls.return_value = control_instance
+
         yield plants_instance
 
 
