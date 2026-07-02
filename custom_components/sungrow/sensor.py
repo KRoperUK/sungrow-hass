@@ -10,8 +10,11 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import SungrowPlantCoordinator
+from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
+
+# Sensors are read-only and updated in bulk by the coordinator, so no per-entity
+# write parallelism limit is needed.
+PARALLEL_UPDATES = 0
 
 # Friendly names for point codes that are otherwise opaque or overly generic.
 # These are applied in addition to the code-based naming, so existing entities
@@ -110,8 +113,9 @@ def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceC
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensors from the coordinators created during entry setup."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinators: list[SungrowPlantCoordinator] = entry_data["coordinators"]
+    coordinators = entry.runtime_data.coordinators
+    # Point the device "Visit" link at the region's iSolarCloud web console.
+    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY), DEFAULT_CONSOLE_URL)
 
     entities: list[SungrowSensor] = []
     for coordinator in coordinators:
@@ -122,7 +126,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
         for point_code, point_data in coordinator.data.items():
             entities.append(
-                SungrowSensor(coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data)
+                SungrowSensor(
+                    coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
+                )
             )
 
     async_add_entities(entities)
@@ -133,7 +139,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
     has_entity_name = True
 
-    def __init__(self, coordinator, point_code, plant_id, plant_name, init_data):
+    def __init__(self, coordinator, point_code, plant_id, plant_name, init_data, console_url=DEFAULT_CONSOLE_URL):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.point_code = point_code
@@ -163,7 +169,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             name=plant_name,
             manufacturer="Sungrow",
             entry_type=DeviceEntryType.SERVICE,
-            configuration_url="https://isolarcloud.eu",
+            configuration_url=console_url,
         )
 
         # Programmatically hide sensors that are "Unknown" at first setup

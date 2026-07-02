@@ -18,20 +18,29 @@ from .coordinator import SungrowPlantCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Dispatch writes go to a single device via one Control client; serialise them so
+# rapid slider changes don't race on the API.
+PARALLEL_UPDATES = 1
+
+# Conservative default upper bound (watts) for charge/discharge power. iSolarCloud
+# does not expose the per-device inverter rating through the realtime API, so this
+# is a fixed clamp rather than a derived limit. Users with larger inverters can
+# still command higher power via the underlying API; adjust here if a rating source
+# becomes available.
+DEFAULT_MAX_DISPATCH_POWER = 5000
+
 # Number parameters exposed as HA Number entities.
 # Keys are canonical Control parameter names; values describe the HA entity.
 DISPATCH_NUMBERS: dict[str, dict] = {
     "charge_discharge_power": {
-        "name": "Charge/Discharge Power",
         "device_class": NumberDeviceClass.POWER,
         "native_unit_of_measurement": "W",
         "native_min_value": 0,
-        "native_max_value": 5000,
+        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
         "native_step": 100,
         "mode": NumberMode.SLIDER,
     },
     "soc_upper_limit": {
-        "name": "SOC Upper Limit",
         "device_class": NumberDeviceClass.BATTERY,
         "native_unit_of_measurement": "%",
         "native_min_value": 70,
@@ -40,7 +49,6 @@ DISPATCH_NUMBERS: dict[str, dict] = {
         "mode": NumberMode.SLIDER,
     },
     "soc_lower_limit": {
-        "name": "SOC Lower Limit",
         "device_class": NumberDeviceClass.BATTERY,
         "native_unit_of_measurement": "%",
         "native_min_value": 0,
@@ -49,7 +57,6 @@ DISPATCH_NUMBERS: dict[str, dict] = {
         "mode": NumberMode.SLIDER,
     },
     "forced_charging_target_soc_1": {
-        "name": "Forced Charge Target SOC",
         "device_class": NumberDeviceClass.BATTERY,
         "native_unit_of_measurement": "%",
         "native_min_value": 0,
@@ -62,10 +69,10 @@ DISPATCH_NUMBERS: dict[str, dict] = {
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow dispatch number entities."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    control: Control = entry_data["control"]
-    devices_by_plant: dict[str, list[dict]] = entry_data["devices"]
-    coordinators: list[SungrowPlantCoordinator] = entry_data["coordinators"]
+    data = entry.runtime_data
+    control = data.control
+    devices_by_plant = data.devices
+    coordinators = data.coordinators
 
     entities: list[NumberEntity] = []
     for coordinator in coordinators:
@@ -114,12 +121,15 @@ class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
         self.control = control
         self.device_uuid = device_uuid
         self.param = param
-        self._attr_name = meta["name"]
+        # Entity name comes from translations (entity.number.<param>.name).
+        self._attr_translation_key = param
         self._attr_unique_id = f"{coordinator.plant_id}_{device_uuid}_{param}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_uuid)},
             name=device_name,
             manufacturer="Sungrow",
+            # Nest the dispatch device under the plant device the sensors created.
+            via_device=(DOMAIN, coordinator.plant_id),
         )
         self._attr_device_class = meta.get("device_class")
         self._attr_native_unit_of_measurement = meta.get("native_unit_of_measurement")

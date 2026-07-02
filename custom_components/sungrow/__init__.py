@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
 import voluptuous as vol
 from aiohttp import web
@@ -36,6 +37,20 @@ PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 HEARTBEAT_STOP_TIMEOUT = 10
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class SungrowData:
+    """Runtime data stored on the config entry (``entry.runtime_data``)."""
+
+    coordinators: list[SungrowPlantCoordinator]
+    control: Control
+    devices: dict[str, list[dict]]
+    # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
+    heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task]] = field(default_factory=dict)
+
+
+type SungrowConfigEntry = ConfigEntry[SungrowData]
 
 
 class IterableSchema(vol.Schema):
@@ -71,7 +86,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
     if "tokens" not in entry.data:
         # Nothing to authenticate with — ask the user to re-authorize.
@@ -127,13 +142,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
             devices_by_plant[plant_id] = []
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinators": coordinators,
-        "control": control_service,
-        "devices": devices_by_plant,
-        # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
-        "heartbeats": {},
-    }
+    entry.runtime_data = SungrowData(
+        coordinators=coordinators,
+        control=control_service,
+        devices=devices_by_plant,
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -143,21 +156,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-    heartbeats = entry_data.get("heartbeats", {})
+    heartbeats = entry.runtime_data.heartbeats
     for heartbeat in list(heartbeats.values()):
         await _stop_heartbeat(heartbeat)
     heartbeats.clear()
 
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_reload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
     """Reload the config entry when its options change."""
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -179,11 +188,11 @@ async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task]) -> None
 
 
 async def async_start_heartbeat(
-    hass: HomeAssistant, entry: ConfigEntry, plant_id: str, device_uuid: str, interval: int
+    hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str, device_uuid: str, interval: int
 ) -> None:
     """Start (or restart) the EMS heartbeat loop for a plant/device."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    heartbeats = entry_data["heartbeats"]
+    data = entry.runtime_data
+    heartbeats = data.heartbeats
 
     # Stop any existing loop for this plant and wait for it to exit before
     # starting a new one, so two loops never run for the same device.
@@ -192,7 +201,7 @@ async def async_start_heartbeat(
         await _stop_heartbeat(existing)
 
     stop_event = asyncio.Event()
-    control: Control = entry_data["control"]
+    control: Control = data.control
     # Tracked by the config entry so HA cancels it automatically on unload.
     task = entry.async_create_background_task(
         hass,
@@ -202,10 +211,9 @@ async def async_start_heartbeat(
     heartbeats[plant_id] = (stop_event, task)
 
 
-async def async_stop_heartbeat(hass: HomeAssistant, entry: ConfigEntry, plant_id: str) -> None:
+async def async_stop_heartbeat(hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str) -> None:
     """Stop the EMS heartbeat loop for a plant."""
-    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-    heartbeats = entry_data.get("heartbeats", {})
+    heartbeats = entry.runtime_data.heartbeats
     heartbeat = heartbeats.pop(plant_id, None)
     if heartbeat is not None:
         await _stop_heartbeat(heartbeat)

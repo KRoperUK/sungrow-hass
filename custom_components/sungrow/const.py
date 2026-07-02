@@ -4,11 +4,8 @@ DOMAIN = "sungrow"
 CONF_APP_KEY = "app_key"
 CONF_APP_SECRET = "app_secret"
 CONF_APP_ID = "app_id"
-CONF_AUTH_URL = "auth_url_input"
 CONF_GATEWAY = "gateway"
 CONF_REDIRECT_URI = "redirect_uri"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
 
 # Options
 CONF_SCAN_INTERVAL = "scan_interval"
@@ -21,7 +18,17 @@ GATEWAYS = {
     "Australia": "https://augateway.isolarcloud.com",
 }
 
+# Web console URL per region, used as the device `configuration_url` so the
+# "Visit device" link points at the right regional iSolarCloud portal.
+GATEWAY_CONSOLE_URLS = {
+    "Europe": "https://isolarcloud.eu",
+    "International": "https://isolarcloud.com.hk",
+    "China": "https://isolarcloud.com",
+    "Australia": "https://au.isolarcloud.com",
+}
+
 DEFAULT_HOST = GATEWAYS["Europe"]
+DEFAULT_CONSOLE_URL = GATEWAY_CONSOLE_URLS["Europe"]
 
 # Polling interval (seconds). iSolarCloud allows ~2000 calls/hour on the free plan,
 # so the minimum is capped at 10 s to prevent accidental quota exhaustion.

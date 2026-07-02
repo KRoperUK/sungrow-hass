@@ -7,6 +7,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sungrow import SungrowData
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.number import DISPATCH_NUMBERS
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
@@ -25,17 +26,19 @@ def _coordinator_with(plant_id, plant_name):
     return coordinator
 
 
-def _entry_data_for(devices):
+def _setup_entry_data(entry, devices) -> SungrowData:
+    """Build a SungrowData and attach it to the entry as runtime_data."""
     control = MagicMock()
     control.async_update_parameters = AsyncMock(return_value=[])
     control.async_heartbeat = AsyncMock()
     control.heartbeat_loop = AsyncMock()
-    return {
-        "coordinators": [_coordinator_with("12345", "Test Plant")],
-        "control": control,
-        "devices": {"12345": devices},
-        "heartbeats": {},
-    }
+    data = SungrowData(
+        coordinators=[_coordinator_with("12345", "Test Plant")],
+        control=control,
+        devices={"12345": devices},
+    )
+    entry.runtime_data = data
+    return data
 
 
 async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant):
@@ -43,7 +46,7 @@ async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM", "device_name": "Inverter 1"}]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+    _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -59,7 +62,7 @@ async def test_number_setup_falls_back_to_inverter(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-2", "device_type": "INVERTER"}]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+    _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -71,7 +74,7 @@ async def test_number_setup_no_devices(hass: HomeAssistant):
     """No dispatch numbers are created when no dispatchable devices are found."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for([])
+    _setup_entry_data(entry, [])
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -84,8 +87,7 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    entry_data = _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -94,7 +96,7 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
         await power.async_set_native_value(2500)
 
-    entry_data["control"].async_update_parameters.assert_awaited_once_with(
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1", {"charge_discharge_power": "2500"}
     )
 
@@ -104,8 +106,7 @@ async def test_number_starts_heartbeat_for_power_changes(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -123,7 +124,7 @@ async def test_number_availability_follows_coordinator(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+    _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -144,7 +145,7 @@ async def test_select_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+    _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -160,8 +161,7 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    entry_data = _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -170,7 +170,7 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
         await command.async_select_option("Charge")
 
-    entry_data["control"].async_update_parameters.assert_awaited_once_with(
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1", {"charge_discharge_command": "170"}
     )
 
@@ -180,8 +180,7 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -199,7 +198,7 @@ async def test_select_availability_follows_coordinator(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+    _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -219,8 +218,7 @@ async def test_select_removal_stops_heartbeat(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -238,8 +236,7 @@ async def test_entity_removal_stops_heartbeat(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    entry_data = _entry_data_for(devices)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+    _setup_entry_data(entry, devices)
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))

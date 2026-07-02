@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.sungrow.const import DOMAIN
+from custom_components.sungrow import SungrowData
 from custom_components.sungrow.diagnostics import async_get_config_entry_diagnostics
 
 
@@ -31,10 +31,11 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
 
     coordinator = _make_coordinator("123", "Test Plant", {"total_active_power": {"value": "1.23"}})
 
-    hass.data.setdefault(DOMAIN, {})["test_entry"] = {
-        "coordinators": [coordinator],
-        "devices": {"123": [{"uuid": "dev-1", "device_name": "Inverter"}]},
-    }
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator],
+        control=MagicMock(),
+        devices={"123": [{"uuid": "dev-1", "device_name": "Inverter"}]},
+    )
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
