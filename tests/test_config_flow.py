@@ -200,6 +200,38 @@ async def test_auth_step_library_missing(hass: HomeAssistant):
     assert result2["reason"] == "library_missing"
 
 
+def _flow_at_finish(hass: HomeAssistant):
+    """Build a config flow primed to run async_step_finish in isolation."""
+    from custom_components.sungrow.config_flow import SungrowConfigFlow
+
+    flow = SungrowConfigFlow()
+    flow.hass = hass
+    flow.init_info = dict(MOCK_USER_INPUT)
+    flow.context = {}
+    return flow
+
+
+async def test_finish_step_library_missing(hass: HomeAssistant):
+    """async_step_finish aborts with library_missing when the library is gone."""
+    flow = _flow_at_finish(hass)
+    flow.context["code"] = "some_code"
+    with patch("custom_components.sungrow.config_flow.Auth", None):
+        result = await flow.async_step_finish()
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "library_missing"
+
+
+async def test_finish_step_missing_code(hass: HomeAssistant, mock_auth):
+    """async_step_finish aborts with missing_code when no code reached the step."""
+    flow = _flow_at_finish(hass)
+    # No "code" in context.
+    result = await flow.async_step_finish()
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "missing_code"
+
+
 # ---------------------------------------------------------------------------
 # Auth URL from URL with code in fragment
 # ---------------------------------------------------------------------------
