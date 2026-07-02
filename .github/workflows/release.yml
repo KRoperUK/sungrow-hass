@@ -24,10 +24,10 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v7
               with:
-                  # On a branch (not the detached SHA) so the changelog action's
-                  # `git pull --tags --ff-only` works, and with full history so it
-                  # can compute the next version from the commit log.
-                  ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+                  # Immutable SHA of the commit that passed CI, with full history
+                  # + tags so the changelog action can compute the next version
+                  # (it runs with skip-git-pull, so a detached HEAD is fine).
+                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
                   fetch-depth: 0
 
             # Compute the next (unreleased) version from conventional commits, the
@@ -46,6 +46,7 @@ jobs:
                   skip-version-file: true
                   skip-commit: true
                   skip-tag: true
+                  skip-git-pull: true
                   output-file: false
 
             - name: Build dev tag

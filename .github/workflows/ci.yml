@@ -109,10 +109,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Check out the PR branch (same-repo only, per the job guard) so we are
-          # on a real branch — the changelog action's `git pull --tags --ff-only`
-          # fails in detached HEAD — and with full history to compute the version.
-          ref: ${{ github.head_ref }}
+          # Check out the immutable head SHA, not the branch name: a CI run can
+          # race with the PR merging, which deletes the branch, after which
+          # github.head_ref no longer resolves ("could not be found").
+          # fetch-depth: 0 gives full history + tags so the changelog action can
+          # run with skip-git-pull (it doesn't need to be on a branch).
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       # Compute the next (unreleased) version from conventional commits so the PR
@@ -130,6 +132,7 @@ jobs:
           skip-version-file: true
           skip-commit: true
           skip-tag: true
+          skip-git-pull: true
           output-file: false
 
       - name: Build dev tag
@@ -138,6 +141,7 @@ jobs:
         # the script — an attacker-controlled branch name would be shell-injected.
         env:
           BRANCH_RAW: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # No releasable commits -> no bump; fall back to the manifest version.
           if [ "${{ steps.nextver.outputs.skipped }}" = "true" ]; then
@@ -145,7 +149,7 @@ jobs:
           else
             VERSION="${{ steps.nextver.outputs.version }}"
           fi
-          SHA="${GITHUB_SHA::7}"
+          SHA="${HEAD_SHA::7}"
           BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
           TAG="dev-${BRANCH}-v${VERSION}-${SHA}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
