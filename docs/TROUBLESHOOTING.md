@@ -37,15 +37,17 @@ by the integration itself.
    exchange. Scheme (`http`/`https`), host/IP, and path must all match.
    - Local: `http://homeassistant.local:8123/api/sungrow_hass/callback`
    - Nabu Casa: `https://<your-id>.ui.nabu.casa/api/sungrow_hass/callback`
-5. **Try automatic authorization first.** The config flow can capture the
-   authorization code automatically when iSolarCloud redirects back to
-   `/api/sungrow_hass/callback`. If this does not complete, use **Enter code
-   manually** and paste the `code` value from the URL bar (or paste the whole URL;
-   the integration extracts the code for you).
-6. If automatic authorization never completes, iSolarCloud may be stripping the
-   `flow_id` query parameter from the redirect URI. In that case rely on the
-   **Enter code manually** option and make sure the base redirect URI still
-   matches the developer portal exactly.
+5. **Automatic authorization runs first.** After you submit your credentials the
+   config flow shows a *Waiting for authorization* screen and captures the code
+   automatically when iSolarCloud redirects back to `/api/sungrow_hass/callback`.
+   You only need to log in and approve the app in the browser.
+6. **Manual entry is the fallback.** If the redirect does not complete (for
+   example the callback endpoint returns an error, or iSolarCloud strips the
+   `flow_id` query parameter), the flow automatically switches to an *Enter
+   Authorization Code* form after a short wait. Paste the `code` value from the
+   URL bar there — or paste the whole redirect URL and the integration extracts
+   the code for you. Make sure the base redirect URI still matches the developer
+   portal exactly.
 
 ---
 

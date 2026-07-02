@@ -145,36 +145,29 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.auth_client.auth_url(callback_redirect)
 
     async def async_step_auth(self, user_input: dict[str, Any] | None = None):
-        """Choose how to complete the OAuth authorization."""
+        """Begin authorization by automatically waiting for the OAuth redirect.
+
+        No menu is shown: the callback listener starts immediately so the user
+        only has to approve the app in their browser. If the redirect never
+        arrives (e.g. the callback endpoint is unreachable), the flow falls back
+        to manual entry so the user can paste the code or full redirect URL.
+        """
         if not self._ensure_auth_client():
             return self.async_abort(reason="library_missing")
-
-        if user_input is not None:
-            # Menu selections arrive as {"next_step_id": "..."}
-            next_step = user_input.get("next_step_id")
-            method = "manual" if next_step == "auth_manual" else "callback"
-            self.context["method"] = method
-            if method == "manual":
-                return await self.async_step_auth_manual()
-            return await self.async_step_auth_callback()
-
-        auth_url = self._auth_url_with_flow_id()
-        return self.async_show_menu(
-            step_id="auth",
-            menu_options=["auth_callback", "auth_manual"],
-            description_placeholders={"auth_url": auth_url},
-        )
+        return await self.async_step_auth_callback()
 
     async def async_step_auth_callback(self, user_input: dict[str, Any] | None = None):
         """Wait for iSolarCloud to redirect back to the callback endpoint.
 
         The callback view extracts the authorization code and calls
         async_configure, which re-enters this step with user_input={"code": ...}.
-        If the callback does not arrive within five minutes, the flow aborts so
-        the user can restart and choose the manual code entry option.
+        If the callback does not arrive within the timeout, the flow falls back
+        to the manual code-entry form instead of aborting.
         """
         if self.context.get("callback_timeout"):
-            return self.async_abort(reason="callback_timeout")
+            # The redirect never arrived — hand off to manual code entry so the
+            # user can paste the authorization code or full redirect URL.
+            return self.async_show_progress_done(next_step_id="auth_manual")
         if user_input is not None and user_input.get("code"):
             self.context["code"] = user_input["code"]
             return self.async_show_progress_done(next_step_id="finish")
@@ -189,7 +182,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         async def _wait_for_callback() -> None:
             """Resume the flow once the OAuth callback delivers a code."""
             try:
-                code = await asyncio.wait_for(future, timeout=300)
+                code = await asyncio.wait_for(future, timeout=120)
             except TimeoutError:
                 _LOGGER.warning("OAuth callback not received within timeout for flow %s", self.flow_id)
                 self.context["callback_timeout"] = True
@@ -217,8 +210,11 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_auth_manual(self, user_input: dict[str, Any] | None = None):
-        """Handle manual entry of the authorization code or full redirect URL."""
-        self.context["method"] = "manual"
+        """Handle manual entry of the authorization code or full redirect URL.
+
+        Reached as a fallback when the automatic redirect does not complete, or
+        when the user wants to paste the code themselves.
+        """
         errors = {}
 
         if user_input is not None and user_input.get("code"):
@@ -257,20 +253,18 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _finish_error_result(self, error_key: str):
-        """Return a user-facing result for an authorization failure.
+        """Return the manual code-entry form with an error so the user can retry.
 
-        Manual-entry users are sent back to the code form so they can retry;
-        automatic-callback users get an abort because there is no form to return to.
+        Both the automatic and manual paths land here on failure; showing the
+        manual form lets the user paste a fresh code or full redirect URL.
         """
-        if self.context.get("method") == "manual":
-            auth_url = self._auth_url_with_flow_id()
-            return self.async_show_form(
-                step_id="auth_manual",
-                description_placeholders={"auth_url": auth_url},
-                data_schema=vol.Schema({vol.Optional("code"): str}),
-                errors={"base": error_key},
-            )
-        return self.async_abort(reason=error_key)
+        auth_url = self._auth_url_with_flow_id()
+        return self.async_show_form(
+            step_id="auth_manual",
+            description_placeholders={"auth_url": auth_url},
+            data_schema=vol.Schema({vol.Optional("code"): str}),
+            errors={"base": error_key},
+        )
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None):
         """Exchange the authorization code for tokens and create the config entry."""

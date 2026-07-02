@@ -47,7 +47,7 @@ async def test_user_step_shows_form(hass: HomeAssistant):
 
 
 async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):
-    """Test submitting user form advances to the auth menu."""
+    """Test submitting the user form starts the automatic callback wait."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
     result2 = await hass.config_entries.flow.async_configure(
@@ -55,8 +55,9 @@ async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):
         user_input=MOCK_USER_INPUT,
     )
 
-    assert result2["type"] == data_entry_flow.FlowResultType.MENU
-    assert result2["step_id"] == "auth"
+    # No menu: the flow automatically waits for the OAuth redirect.
+    assert result2["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+    assert result2["step_id"] == "auth_callback"
     # The auth URL should be present in description placeholders
     assert "auth_url" in result2["description_placeholders"]
 
@@ -67,25 +68,14 @@ async def test_user_step_advances_to_auth(hass: HomeAssistant, mock_auth):
 
 
 async def test_auth_step_success(hass: HomeAssistant, mock_auth):
-    """Test a full successful flow: user -> auth menu -> manual -> entry created."""
+    """Test a full successful flow via the manual fallback: user -> manual -> entry created."""
     # Step 1: init
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
-    # Step 2: submit user info -> auth menu
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input=MOCK_USER_INPUT,
-    )
-    assert result2["step_id"] == "auth"
+    # Step 2: submit user info; the automatic wait times out and drops to manual entry.
+    await _navigate_to_auth_manual(hass, result["flow_id"])
 
-    # Step 3: choose manual entry
-    result3 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={"next_step_id": "auth_manual"},
-    )
-    assert result3["step_id"] == "auth_manual"
-
-    # Step 4: submit the auth code
+    # Step 3: submit the auth code
     with patch("custom_components.sungrow.async_setup_entry", return_value=True):
         result4 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -107,8 +97,7 @@ async def test_auth_step_success(hass: HomeAssistant, mock_auth):
 async def test_auth_step_extracts_code_from_url(hass: HomeAssistant, mock_auth):
     """Test that pasting a full callback URL extracts the code automatically."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"next_step_id": "auth_manual"})
+    await _navigate_to_auth_manual(hass, result["flow_id"])
 
     callback_url = "http://homeassistant.local:8123/api/sungrow_hass/callback?code=extracted_code&flow_id=123"
     with patch("custom_components.sungrow.async_setup_entry", return_value=True):
@@ -131,9 +120,20 @@ async def test_auth_step_extracts_code_from_url(hass: HomeAssistant, mock_auth):
 
 
 async def _navigate_to_auth_manual(hass: HomeAssistant, flow_id: str):
-    """Helper: move from the auth menu to the manual code entry step."""
-    await hass.config_entries.flow.async_configure(flow_id, user_input=MOCK_USER_INPUT)
-    await hass.config_entries.flow.async_configure(flow_id, user_input={"next_step_id": "auth_manual"})
+    """Helper: drive the flow to the manual code-entry step via a callback timeout.
+
+    Submitting the user form starts the automatic callback wait; forcing that
+    wait to time out drops the flow to the manual code-entry form.
+    """
+
+    async def _timeout(*args, **kwargs):
+        await asyncio.sleep(0)
+        raise TimeoutError
+
+    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_timeout):
+        await hass.config_entries.flow.async_configure(flow_id, user_input=MOCK_USER_INPUT)
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
 
 
 async def test_auth_step_no_tokens(hass: HomeAssistant, mock_auth_no_tokens):
@@ -252,8 +252,7 @@ async def test_user_step_aborts_if_already_configured(hass: HomeAssistant, mock_
     existing.add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"next_step_id": "auth_manual"})
+    await _navigate_to_auth_manual(hass, result["flow_id"])
     result4 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input={"code": "auth_code_from_provider"},
@@ -279,13 +278,10 @@ async def test_auth_url_includes_flow_id(hass: HomeAssistant, mock_auth):
 
 
 async def test_auth_callback_step_registers_future(hass: HomeAssistant, mock_auth):
-    """Test choosing automatic authorization registers a callback future."""
+    """Test the automatic auth step registers a callback future."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+    result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
 
-    result3 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={"next_step_id": "auth_callback"}
-    )
     assert result3["step_id"] == "auth_callback"
     assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
 
@@ -299,10 +295,7 @@ async def test_callback_view_resumes_flow(hass: HomeAssistant, mock_auth):
     from custom_components.sungrow import SungrowAuthCallbackView
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
-    result3 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={"next_step_id": "auth_callback"}
-    )
+    result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
     assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
 
     request = MagicMock()
@@ -325,10 +318,7 @@ async def test_callback_view_resumes_flow_without_flow_id(hass: HomeAssistant, m
     from custom_components.sungrow import SungrowAuthCallbackView
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
-    result3 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={"next_step_id": "auth_callback"}
-    )
+    result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
     assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
 
     request = MagicMock()
@@ -359,9 +349,8 @@ async def test_callback_view_rejects_unknown_flow(hass: HomeAssistant, mock_auth
     assert response.status == 400
 
 
-async def test_auth_callback_timeout_aborts_flow(hass: HomeAssistant, mock_auth):
-    """Test that a missing callback within the timeout aborts the flow."""
-    from unittest.mock import patch
+async def test_auth_callback_timeout_falls_back_to_manual(hass: HomeAssistant, mock_auth):
+    """Test that a missing callback within the timeout drops to manual code entry."""
 
     async def _fake_wait_for(*args, **kwargs):
         """Yield control so the progress step is returned, then time out."""
@@ -369,20 +358,17 @@ async def test_auth_callback_timeout_aborts_flow(hass: HomeAssistant, mock_auth)
         raise TimeoutError
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
 
     with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_fake_wait_for):
-        result3 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input={"next_step_id": "auth_callback"}
-        )
-        assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+        result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+        assert result2["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
         # Wait for the background task to process the timeout.
         await hass.async_block_till_done()
         await hass.async_block_till_done()
 
-    # The flow should have been aborted by the timeout handler.
-    with pytest.raises(data_entry_flow.UnknownFlow):
-        hass.config_entries.flow.async_get(result["flow_id"])
+    # The flow should have fallen back to the manual code-entry form.
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["step_id"] == "auth_manual"
 
 
 async def test_reauth_flow_updates_entry(hass: HomeAssistant, mock_auth, mock_setup_auth, mock_plants_service):
@@ -390,16 +376,21 @@ async def test_reauth_flow_updates_entry(hass: HomeAssistant, mock_auth, mock_se
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
 
-    result = await entry.start_reauth_flow(hass)
-    assert result["type"] == data_entry_flow.FlowResultType.MENU
-    assert result["step_id"] == "auth"
+    async def _timeout(*args, **kwargs):
+        await asyncio.sleep(0)
+        raise TimeoutError
 
-    # Choose manual entry and provide a fresh authorization code.
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={"next_step_id": "auth_manual"}
-    )
-    assert result2["step_id"] == "auth_manual"
+    # Reauth starts the automatic wait; force it to time out so we land on manual entry.
+    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_timeout):
+        result = await entry.start_reauth_flow(hass)
+        assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
 
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["step_id"] == "auth_manual"
+
+    # Provide a fresh authorization code via manual entry.
     mock_auth.tokens = {"access_token": "fresh_token", "refresh_token": "fresh_refresh", "expires_at": 9999999999}
     result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"code": "fresh_code"})
     await hass.async_block_till_done()
