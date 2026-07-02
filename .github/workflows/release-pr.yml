@@ -64,8 +64,11 @@ jobs:
 
             - name: Sync versions to manifest and pyproject
               if: steps.changelog.outputs.skipped != 'true'
+              # Pass the computed version via env, not inline ${{ }}, so it can't be
+              # shell-injected.
+              env:
+                  VERSION: ${{ steps.changelog.outputs.version }}
               run: |
-                  VERSION="${{ steps.changelog.outputs.version }}"
                   # Update manifest.json (preserving quotes and comma)
                   sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" custom_components/sungrow/manifest.json
                   # Update pyproject.toml
