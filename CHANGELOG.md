@@ -1,16 +1,18 @@
-## [1.1.1](https://github.com/KRoperUK/sungrow-hass/compare/v1.1.0...v1.1.1) (2026-07-02)
+## [2.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v2.0.0) (2026-07-02)
 
 
-### Bug Fixes
+### ⚠ BREAKING CHANGES
 
-* register OAuth callback view during the config flow (first-install 404) ([#69](https://github.com/KRoperUK/sungrow-hass/issues/69)) ([329a155](https://github.com/KRoperUK/sungrow-hass/commit/329a155750d9f4be83a85dc3b5e17e73d3dff474))
+* first-time setup now creates the hub immediately and completes
+authorization via a follow-up reauth prompt, instead of authorizing inside the
+initial config flow. Existing configured entries are unaffected.
 
-## [1.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v1.1.0) (2026-07-02)
-
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
 
 ### Features
 
 * auto-start OAuth redirect with manual code/URL fallback ([#46](https://github.com/KRoperUK/sungrow-hass/issues/46)) ([492fa4a](https://github.com/KRoperUK/sungrow-hass/commit/492fa4a5e85d47a2b1fb52922a9296d3a982bb6b))
+* create the hub first, then authorize via reauth ([#71](https://github.com/KRoperUK/sungrow-hass/issues/71)) ([579479b](https://github.com/KRoperUK/sungrow-hass/commit/579479ba21a0e7801fd0036e26e0ef1c4027963a))
 * **diagnostics:** capture all devices + per-device realtime for [#18](https://github.com/KRoperUK/sungrow-hass/issues/18) ([#67](https://github.com/KRoperUK/sungrow-hass/issues/67)) ([4d4dd54](https://github.com/KRoperUK/sungrow-hass/commit/4d4dd546ba6509ad9f96f5741ec7d8be57a6c690))
 * harden OAuth callback, expand tests, add repo hygiene ([#38](https://github.com/KRoperUK/sungrow-hass/issues/38)) ([ebb9968](https://github.com/KRoperUK/sungrow-hass/commit/ebb9968e68416678eaca2a1081e3010f85334e7f)), closes [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)
 * Home Assistant quality-scale compliance (Batch B) ([#62](https://github.com/KRoperUK/sungrow-hass/issues/62)) ([c956194](https://github.com/KRoperUK/sungrow-hass/commit/c9561943f656448d0c9ceaff4a4b55bd3e365643)), closes [#50](https://github.com/KRoperUK/sungrow-hass/issues/50)
@@ -23,6 +25,8 @@
 * **dispatch:** select ESS device when device_type is a DeviceType enum ([#68](https://github.com/KRoperUK/sungrow-hass/issues/68)) ([6919bf3](https://github.com/KRoperUK/sungrow-hass/commit/6919bf3448fd88925a24d2e3f50e3f421e283df0))
 * handle OAuth callback when iSolarCloud strips flow_id query param ([#41](https://github.com/KRoperUK/sungrow-hass/issues/41)) ([cf5ef83](https://github.com/KRoperUK/sungrow-hass/commit/cf5ef83de298370cd3689feb495c7b5bc03826e1))
 * harden heartbeat lifecycle, entity availability, and secret logging ([#48](https://github.com/KRoperUK/sungrow-hass/issues/48)) ([51dee14](https://github.com/KRoperUK/sungrow-hass/commit/51dee1448cd866f110e41c5f6675bbdbc8274f9a))
+* register OAuth callback view during the config flow (first-install 404) ([#69](https://github.com/KRoperUK/sungrow-hass/issues/69)) ([329a155](https://github.com/KRoperUK/sungrow-hass/commit/329a155750d9f4be83a85dc3b5e17e73d3dff474))
+* use one bare redirect_uri for auth + token exchange (invalid auth) ([#73](https://github.com/KRoperUK/sungrow-hass/issues/73)) ([3b979c2](https://github.com/KRoperUK/sungrow-hass/commit/3b979c28ca92093d36bd7125d0fe33c07260cb56))
 
 ## [1.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v0.2.3...v1.0.0) (2026-07-02)
 
@@ -43,4 +47,11 @@
 
 * persist refreshed tokens and harden setup ([#23](https://github.com/KRoperUK/sungrow-hass/issues/23)) ([2d579fd](https://github.com/KRoperUK/sungrow-hass/commit/2d579fd3af9ca2ba3836fe3ccaa2963683d69d7b)), closes [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21)
 * resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
+* resolved hassfest warnings ([74dc412](https://github.com/KRoperUK/sungrow-hass/commit/74dc4123499d2dc1d3cebec0e4597e84488bb81c))
+* resolved hassfest warnings ([44fe5dd](https://github.com/KRoperUK/sungrow-hass/commit/44fe5dd5ee630ed191f25ee63a3c56a648137800))
+* resolved hassfest warnings ([990fce2](https://github.com/KRoperUK/sungrow-hass/commit/990fce2292a68b95790e12745d3ee3b0b29da69b))
+* resolved hassfest warnings ([492d444](https://github.com/KRoperUK/sungrow-hass/commit/492d444aee493ec3485c22d623be6cc3a63827a2))
+* resolved hassfest warnings ([fe118f3](https://github.com/KRoperUK/sungrow-hass/commit/fe118f39de2c4413bad1176558eec599a3f1d7bb))
+* resolved hassfest warnings ([9b62243](https://github.com/KRoperUK/sungrow-hass/commit/9b622435faf635d17245d4aeac1d8d7fcc1006de))
+* resolved hassfest warnings ([704e48c](https://github.com/KRoperUK/sungrow-hass/commit/704e48c9e59fe5b8c76cb164e870ac8179f2807b))
 
