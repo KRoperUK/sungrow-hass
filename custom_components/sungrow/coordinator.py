@@ -43,12 +43,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         plant_name: str,
     ) -> None:
         """Initialize the coordinator."""
-        scan_minutes = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
             name=f"Sungrow Plant {plant_name}",
-            update_interval=timedelta(minutes=scan_minutes),
+            update_interval=timedelta(seconds=scan_seconds),
             config_entry=config_entry,
         )
         self.plants_service = plants_service

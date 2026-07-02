@@ -55,9 +55,9 @@
     "step": {
       "init": {
         "title": "Sungrow Options",
-        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota.",
+        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota. The free plan allows ~2000 calls/hour; the minimum is 10 seconds.",
         "data": {
-          "scan_interval": "Polling interval (minutes)",
+          "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)"
         }
       }

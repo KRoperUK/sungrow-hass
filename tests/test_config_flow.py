@@ -443,7 +443,7 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
     result2 = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
-            CONF_SCAN_INTERVAL: 5,
+            CONF_SCAN_INTERVAL: 30,
             CONF_EXTRA_MEASURE_POINTS: "99999=battery_charge_power, 99998=battery_discharge_power",
         },
     )
@@ -468,7 +468,7 @@ async def test_options_flow_rejects_invalid_extra_measure_points(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result2 = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={CONF_SCAN_INTERVAL: 5, CONF_EXTRA_MEASURE_POINTS: "not_a_mapping"},
+        user_input={CONF_SCAN_INTERVAL: 30, CONF_EXTRA_MEASURE_POINTS: "not_a_mapping"},
     )
 
     assert result2["type"] == data_entry_flow.FlowResultType.FORM

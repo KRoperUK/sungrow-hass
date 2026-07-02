@@ -120,7 +120,7 @@ async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth
     assert entry.state is ConfigEntryState.LOADED
     entry_data = hass.data[DOMAIN][entry.entry_id]
     coordinators = entry_data["coordinators"]
-    assert coordinators[0].update_interval.total_seconds() == 15 * 60
+    assert coordinators[0].update_interval.total_seconds() == 15
 
 
 # ---------------------------------------------------------------------------

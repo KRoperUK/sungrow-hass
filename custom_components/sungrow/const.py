@@ -23,8 +23,8 @@ GATEWAYS = {
 
 DEFAULT_HOST = GATEWAYS["Europe"]
 
-# Polling interval (minutes). iSolarCloud allows ~2000 calls/hour, so the default
-# is deliberately conservative; users can tune it via the integration options.
-DEFAULT_SCAN_INTERVAL = 5
-MIN_SCAN_INTERVAL = 1
-MAX_SCAN_INTERVAL = 1440
+# Polling interval (seconds). iSolarCloud allows ~2000 calls/hour on the free plan,
+# so the minimum is capped at 10 s to prevent accidental quota exhaustion.
+DEFAULT_SCAN_INTERVAL = 300
+MIN_SCAN_INTERVAL = 10
+MAX_SCAN_INTERVAL = 86400
