@@ -43,6 +43,16 @@ jobs:
                   prerelease: false
                   token: ${{ github.token }}
 
-            - name: Remove dev tag
+            - name: Delete dev pre-releases for this version
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
               run: |
-                  git push origin :refs/tags/dev-v${{ steps.version.outputs.version }} 2>/dev/null || true
+                  TAG_PREFIX="dev-v${{ steps.version.outputs.version }}-"
+                  echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
+                  gh release list --json tagName,isPrerelease \
+                    --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
+                  | while read -r tag; do
+                      echo "Deleting release and tag: ${tag}"
+                      gh release delete "$tag" --yes --cleanup-tag
+                    done
