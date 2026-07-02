@@ -10,6 +10,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow import SungrowData
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.sensor import (
+    SungrowDeviceSensor,
     SungrowSensor,
     async_setup_entry,
     infer_device_class,
@@ -275,3 +276,65 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     assert added == []
+
+
+# ---------------------------------------------------------------------------
+# Per-device sensors (issue #74)
+# ---------------------------------------------------------------------------
+
+
+async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
+    """Device points not already at plant level become sensors under their device."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = True
+    coordinator.device_data = {
+        "chg-1": {
+            "ev_charger_power": {"code": "ev_charger_power", "value": "7.2", "unit": "kW"},
+            # Duplicate of a plant-level point -> should be skipped.
+            "total_active_power": {"code": "total_active_power", "value": "5.0", "unit": "kW"},
+        }
+    }
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator],
+        control=MagicMock(),
+        devices={"12345": [{"uuid": "chg-1", "device_name": "AC011E", "device_type": 999}]},
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    device_sensors = [e for e in added if isinstance(e, SungrowDeviceSensor)]
+    assert len(device_sensors) == 1  # the plant-duplicate point was skipped
+    sensor = device_sensors[0]
+    assert sensor.point_code == "ev_charger_power"
+    assert sensor.device_uuid == "chg-1"
+    assert sensor._attr_unique_id == "12345_chg-1_ev_charger_power"
+    assert (DOMAIN, "chg-1") in sensor._attr_device_info["identifiers"]
+    assert sensor._attr_device_info["via_device"] == (DOMAIN, "12345")
+    # Reads its value from the coordinator's per-device data.
+    assert sensor.native_value == 7.2
+
+
+async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):
+    """No device sensors are created when the option is off, even with device data present."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = False
+    coordinator.device_data = {"chg-1": {"ev_charger_power": {"value": "7.2"}}}
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator],
+        control=MagicMock(),
+        devices={"12345": [{"uuid": "chg-1", "device_name": "AC011E"}]},
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert not any(isinstance(e, SungrowDeviceSensor) for e in added)
+    # Plant sensors are still created.
+    assert any(isinstance(e, SungrowSensor) for e in added)

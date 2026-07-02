@@ -308,3 +308,15 @@ async def test_entity_removal_stops_heartbeat(hass: HomeAssistant):
         await number.async_will_remove_from_hass()
 
     mock_stop.assert_awaited_once_with(hass, number.coordinator.config_entry, "12345")
+
+
+def test_select_dispatch_device_ignores_non_dispatch_devices():
+    """Meters / EV chargers are never chosen for dispatch (only inverter/ESS)."""
+    # A non-dispatch device alone -> nothing dispatch-capable.
+    assert select_dispatch_device([{"uuid": "meter", "device_type": DeviceType.METER}]) is None
+    # Meter listed first, inverter second -> the inverter wins (not devices[0]).
+    devices = [
+        {"uuid": "meter", "device_type": DeviceType.METER},
+        {"uuid": "inv", "device_type": DeviceType.INVERTER},
+    ]
+    assert select_dispatch_device(devices)["uuid"] == "inv"
