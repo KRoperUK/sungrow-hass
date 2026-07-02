@@ -33,12 +33,9 @@ updates:
       - "dependencies"
       - "python"
     groups:
-      # Batch the test/lint tooling into one PR. Exclude the load-bearing runtime
-      # client (sungrow-isolarcloud) so it arrives as its own PR — it must stay
-      # pinned and kept in sync with manifest.json by hand (see CLAUDE.md), so it
-      # needs individual review rather than being auto-batched.
-      dev-dependencies:
+      # Batch every Python dependency (all update types) into a single PR to keep
+      # the PR count down. Note: when this PR bumps sungrow-isolarcloud, also bump
+      # manifest.json to match before merging (see CLAUDE.md).
+      python:
         patterns:
           - "*"
-        exclude-patterns:
-          - "sungrow-isolarcloud"
