@@ -34,7 +34,7 @@ def _entry_data_for(devices):
         "coordinators": [_coordinator_with("12345", "Test Plant")],
         "control": control,
         "devices": {"12345": devices},
-        "heartbeat_stop": {},
+        "heartbeats": {},
     }
 
 
@@ -118,6 +118,27 @@ async def test_number_starts_heartbeat_for_power_changes(hass: HomeAssistant):
     assert mock_start.call_args.args[3] == "dev-uuid-1"
 
 
+async def test_number_availability_follows_coordinator(hass: HomeAssistant):
+    """Number availability tracks the coordinator; native_value is None with no side effects."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+
+    assert power.native_value is None
+    assert power.available is True  # coordinator.last_update_success is True
+
+    power.coordinator.last_update_success = False
+    assert power.available is False
+    # Reading native_value must not flip availability back on.
+    assert power.native_value is None
+    assert power.available is False
+
+
 async def test_select_setup_creates_entities_for_ess_device(hass: HomeAssistant):
     """Dispatch selects are created when an ESS device is discovered."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
@@ -169,6 +190,45 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
     command.hass = hass
     with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
         await command.async_select_option("Stop")
+
+    mock_stop.assert_awaited_once_with(hass, command.coordinator.config_entry, "12345")
+
+
+async def test_select_availability_follows_coordinator(hass: HomeAssistant):
+    """Select availability tracks the coordinator; current_option is None with no side effects."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _entry_data_for(devices)
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+
+    assert command.current_option is None
+    assert command.available is True
+
+    command.coordinator.last_update_success = False
+    assert command.available is False
+    assert command.current_option is None
+    assert command.available is False
+
+
+async def test_select_removal_stops_heartbeat(hass: HomeAssistant):
+    """Removing a select entity stops the heartbeat for the plant."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _entry_data_for(devices)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = added[0]
+
+    command.hass = hass
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
+        await command.async_will_remove_from_hass()
 
     mock_stop.assert_awaited_once_with(hass, command.coordinator.config_entry, "12345")
 

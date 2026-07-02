@@ -68,7 +68,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step."""
-        _LOGGER.debug(f"async_step_user called with user_input: {user_input}")
+        # Do not log user_input — it contains the app secret.
+        _LOGGER.debug("async_step_user called (user_input provided: %s)", user_input is not None)
         errors = {}
 
         if user_input is not None:
@@ -128,8 +129,9 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             app_id=self.init_info[CONF_APP_ID],
             websession=session,
         )
-        _LOGGER.info("Initialized Auth client for Sungrow iSolarCloud")
-        _LOGGER.debug("Auth client details: %s", self.auth_client)
+        # Debug, not info (routine setup), and never log the client repr — it
+        # holds the app key/secret.
+        _LOGGER.debug("Initialized Auth client for Sungrow iSolarCloud")
         return True
 
     def _auth_url_with_flow_id(self) -> str:
@@ -279,11 +281,14 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             redirect_uri_clean = self.init_info[CONF_REDIRECT_URI]
-            _LOGGER.info("Authorizing with code: %s and redirect_uri: %s", code, redirect_uri_clean)
+            # Never log the authorization code or tokens — they are credentials.
+            _LOGGER.debug("Authorizing with redirect_uri: %s", redirect_uri_clean)
             await self.auth_client.async_authorize(code, redirect_uri_clean)
 
             tokens = self.auth_client.tokens
-            _LOGGER.debug("Received tokens: %s", tokens)
+            _LOGGER.debug(
+                "Authorization succeeded (access token received: %s)", bool(tokens and tokens.get("access_token"))
+            )
 
             if not tokens or not tokens.get("access_token"):
                 _LOGGER.error("Failed to retrieve tokens")
