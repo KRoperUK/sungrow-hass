@@ -1,19 +1,44 @@
 version: 2
 updates:
+  # GitHub Actions — keeps the workflow actions (including the SHA-pinned ones)
+  # up to date. Batched into a single weekly PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional-commit prefix so these never look like feat/fix and never
+      # trigger a release (see the release-pr / conventionalcommits workflow).
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
     groups:
-      actions:
+      github-actions:
         patterns:
           - "*"
 
+  # Python test / lint dependencies (requirements_test.txt).
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    labels:
+      - "dependencies"
+      - "python"
     groups:
-      python:
+      # Batch the test/lint tooling into one PR. Exclude the load-bearing runtime
+      # client (sungrow-isolarcloud) so it arrives as its own PR — it must stay
+      # pinned and kept in sync with manifest.json by hand (see CLAUDE.md), so it
+      # needs individual review rather than being auto-batched.
+      dev-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "sungrow-isolarcloud"
