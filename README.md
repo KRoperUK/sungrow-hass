@@ -52,9 +52,9 @@ Or manually:
 | **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
 | **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
 
-4. Click **Submit**. Home Assistant shows a **"Waiting for authorization"** screen with a link.
-5. Open the link, log in to iSolarCloud, and approve the application. You're redirected back and Home Assistant receives the authorization code automatically (via the `/api/sungrow_hass/callback` endpoint) and finishes setup — no copy-and-paste needed.
-6. If the automatic redirect doesn't complete within a couple of minutes (for example because iSolarCloud strips query parameters from your redirect URI), the flow falls back to a **manual entry** form. Paste the `code` from the redirect URL — or the whole redirect URL — to finish.
+4. Click **Submit**. The **hub is created immediately** and Home Assistant prompts you to **authorize** it (shown as a "reconfigure/authorize" notification on the integration). Creating the hub first is what registers the callback endpoint, so the redirect resolves reliably even on a brand-new install.
+5. Open the authorization prompt → a **"Waiting for authorization"** screen appears with a link. Open the link, log in to iSolarCloud, and approve the application. You're redirected back and Home Assistant captures the authorization code automatically (via the `/api/sungrow_hass/callback` endpoint) and finishes — no copy-and-paste needed.
+6. If the automatic redirect doesn't complete within a couple of minutes (for example because iSolarCloud strips query parameters from your redirect URI), the screen falls back to a **manual entry** form. Paste the `code` from the redirect URL — or the whole redirect URL — to finish authorizing the hub.
 
 ### Obtaining Credentials
 

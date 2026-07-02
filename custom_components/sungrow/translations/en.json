@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to iSolarCloud",
-        "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud]({url})",
+        "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud]({url})\n\nAfter you submit, the hub is created and Home Assistant will prompt you to authorize it in your browser.",
         "data": {
           "gateway": "Gateway Region",
           "app_key": "AppKey",
