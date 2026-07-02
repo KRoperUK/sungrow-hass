@@ -38,6 +38,12 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
+# How long to wait for the OAuth redirect before offering (or, on the manual step,
+# giving up on) automatic completion. Generous, since iSolarCloud's approval page
+# can be slow — a redirect that lands within this window completes the flow
+# automatically even if the user has already reached the manual-entry form.
+CALLBACK_WAIT_TIMEOUT = 300
+
 
 class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Sungrow iSolarCloud."""
@@ -204,44 +210,69 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_progress_done(next_step_id="auth_manual")
         if user_input is not None and user_input.get("code"):
             self.context["code"] = user_input["code"]
+            self._drop_callback_future()
             return self.async_show_progress_done(next_step_id="finish")
 
-        # Register this flow so the callback view can resume it.
-        flows = self.hass.data.setdefault(DOMAIN, {}).setdefault("flows", {})
-        future: asyncio.Future[str] = asyncio.Future()
-        flows[self.flow_id] = future
-
         auth_url = self._auth_url()
-
-        async def _wait_for_callback() -> None:
-            """Resume the flow once the OAuth callback delivers a code."""
-            try:
-                code = await asyncio.wait_for(future, timeout=120)
-            except TimeoutError:
-                _LOGGER.warning("OAuth callback not received within timeout for flow %s", self.flow_id)
-                self.context["callback_timeout"] = True
-                try:
-                    await self.hass.config_entries.flow.async_configure(flow_id=self.flow_id, user_input={})
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Failed to resume config flow after callback timeout")
-                return
-            except asyncio.CancelledError:
-                return
-            finally:
-                flows.pop(self.flow_id, None)
-            try:
-                await self.hass.config_entries.flow.async_configure(flow_id=self.flow_id, user_input={"code": code})
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Failed to resume config flow from OAuth callback")
-
-        task = self.hass.async_create_background_task(_wait_for_callback(), name="sungrow-oauth-callback")
-
+        # Fall back to the manual form if the redirect doesn't arrive in time.
+        task = self._arm_callback_wait(fall_back_to_manual=True)
         return self.async_show_progress(
             step_id="auth_callback",
             progress_action="wait_for_callback",
             progress_task=task,
             description_placeholders={"auth_url": auth_url},
         )
+
+    def _arm_callback_wait(self, *, fall_back_to_manual: bool) -> asyncio.Task:
+        """Register a callback future and spawn a task that resumes the flow.
+
+        Used by both the automatic progress step and the manual-entry form, so a
+        redirect that arrives late (after the auto-wait timed out and the user
+        reached the manual form) still completes the flow automatically. Reuses the
+        registered future when one is still pending so the callback view always has
+        a live target.
+        """
+        flows = self.hass.data.setdefault(DOMAIN, {}).setdefault("flows", {})
+        future = flows.get(self.flow_id)
+        if not isinstance(future, asyncio.Future) or future.done():
+            future = asyncio.Future()
+            flows[self.flow_id] = future
+
+        async def _wait_for_callback() -> None:
+            try:
+                code = await asyncio.wait_for(future, timeout=CALLBACK_WAIT_TIMEOUT)
+            except TimeoutError:
+                if fall_back_to_manual:
+                    _LOGGER.warning("OAuth callback not received within timeout for flow %s", self.flow_id)
+                    self.context["callback_timeout"] = True
+                    await self._resume_flow(user_input={})
+                return
+            except asyncio.CancelledError:
+                return
+            else:
+                await self._resume_flow(user_input={"code": code})
+            finally:
+                # Drop the future once it has been consumed / expired so a stale one
+                # isn't reused; leave a newer future (e.g. re-armed for manual) alone.
+                if flows.get(self.flow_id) is future:
+                    flows.pop(self.flow_id, None)
+
+        return self.hass.async_create_background_task(_wait_for_callback(), name="sungrow-oauth-callback")
+
+    async def _resume_flow(self, *, user_input: dict[str, Any]) -> None:
+        """Re-enter the config flow from the OAuth callback background task."""
+        try:
+            await self.hass.config_entries.flow.async_configure(flow_id=self.flow_id, user_input=user_input)
+        except Exception:  # pylint: disable=broad-except
+            # The flow may already have progressed (e.g. the user finished manually);
+            # a late resume is harmless.
+            _LOGGER.debug("Could not resume config flow %s from OAuth callback", self.flow_id)
+
+    def _drop_callback_future(self) -> None:
+        """Remove this flow's pending callback future (it has been consumed)."""
+        flows = self.hass.data.get(DOMAIN, {}).get("flows", {})
+        if isinstance(flows, dict):
+            flows.pop(self.flow_id, None)
 
     async def async_step_auth_manual(self, user_input: dict[str, Any] | None = None):
         """Handle manual entry of the authorization code or full redirect URL.
@@ -272,11 +303,20 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     code = code_input
 
                 self.context["code"] = code
+                self._drop_callback_future()
                 return self.async_show_progress_done(next_step_id="finish")
 
             except Exception as e:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception in async_step_auth_manual: %s", e)
                 errors["base"] = "unknown"
+
+        # Keep a callback waiter armed while the manual form is shown, so a redirect
+        # that lands late (after the auto-wait timed out) still completes the flow
+        # automatically instead of stranding a "successful" callback with no effect.
+        # A context flag arms it exactly once (not on every form re-render).
+        if not self.context.get("manual_waiter_armed"):
+            self.context["manual_waiter_armed"] = True
+            self._arm_callback_wait(fall_back_to_manual=False)
 
         auth_url = self._auth_url()
         return self.async_show_form(

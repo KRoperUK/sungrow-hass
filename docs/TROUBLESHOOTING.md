@@ -51,7 +51,9 @@ by the integration itself.
    Authorization Code* form after a short wait. Paste the `code` value from the
    URL bar there — or paste the whole redirect URL and the integration extracts
    the code for you. Make sure the base redirect URI still matches the developer
-   portal exactly.
+   portal exactly. Even once you're on this form, **finishing the login in your
+   browser still completes setup automatically** — a redirect that lands late is
+   no longer lost.
 
 ---
 

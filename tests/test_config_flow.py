@@ -325,6 +325,51 @@ async def test_reauth_timeout_falls_back_to_manual(hass: HomeAssistant, mock_aut
     await _reauth_to_manual(hass, entry)
 
 
+async def test_late_callback_completes_from_manual_step(hass: HomeAssistant, mock_auth):
+    """A redirect that lands while the user is on the manual form still completes the flow (#75)."""
+    from custom_components.sungrow import SungrowAuthCallbackView
+
+    entry = _hub_entry(hass)
+
+    # Time out only the FIRST wait (the automatic one) so the flow reaches the manual
+    # form; the manual re-armed waiter then waits normally for the late callback.
+    real_wait_for = asyncio.wait_for
+    calls = {"n": 0}
+
+    async def _wait_for(aw, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.sleep(0)
+            aw.cancel()  # real asyncio.wait_for cancels the awaited future on timeout
+            raise TimeoutError
+        return await real_wait_for(aw, timeout=None)
+
+    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_wait_for):
+        result = await entry.start_reauth_flow(hass)
+        assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+
+        flow = hass.config_entries.flow.async_get(result["flow_id"])
+        assert flow["step_id"] == "auth_manual"
+
+        # The OAuth redirect finally lands (flow_id stripped -> single-flow fallback).
+        request = MagicMock()
+        request.app = {"hass": hass}
+        request.query = {"code": "late_code"}
+        view = SungrowAuthCallbackView()
+
+        with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+            response = await view.get(request)
+            await hass.async_block_till_done()
+            await hass.async_block_till_done()
+
+    assert response.status == 200
+    # The flow completed automatically without the user pasting anything.
+    assert mock_auth.async_authorize.call_args[0][0] == "late_code"
+    assert entry.data["tokens"]["access_token"] == "test_access_token"
+
+
 async def test_callback_view_resumes_reauth(hass: HomeAssistant, mock_auth):
     """The HTTP callback view delivers the code and completes the reauth flow."""
     from custom_components.sungrow import SungrowAuthCallbackView
