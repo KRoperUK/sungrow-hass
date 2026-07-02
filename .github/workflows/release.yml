@@ -47,6 +47,9 @@ jobs:
                   skip-commit: true
                   skip-tag: true
                   skip-git-pull: true
+                  # Compute-only: never commit/tag/push. Without this the action
+                  # still tries to `git push` at the end and fails in detached HEAD.
+                  git-push: false
                   output-file: false
 
             - name: Build dev tag
