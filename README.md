@@ -4,13 +4,15 @@
 [![CI][ci-badge]][ci-url]
 [![GitHub Release][release-badge]][release-url]
 
-Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`pysolarcloud`](https://pypi.org/project/pysolarcloud/) library.
+Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`sungrow-isolarcloud`](https://github.com/KRoperUK/pysolarcloud) library (a maintained fork of `pysolarcloud`).
 
 ## Features
 
 - **Cloud Polling** — fetches real-time data from the iSolarCloud API.
 - **Auto-Discovery** — automatically finds all plants linked to your account.
 - **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.) with correct device/state classes for the Energy dashboard.
+- **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery charge/discharge power or EV charger values) via the options flow.
+- **Dispatch / control entities** — number and select entities for charge/discharge command, power, SOC limits, and forced charging, with automatic EMS heartbeat when dispatching.
 - **Config Flow** — set up entirely through the Home Assistant UI.
 - **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay available across restarts; if credentials expire you're prompted to re-authorize in place (no delete & re-add).
 - **Configurable polling interval** — tune how often data is fetched via the integration options.
@@ -60,7 +62,14 @@ Register an application on the [iSolarCloud Developer Platform](https://develope
 
 ### Options
 
-After setup, go to **Settings → Devices & Services → Sungrow → Configure** to change the **polling interval** (default 5 minutes).
+After setup, go to **Settings → Devices & Services → Sungrow → Configure** to change:
+
+- **Polling interval** (default 5 minutes)
+- **Extra measure points** — add custom `point_id=code` pairs to request additional data points from iSolarCloud
+
+### Sensor mapping
+
+Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
 
 ## Troubleshooting
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import voluptuous as vol
@@ -12,7 +13,8 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pysolarcloud.plants import Plants
+from pysolarcloud.control import Control
+from pysolarcloud.plants import DeviceType, Plants
 
 from .auth import SungrowAuth
 from .const import (
@@ -26,7 +28,7 @@ from .const import (
 )
 from .coordinator import SungrowPlantCoordinator, is_auth_error
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     auth.tokens = dict(entry.data["tokens"])
 
     plants_service = Plants(auth)
+    control_service = Control(auth)
 
     try:
         plant_list = await plants_service.async_get_plants()
@@ -87,6 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
+    devices_by_plant: dict[str, list[dict]] = {}
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
         plant_name = plant_info["ps_name"]
@@ -95,7 +99,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_config_entry_first_refresh()
         coordinators.append(coordinator)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
+        # Discover dispatch-capable devices (inverters / ESS) for this plant. Failures here are
+        # non-fatal — dispatch entities simply won't be created for this plant.
+        try:
+            devices = await plants_service.async_get_plant_devices(
+                plant_id,
+                device_types=[DeviceType.INVERTER, DeviceType.ENERGY_STORAGE_SYSTEM],
+            )
+            devices_by_plant[plant_id] = devices
+        except Exception as err:
+            _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
+            devices_by_plant[plant_id] = []
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinators": coordinators,
+        "control": control_service,
+        "devices": devices_by_plant,
+        "heartbeat_stop": {},
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -107,6 +128,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    for stop_event in entry_data.get("heartbeat_stop", {}).values():
+        stop_event.set()
+
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 
@@ -116,6 +141,32 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the config entry when its options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_start_heartbeat(
+    hass: HomeAssistant, entry: ConfigEntry, plant_id: str, device_uuid: str, interval: int
+) -> None:
+    """Start (or restart) the EMS heartbeat loop for a plant/device."""
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    stops = entry_data["heartbeat_stop"]
+
+    # Stop any existing loop for this plant before starting a new one.
+    if plant_id in stops:
+        stops[plant_id].set()
+        await asyncio.sleep(0)
+
+    stop_event = asyncio.Event()
+    stops[plant_id] = stop_event
+    control: Control = entry_data["control"]
+    asyncio.create_task(control.heartbeat_loop(device_uuid, interval, stop_event))
+
+
+async def async_stop_heartbeat(hass: HomeAssistant, entry: ConfigEntry, plant_id: str) -> None:
+    """Stop the EMS heartbeat loop for a plant."""
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    stops = entry_data.get("heartbeat_stop", {})
+    if plant_id in stops:
+        stops[plant_id].set()
 
 
 class SungrowAuthCallbackView(HomeAssistantView):
