@@ -56,22 +56,31 @@ jobs:
 
             - name: Build dev tag
               id: tag
+              # Pass step/context values via env and reference them as shell vars —
+              # never inline ${{ }} into the script (avoids code injection from a
+              # workflow_dispatch-controlled value).
+              env:
+                  SKIPPED: ${{ steps.nextver.outputs.skipped }}
+                  NEXT_VERSION: ${{ steps.nextver.outputs.version }}
+                  RUN_NUMBER: ${{ github.run_number }}
               run: |
                   # No releasable commits since the last release -> no bump; fall
                   # back to the current manifest version.
-                  if [ "${{ steps.nextver.outputs.skipped }}" = "true" ]; then
+                  if [ "$SKIPPED" = "true" ]; then
                     VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
                   else
-                    VERSION="${{ steps.nextver.outputs.version }}"
+                    VERSION="$NEXT_VERSION"
                   fi
-                  TAG="dev-v${VERSION}-${{ github.run_number }}"
+                  TAG="dev-v${VERSION}-${RUN_NUMBER}"
                   echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
             - name: Create pre-release
               env:
                   GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ steps.tag.outputs.tag }}
+                  COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
               run: |
-                  gh release create "${{ steps.tag.outputs.tag }}" \
+                  gh release create "$TAG" \
                     --prerelease \
-                    --title "${{ steps.tag.outputs.tag }}" \
-                    --notes "Development build from \`main\` at commit \`${{ github.event.workflow_run.head_sha || github.sha }}\`."
+                    --title "$TAG" \
+                    --notes "Development build from \`main\` at commit \`${COMMIT_SHA}\`."
