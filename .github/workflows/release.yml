@@ -1,4 +1,4 @@
-name: Release
+name: Dev Release (main)
 
 on:
     push:
@@ -8,56 +8,33 @@ on:
 
 permissions:
     contents: write
-    pull-requests: write
 
 concurrency:
     group: release-${{ github.ref }}
     cancel-in-progress: false
 
 jobs:
-    release:
+    dev-release:
         if: "!contains(github.event.head_commit.message, '[skip ci]')"
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
               uses: actions/checkout@v7
-              with:
-                  fetch-depth: 0
 
-            - name: Conventional Changelog / Dev Tag
-              id: changelog
-              uses: TriPSs/conventional-changelog-action@v6
-              with:
-                  github-token: ${{ github.token }}
-                  output-file: CHANGELOG.md
-                  tag-prefix: dev-v
-                  release-name: "Development v{{version}}"
-                  skip-on-empty: true
-                  version-file: custom_components/sungrow/manifest.json
-                  version-path: version
-                  preset: conventionalcommits
-                  create-summary: true
-                  skip-commit: true
-                  skip-release: true
-                  git-user-name: "github-actions[bot]"
-                  git-user-email: "41898282+github-actions[bot]@users.noreply.github.com"
-                  create-release: false
-
-            # NOTE: This job intentionally does NOT push commits to `main`.
-            # `main` is a protected branch (PRs + status checks required), so the
-            # version bump / CHANGELOG commit happens via the Release PR workflow
-            # (`release-pr.yml`). Here we only move a lightweight dev tag, which is
-            # not blocked by branch protection. This also avoids the self-retrigger
-            # loop a `chore(release)` commit pushed back to `main` would cause.
-            - name: Create dev tag
-              if: steps.changelog.outputs.skipped != 'true'
+            - name: Build dev tag
+              id: tag
               run: |
-                  git tag -f "dev-v${{ steps.changelog.outputs.version }}"
-                  git push -f origin "dev-v${{ steps.changelog.outputs.version }}"
+                  VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+                  SHA="${GITHUB_SHA::7}"
+                  TAG="dev-v${VERSION}-${SHA}"
+                  echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+                  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-            - name: Show dev tag summary
-              if: steps.changelog.outputs.skipped != 'true'
+            - name: Create pre-release
+              env:
+                  GH_TOKEN: ${{ github.token }}
               run: |
-                  echo "Dev Version: ${{ steps.changelog.outputs.version }}"
-                  echo "Dev Tag: dev-v${{ steps.changelog.outputs.version }}"
-                  echo "No commit pushed to main — releases are cut via release-pr.yml."
+                  gh release create "${{ steps.tag.outputs.tag }}" \
+                    --prerelease \
+                    --title "${{ steps.tag.outputs.tag }}" \
+                    --notes "Development build from \`main\` at commit \`${{ github.sha }}\`."
