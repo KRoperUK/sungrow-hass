@@ -77,15 +77,17 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: HACS validation
-        uses: hacs/action@main
+        uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration
 
       - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@master
+        uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c # master
 
   dev-release:
-    if: github.event_name == 'pull_request'
+    # Only run for same-repo PRs: fork PRs get a read-only token (the release
+    # would fail) and this job holds contents: write, so keep it off forks.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [lint, test, hacs_validate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -96,20 +98,27 @@ jobs:
 
       - name: Build dev tag
         id: tag
+        # Pass the branch name via env, never inline ${{ github.head_ref }} into
+        # the script — an attacker-controlled branch name would be shell-injected.
+        env:
+          BRANCH_RAW: ${{ github.head_ref }}
         run: |
           VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
           SHA="${GITHUB_SHA::7}"
-          BRANCH="${{ github.head_ref }}"
-          BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
+          BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
           TAG="dev-${BRANCH}-v${VERSION}-${SHA}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Create pre-release
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH_RAW: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_SHA: ${{ github.sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          gh release create "${{ steps.tag.outputs.tag }}" \
+          gh release create "$TAG" \
             --prerelease \
-            --title "${{ steps.tag.outputs.tag }}" \
-            --notes "Development build from branch \`${{ github.head_ref }}\` (PR #${{ github.event.pull_request.number }}) at commit \`${{ github.sha }}\`." \
+            --title "$TAG" \
+            --notes "Development build from branch \`${BRANCH_RAW}\` (PR #${PR_NUMBER}) at commit \`${COMMIT_SHA}\`." \
             || echo "Release already exists for this tag, skipping."
