@@ -282,14 +282,40 @@ async def test_reauth_auto_wait_registers_future(hass: HomeAssistant, mock_auth)
     assert isinstance(flows[result["flow_id"]], asyncio.Future)
 
 
-async def test_auth_url_includes_flow_id(hass: HomeAssistant, mock_auth):
-    """The authorization URL embeds the current (reauth) flow ID."""
+async def test_auth_url_uses_bare_redirect(hass: HomeAssistant, mock_auth):
+    """The auth URL uses the bare redirect URI (no flow_id).
+
+    iSolarCloud strips extra query params from the redirect and validates the
+    token-exchange redirect_uri against the auth request's, so appending a flow_id
+    would break the exchange. The callback view resolves the flow via its
+    single-flow fallback instead.
+    """
     entry = _hub_entry(hass)
-    result = await entry.start_reauth_flow(hass)
+    await entry.start_reauth_flow(hass)
 
     mock_auth.auth_url.assert_called_once()
     redirect_uri = mock_auth.auth_url.call_args[0][0]
-    assert f"flow_id={result['flow_id']}" in redirect_uri
+    assert "flow_id=" not in redirect_uri
+    assert redirect_uri == MOCK_USER_INPUT["redirect_uri"].rstrip("/")
+
+
+async def test_token_exchange_redirect_matches_auth_request(hass: HomeAssistant, mock_auth):
+    """Regression: the token exchange must use the same redirect_uri as the auth URL.
+
+    A mismatch (previously the auth URL had a flow_id appended while the exchange
+    used the bare URI) makes iSolarCloud reject the exchange with 'invalid
+    authentication'.
+    """
+    entry = _hub_entry(hass)
+    flow_id = await _reauth_to_manual(hass, entry)
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        await hass.config_entries.flow.async_configure(flow_id, user_input={"code": "abc"})
+        await hass.async_block_till_done()
+
+    auth_redirect = mock_auth.auth_url.call_args[0][0]
+    exchange_redirect = mock_auth.async_authorize.call_args[0][1]
+    assert exchange_redirect == auth_redirect
 
 
 async def test_reauth_timeout_falls_back_to_manual(hass: HomeAssistant, mock_auth):
