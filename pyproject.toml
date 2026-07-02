@@ -42,8 +42,3 @@ select = [
     "SIM", # flake8-simplify
 ]
 ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.12"
-ignore_missing_imports = true
-check_untyped_defs = true

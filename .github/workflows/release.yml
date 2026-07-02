@@ -18,7 +18,9 @@ jobs:
     dev-release:
         if: >-
             github.event_name == 'workflow_dispatch' ||
-            github.event.workflow_run.conclusion == 'success'
+            (github.event.workflow_run.conclusion == 'success' &&
+             github.event.workflow_run.head_branch == 'main' &&
+             github.event.workflow_run.event == 'push')
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
@@ -35,7 +37,7 @@ jobs:
             # *upcoming* version (e.g. dev-v1.1.0-N while main is still at 1.0.0).
             - name: Compute next version
               id: nextver
-              uses: TriPSs/conventional-changelog-action@v6
+              uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
               with:
                   github-token: ${{ github.token }}
                   version-file: custom_components/sungrow/manifest.json

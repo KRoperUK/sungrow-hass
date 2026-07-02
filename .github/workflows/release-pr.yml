@@ -21,6 +21,8 @@ jobs:
         if: >-
             github.event_name == 'workflow_dispatch' ||
             (github.event.workflow_run.conclusion == 'success' &&
+             github.event.workflow_run.head_branch == 'main' &&
+             github.event.workflow_run.event == 'push' &&
              !contains(github.event.workflow_run.head_commit.message, 'chore: release') &&
              !contains(github.event.workflow_run.head_commit.message, '[skip ci]'))
         runs-on: ubuntu-latest
@@ -41,7 +43,7 @@ jobs:
               #   feat                             -> minor
               #   fix                              -> patch
               #   chore / docs / style / refactor / test / ci / build -> no release
-              uses: TriPSs/conventional-changelog-action@v6
+              uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
               with:
                   github-token: ${{ github.token }}
                   output-file: CHANGELOG.md
@@ -72,7 +74,7 @@ jobs:
 
             - name: Create release PR
               if: steps.changelog.outputs.skipped != 'true'
-              uses: peter-evans/create-pull-request@v8
+              uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
               with:
                   token: ${{ github.token }}
                   committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

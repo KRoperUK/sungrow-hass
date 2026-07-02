@@ -5,8 +5,8 @@ pytest-cov
 pytest-sugar
 python-dotenv
 
-# Linting & formatting (match pre-commit versions)
-ruff
+# Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
+ruff==0.15.16
 
 # Component dependencies
 sungrow-isolarcloud==0.5.0

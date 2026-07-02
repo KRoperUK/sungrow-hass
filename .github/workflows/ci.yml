@@ -39,13 +39,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Project supports 3.12+, so test the full supported range.
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements_test.txt
 
@@ -64,7 +69,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
+          # Matrix jobs must not share an artifact name (upload-artifact v4+ errors).
+          name: coverage-report-${{ matrix.python-version }}
           path: coverage.xml
 
       - name: Upload coverage to Codecov
@@ -121,7 +127,7 @@ jobs:
       # dev build is a pre-release of the upcoming version.
       - name: Compute next version
         id: nextver
-        uses: TriPSs/conventional-changelog-action@v6
+        uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
         with:
           github-token: ${{ github.token }}
           version-file: custom_components/sungrow/manifest.json
