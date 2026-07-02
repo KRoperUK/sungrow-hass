@@ -1,17 +1,12 @@
+## [1.1.1](https://github.com/KRoperUK/sungrow-hass/compare/v1.1.0...v1.1.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* register OAuth callback view during the config flow (first-install 404) ([#69](https://github.com/KRoperUK/sungrow-hass/issues/69)) ([329a155](https://github.com/KRoperUK/sungrow-hass/commit/329a155750d9f4be83a85dc3b5e17e73d3dff474))
+
 ## [1.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v1.1.0) (2026-07-02)
 
-> [!IMPORTANT]
-> **Upgrade note — dispatch (charge/discharge) users.** The dispatch number/select
-> controls now correctly attach to your **battery / energy-storage device** instead
-> of the first-listed device ([#68](https://github.com/KRoperUK/sungrow-hass/issues/68)).
-> On systems with **both an inverter and a battery**, this can change those entities'
-> unique IDs, so Home Assistant may **recreate the dispatch entities** — the old ones
-> appear as *unavailable* and can be deleted, and any automations/dashboards that
-> reference them should be re-checked after updating. **Sensors are unaffected**, and
-> plants without dispatch controls (or with a single device) see no change.
->
-> Polling intervals are migrated automatically (the setting moved from minutes to
-> seconds — an existing 5 becomes 300s); no action needed.
 
 ### Features
 
@@ -48,11 +43,4 @@
 
 * persist refreshed tokens and harden setup ([#23](https://github.com/KRoperUK/sungrow-hass/issues/23)) ([2d579fd](https://github.com/KRoperUK/sungrow-hass/commit/2d579fd3af9ca2ba3836fe3ccaa2963683d69d7b)), closes [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21)
 * resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
-* resolved hassfest warnings ([74dc412](https://github.com/KRoperUK/sungrow-hass/commit/74dc4123499d2dc1d3cebec0e4597e84488bb81c))
-* resolved hassfest warnings ([44fe5dd](https://github.com/KRoperUK/sungrow-hass/commit/44fe5dd5ee630ed191f25ee63a3c56a648137800))
-* resolved hassfest warnings ([990fce2](https://github.com/KRoperUK/sungrow-hass/commit/990fce2292a68b95790e12745d3ee3b0b29da69b))
-* resolved hassfest warnings ([492d444](https://github.com/KRoperUK/sungrow-hass/commit/492d444aee493ec3485c22d623be6cc3a63827a2))
-* resolved hassfest warnings ([fe118f3](https://github.com/KRoperUK/sungrow-hass/commit/fe118f39de2c4413bad1176558eec599a3f1d7bb))
-* resolved hassfest warnings ([9b62243](https://github.com/KRoperUK/sungrow-hass/commit/9b622435faf635d17245d4aeac1d8d7fcc1006de))
-* resolved hassfest warnings ([704e48c](https://github.com/KRoperUK/sungrow-hass/commit/704e48c9e59fe5b8c76cb164e870ac8179f2807b))
 
