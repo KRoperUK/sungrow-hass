@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.control import Control
 
-from . import async_start_heartbeat, async_stop_heartbeat
+from . import async_start_heartbeat, async_stop_heartbeat, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 
@@ -50,10 +50,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     for coordinator in coordinators:
         plant_id = coordinator.plant_id
         devices = devices_by_plant.get(plant_id, [])
-        if not devices:
+        # Prefer the ESS device if present, otherwise fall back to the first device.
+        target = select_dispatch_device(devices)
+        if target is None:
             continue
-        ess_devices = [d for d in devices if d.get("device_type") == "ENERGY_STORAGE_SYSTEM"]
-        target = ess_devices[0] if ess_devices else devices[0]
         device_uuid = target.get("uuid")
         if not device_uuid:
             continue
