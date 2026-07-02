@@ -156,6 +156,11 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         if not self._ensure_auth_client():
             return self.async_abort(reason="library_missing")
+        # Register the callback view now: on a first-time install async_setup has
+        # not run yet, so without this the OAuth redirect would 404.
+        from . import _ensure_callback_view_registered
+
+        _ensure_callback_view_registered(self.hass)
         return await self.async_step_auth_callback()
 
     async def async_step_auth_callback(self, user_input: dict[str, Any] | None = None):

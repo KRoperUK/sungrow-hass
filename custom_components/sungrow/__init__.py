@@ -93,9 +93,26 @@ class IterableSchema(vol.Schema):
 CONFIG_SCHEMA = IterableSchema({}, extra=vol.ALLOW_EXTRA)
 
 
+def _ensure_callback_view_registered(hass: HomeAssistant) -> None:
+    """Register the OAuth callback HTTP view exactly once.
+
+    iSolarCloud redirects back to ``/api/sungrow_hass/callback`` *during* the very
+    first config flow — before any config entry exists, and therefore before
+    ``async_setup`` (which used to be the only place the view was registered) has
+    run. Without this, a first-time install gets a 404 on the callback while an
+    install that already has a Sungrow entry works. Registering here, guarded by a
+    flag so aiohttp never sees a duplicate route, fixes the first-time case.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("callback_view_registered"):
+        return
+    hass.http.register_view(SungrowAuthCallbackView())
+    domain_data["callback_view_registered"] = True
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Sungrow iSolarCloud component."""
-    hass.http.register_view(SungrowAuthCallbackView())
+    _ensure_callback_view_registered(hass)
     return True
 
 

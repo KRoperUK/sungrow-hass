@@ -309,6 +309,25 @@ async def test_auth_url_includes_flow_id(hass: HomeAssistant, mock_auth):
     assert f"flow_id={result['flow_id']}" in redirect_uri
 
 
+async def test_callback_view_registered_during_first_flow(hass: HomeAssistant, mock_auth):
+    """The callback view is registered by the flow itself, before any entry exists.
+
+    Regression for the 404-on-callback bug on a first-time install: async_setup
+    (the old sole place the view was registered) only runs once an entry is being
+    set up, which is after the OAuth redirect. The flow must register it so the
+    redirect resolves.
+    """
+    # Nothing has registered the callback view yet (async_setup has not run).
+    assert not hass.data.get(DOMAIN, {}).get("callback_view_registered")
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+
+    # Reaching the OAuth wait must have registered the callback view.
+    assert result2["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+    assert hass.data[DOMAIN]["callback_view_registered"] is True
+
+
 async def test_auth_callback_step_registers_future(hass: HomeAssistant, mock_auth):
     """Test the automatic auth step registers a callback future."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
