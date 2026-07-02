@@ -46,15 +46,15 @@ Or manually:
 
 | Field | Description |
 |---|---|
-| **Gateway** | Your region (Europe, Australia, China, etc.) |
+| **Gateway** | Your region: **Europe**, **International**, **China**, or **Australia** |
 | **App Key** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
 | **App Secret** | AppSecret from the Developer Platform |
 | **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
 | **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
 
-4. Click **Submit** — you'll be shown an authorisation URL.
-5. Choose **Authorize automatically (recommended)**. A browser window opens for the iSolarCloud login; after you authorize, Home Assistant receives the code automatically via the `/api/sungrow_hass/callback` endpoint.
-6. If the automatic redirect doesn't work (for example, because iSolarCloud strips query parameters from your redirect URI), choose **Enter code manually** and paste the `code` from the URL.
+4. Click **Submit**. Home Assistant shows a **"Waiting for authorization"** screen with a link.
+5. Open the link, log in to iSolarCloud, and approve the application. You're redirected back and Home Assistant receives the authorization code automatically (via the `/api/sungrow_hass/callback` endpoint) and finishes setup — no copy-and-paste needed.
+6. If the automatic redirect doesn't complete within a couple of minutes (for example because iSolarCloud strips query parameters from your redirect URI), the flow falls back to a **manual entry** form. Paste the `code` from the redirect URL — or the whole redirect URL — to finish.
 
 ### Obtaining Credentials
 
@@ -72,6 +72,19 @@ After setup, go to **Settings → Devices & Services → Sungrow → Configure**
 ### Sensor mapping
 
 Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
+
+## Supported devices & regions
+
+- **Regions / gateways:** Europe, International, China, and Australia. Pick the one matching the account you registered your developer application under.
+- **Devices:** grid-tied inverters, hybrid inverters, and energy storage systems (ESS / batteries) that appear in your iSolarCloud account. Sensors are created for whatever data points iSolarCloud returns for your plant.
+- **Dispatch / control:** number and select entities (charge/discharge command & power, SOC limits, forced charging) are created for inverter / ESS devices that support External EMS control.
+
+## Limitations
+
+- **Cloud-only.** All data comes from the iSolarCloud cloud API — there is no local polling. If iSolarCloud is unreachable, or your account/plan loses API access, entities become unavailable.
+- **API quota.** The free developer plan allows ~2000 calls/hour; keep the polling interval sensible, especially with many sensors.
+- **Dispatch needs compatible firmware and plan.** External EMS / parameter setting requires an inverter and iSolarCloud plan that permit it. Where unsupported, dispatch entities may error on write.
+- **Developer app approval.** New iSolarCloud developer applications must be approved by Sungrow (with OAuth 2.0 enabled) before authorization works — this can take up to a week.
 
 ## Troubleshooting
 
@@ -110,6 +123,19 @@ To run live tests against the real iSolarCloud API:
    ```
 
    > Live tests are automatically skipped when credentials are not set.
+
+### Logo & icon
+
+The integration ships `icon.png` / `logo.png` under `custom_components/sungrow/`.
+For the brand images to appear in the Home Assistant UI's official brand system
+(and on [brands.home-assistant.io](https://brands.home-assistant.io)), the
+`sungrow` domain also needs a PR to the
+[home-assistant/brands](https://github.com/home-assistant/brands) repository.
+
+### Security
+
+Found a security issue? Please follow the disclosure process in
+[SECURITY.md](SECURITY.md) rather than opening a public issue.
 
 ## Support
 
