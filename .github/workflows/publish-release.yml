@@ -44,15 +44,19 @@ jobs:
                   prerelease: false
                   token: ${{ github.token }}
 
-            - name: Delete dev pre-releases for this version
+            - name: Delete main dev pre-releases
               env:
                   GH_TOKEN: ${{ github.token }}
                   GH_REPO: ${{ github.repository }}
               run: |
-                  TAG_PREFIX="dev-v${{ steps.version.outputs.version }}-"
-                  echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
+                  # A published release supersedes every main dev build, so remove
+                  # all "dev-v<semver>-<n>" pre-releases regardless of version — the
+                  # dev version now tracks the *next* version, which can drift
+                  # (e.g. 1.1.0 dev builds when a later breaking change ships 2.0.0).
+                  # PR dev builds ("dev-<branch>-v*") are cleaned up on PR close.
+                  echo "Deleting all main dev pre-releases (dev-v<semver>-<n>)"
                   gh release list --limit 1000 --json tagName,isPrerelease \
-                    --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
+                    --jq '.[] | select(.isPrerelease and (.tagName | test("^dev-v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+$"))) | .tagName' \
                   | while read -r tag; do
                       echo "Deleting release and tag: ${tag}"
                       gh release delete "$tag" --yes --cleanup-tag
