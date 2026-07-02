@@ -124,13 +124,31 @@ class TestSungrowSensor:
 
         assert sensor._attr_device_class is None
 
-    def test_sensor_icon(self):
-        """Test all sensors use the solar icon."""
+    def test_sensor_icon_fallback_for_unclassified(self):
+        """Sensors with no recognised device class fall back to the solar icon."""
         coordinator = self._make_coordinator()
         init_data = {"code": "x", "value": "1", "unit": "", "name": "X"}
         sensor = SungrowSensor(coordinator, "x", "123", "Plant", init_data)
 
         assert sensor._attr_icon == "mdi:solar-power-variant"
+
+    def test_sensor_icon_none_for_classified(self):
+        """Sensors with a known device class use None so HA picks the right icon."""
+        coordinator = self._make_coordinator()
+        # Battery SoC — device_class: BATTERY → should show mdi:battery automatically
+        init_data = {"code": "battery_level_soc", "value": "80", "unit": "%"}
+        sensor = SungrowSensor(coordinator, "battery_level_soc", "123", "Plant", init_data)
+
+        assert sensor._attr_icon is None
+        assert sensor._attr_device_class == SensorDeviceClass.BATTERY
+
+    def test_sensor_alias_battery_soc(self):
+        """battery_level_soc gets a friendly human-readable alias."""
+        coordinator = self._make_coordinator()
+        init_data = {"code": "battery_level_soc", "value": "80", "unit": "%"}
+        sensor = SungrowSensor(coordinator, "battery_level_soc", "123", "Plant", init_data)
+
+        assert sensor._attr_name == "Battery State of Charge"
 
     def test_sensor_device_info(self):
         """Test sensor has device_info grouping it under its plant."""
