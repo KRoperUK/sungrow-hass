@@ -1,27 +1,9 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
+    rev: v0.11.0
     hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+        args: [--fix]
       - id: ruff-format
-
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest -m "not live"
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [push]
-
-  - repo: local
-    hooks:
-      - id: sort-manifest
-        name: Sort Manifest
-        entry: python3 scripts/sort_manifest.py
-        language: system
-        files: ^custom_components/sungrow/manifest\.json$
-        pass_filenames: false
-

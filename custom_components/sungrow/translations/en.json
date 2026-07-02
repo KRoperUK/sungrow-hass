@@ -46,6 +46,7 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "callback_timeout": "Authorization callback was not received in time. Please try again and choose Enter code manually if the redirect does not complete.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful"
     }
