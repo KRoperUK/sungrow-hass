@@ -2,8 +2,20 @@
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.0
+    # Keep in sync with the ruff pin in requirements_test.txt and ci.yml.
+    rev: v0.15.16
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      # Keep manifest.json keys in the order hassfest expects (domain/name first,
+      # then alphabetical) so CI's hassfest validation never trips on ordering.
+      - id: sort-manifest
+        name: sort manifest.json
+        entry: python scripts/sort_manifest.py
+        language: system
+        files: ^custom_components/sungrow/manifest\.json$
+        pass_filenames: false

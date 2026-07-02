@@ -1,0 +1,42 @@
+name: Cleanup stale dev releases
+
+# Dev pre-releases accumulate for version lines that never ship a real release
+# (abandoned PR builds, superseded next-version dev builds). A published release
+# prunes the current main dev builds, but the long tail needs a scheduled sweep.
+
+on:
+    schedule:
+        - cron: "0 3 * * 1" # Mondays 03:00 UTC
+    workflow_dispatch: {}
+
+permissions:
+    contents: write
+
+concurrency:
+    group: cleanup-dev-releases
+    cancel-in-progress: false
+
+jobs:
+    cleanup:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Delete dev pre-releases older than 30 days
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+              run: |
+                  # Sweep every "dev-*" pre-release (both main dev-v<semver>-<n> and
+                  # PR dev-<branch>-v* builds) created more than 30 days ago. Real
+                  # releases (no "dev-" prefix) and recent dev builds are kept.
+                  CUTOFF=$(date -u -d '30 days ago' +%s)
+                  echo "Deleting dev-* pre-releases created before $(date -u -d @"$CUTOFF")"
+                  gh release list --limit 1000 --json tagName,isPrerelease,createdAt \
+                    --jq '.[] | select(.isPrerelease and (.tagName | startswith("dev-"))) | [.tagName, .createdAt] | @tsv' \
+                  | while IFS=$'\t' read -r tag created; do
+                      created_epoch=$(date -u -d "$created" +%s)
+                      if [ "$created_epoch" -lt "$CUTOFF" ]; then
+                        echo "Deleting stale pre-release: ${tag} (created ${created})"
+                        gh release delete "$tag" --yes --cleanup-tag
+                      fi
+                    done

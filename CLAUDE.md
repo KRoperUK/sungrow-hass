@@ -51,7 +51,7 @@ Coverage threshold (`fail_under`) is set in `pyproject.toml`; keep it green.
 
 ## Conventions
 
-- **Python 3.12+/3.13**, ruff (line length 120) for lint + format.
+- **Python 3.13** (Home Assistant requires >=3.13), ruff (line length 120) for lint + format.
 - **Conventional Commits** for commit and PR titles (`fix:`, `feat:`, `chore:`,
   `docs:`) — this drives changelog and version bumps.
 - Every behaviour change needs tests. Tests mock `pysolarcloud` (`SungrowAuth`,
