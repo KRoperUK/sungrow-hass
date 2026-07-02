@@ -53,6 +53,30 @@ class SungrowData:
 type SungrowConfigEntry = ConfigEntry[SungrowData]
 
 
+def _matches_device_type(device: dict, target: DeviceType) -> bool:
+    """Return True if a discovered device is of ``target`` type.
+
+    pysolarcloud converts a *known* device type to a ``DeviceType`` enum, but the
+    raw API (and test mocks) may present it as an int or a string, so match against
+    all three representations rather than a single one.
+    """
+    dt = device.get("device_type")
+    return dt in (target, target.value, target.name)
+
+
+def select_dispatch_device(devices: list[dict]) -> dict | None:
+    """Pick the device to attach dispatch (number/select) entities to.
+
+    Prefer an energy-storage system — that's what accepts charge/discharge dispatch
+    — and fall back to the first discovered device otherwise. Returns ``None`` when
+    there are no devices.
+    """
+    if not devices:
+        return None
+    ess = [d for d in devices if _matches_device_type(d, DeviceType.ENERGY_STORAGE_SYSTEM)]
+    return ess[0] if ess else devices[0]
+
+
 class IterableSchema(vol.Schema):
     """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
 
