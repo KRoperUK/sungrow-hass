@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.components.number import NumberDeviceClass
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
+from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sungrow import SungrowData
+from custom_components.sungrow import SungrowData, select_dispatch_device
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.number import DISPATCH_NUMBERS
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
@@ -55,6 +56,42 @@ async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_device_class == NumberDeviceClass.POWER
     assert power._attr_native_unit_of_measurement == "W"
+
+
+def test_select_dispatch_device_matches_all_representations():
+    """The ESS is chosen whether device_type is an enum, int, or string."""
+    assert select_dispatch_device([]) is None
+    # Inverter first, ESS second — the ESS must still win (not just devices[0]).
+    enum_devices = [
+        {"uuid": "inv", "device_type": DeviceType.INVERTER},
+        {"uuid": "ess", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM},
+    ]
+    assert select_dispatch_device(enum_devices)["uuid"] == "ess"
+    assert select_dispatch_device([{"uuid": "ess", "device_type": 14}])["uuid"] == "ess"
+    assert select_dispatch_device([{"uuid": "ess", "device_type": "ENERGY_STORAGE_SYSTEM"}])["uuid"] == "ess"
+    # No ESS -> first device.
+    assert select_dispatch_device([{"uuid": "inv", "device_type": DeviceType.INVERTER}])["uuid"] == "inv"
+
+
+async def test_number_setup_prefers_ess_with_enum_device_type(hass: HomeAssistant):
+    """ESS is selected even when device_type is a DeviceType enum (the production path).
+
+    Regression test: the old string comparison never matched the enum, so dispatch
+    silently fell back to devices[0] (here the inverter).
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER},
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert added
+    assert all(e.device_uuid == "ess-1" for e in added)
 
 
 async def test_number_setup_falls_back_to_inverter(hass: HomeAssistant):
