@@ -74,7 +74,19 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.init_info = user_input
-            return await self.async_step_auth()
+            await self.async_set_unique_id(str(user_input[CONF_APP_ID]))
+            self._abort_if_unique_id_configured()
+            # Create the hub immediately, before authorizing. Setting up this
+            # token-less entry runs async_setup — which registers the OAuth
+            # callback view — and then raises ConfigEntryAuthFailed, so Home
+            # Assistant starts a reauth flow to finish authorization. This
+            # guarantees the callback endpoint exists before the OAuth redirect
+            # (fixing the first-install 404), and lets the user complete auth
+            # automatically via the redirect or manually by pasting the code/URL.
+            return self.async_create_entry(
+                title=f"Sungrow {user_input[CONF_APP_ID]}",
+                data=user_input,
+            )
 
         # Attempt to automatically detect the callback URL
         try:

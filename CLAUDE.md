@@ -16,7 +16,7 @@ HACS. `iot_class` is `cloud_polling`.
 | `__init__.py` | Entry setup/unload. Builds `SungrowAuth` + `Plants`, creates one coordinator per plant, **persists rotated tokens back to the config entry**, classifies errors into `ConfigEntryNotReady` (transient) vs `ConfigEntryAuthFailed` (reauth). Registers the OAuth callback HTTP view. |
 | `auth.py` | `SungrowAuth(pysolarcloud.Auth)` — adds a `token_updater` callback that fires when the access token is refreshed (pysolarcloud rotates the refresh token in memory). `AUTH_ERRORS` lists upstream error codes that mean "credentials dead". |
 | `coordinator.py` | `SungrowPlantCoordinator(DataUpdateCoordinator)` — fetches realtime data per plant; reads the scan interval from `entry.options`; `is_auth_error()` maps exceptions to reauth vs retry. |
-| `config_flow.py` | User setup, **reauth** (`async_step_reauth`), and **options** (`SungrowOptionsFlow`, polling interval) flows. Sets a unique ID (App ID) to prevent duplicates. |
+| `config_flow.py` | **Two-phase setup:** the user step creates the hub entry from credentials (no tokens) and sets a unique ID (App ID); the token-less entry then raises `ConfigEntryAuthFailed`, so **authorization runs via reauth** (`async_step_reauth` → auto OAuth-callback wait with a manual code/URL fallback). Creating the hub first runs `async_setup`, which registers the callback view *before* any redirect (fixes the first-install 404). Also hosts the **options** flow (`SungrowOptionsFlow`, polling interval). |
 | `sensor.py` | Builds `SungrowSensor` entities from the stored coordinators. `infer_device_class()` maps units → device/state class so the Energy dashboard works. |
 | `const.py` | Domain, config keys, `GATEWAYS`, scan-interval defaults. |
 

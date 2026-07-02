@@ -37,13 +37,17 @@ by the integration itself.
    exchange. Scheme (`http`/`https`), host/IP, and path must all match.
    - Local: `http://homeassistant.local:8123/api/sungrow_hass/callback`
    - Nabu Casa: `https://<your-id>.ui.nabu.casa/api/sungrow_hass/callback`
-5. **Automatic authorization runs first.** After you submit your credentials the
-   config flow shows a *Waiting for authorization* screen and captures the code
-   automatically when iSolarCloud redirects back to `/api/sungrow_hass/callback`.
-   You only need to log in and approve the app in the browser.
+5. **The hub is created first, then you authorize it.** After you submit your
+   credentials Home Assistant creates the hub and prompts you to *authorize* it
+   (a reconfigure/authorize notification on the integration). Creating the hub
+   first registers the `/api/sungrow_hass/callback` endpoint, so the redirect
+   resolves even on a brand-new install (this is the fix for the *404 on the
+   callback during a first-time setup*). Open the prompt and a *Waiting for
+   authorization* screen appears; log in and approve the app and the code is
+   captured automatically.
 6. **Manual entry is the fallback.** If the redirect does not complete (for
    example the callback endpoint returns an error, or iSolarCloud strips the
-   `flow_id` query parameter), the flow automatically switches to an *Enter
+   `flow_id` query parameter), the screen automatically switches to an *Enter
    Authorization Code* form after a short wait. Paste the `code` value from the
    URL bar there — or paste the whole redirect URL and the integration extracts
    the code for you. Make sure the base redirect URI still matches the developer
