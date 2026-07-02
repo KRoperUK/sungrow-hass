@@ -27,7 +27,7 @@ def is_auth_error(err: Exception) -> bool:
     re-authorize rather than waiting for a transient outage to clear.
     """
     if isinstance(err, KeyError):
-        return True
+        return str(err) == "'access_token'"
     return isinstance(err, PySolarCloudException) and err.error in AUTH_ERRORS
 
 
