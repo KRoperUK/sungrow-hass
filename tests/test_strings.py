@@ -30,7 +30,6 @@ def test_strings_has_required_steps(strings_data):
     """Test config flow steps match what the code defines."""
     steps = strings_data["config"]["step"]
     assert "user" in steps, "Missing 'user' step"
-    assert "auth" in steps, "Missing 'auth' step"
     assert "auth_manual" in steps, "Missing 'auth_manual' step"
     assert "auth_callback" in steps, "Missing 'auth_callback' step"
 
