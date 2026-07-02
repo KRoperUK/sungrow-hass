@@ -20,6 +20,7 @@ jobs:
             github.event.pull_request.merged == true &&
             contains(github.event.pull_request.labels.*.name, 'release')
         runs-on: ubuntu-latest
+        timeout-minutes: 15
         steps:
             - name: Checkout
               uses: actions/checkout@v7
@@ -50,7 +51,7 @@ jobs:
               run: |
                   TAG_PREFIX="dev-v${{ steps.version.outputs.version }}-"
                   echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
-                  gh release list --json tagName,isPrerelease \
+                  gh release list --limit 1000 --json tagName,isPrerelease \
                     --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
                   | while read -r tag; do
                       echo "Deleting release and tag: ${tag}"
