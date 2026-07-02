@@ -52,7 +52,8 @@ Or manually:
 | **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
 
 4. Click **Submit** — you'll be shown an authorisation URL.
-5. Visit the URL, log in, and paste the returned **code** back into Home Assistant.
+5. Choose **Authorize automatically (recommended)**. A browser window opens for the iSolarCloud login; after you authorize, Home Assistant receives the code automatically via the `/api/sungrow_hass/callback` endpoint.
+6. If the automatic redirect doesn't work (for example, because iSolarCloud strips query parameters from your redirect URI), choose **Enter code manually** and paste the `code` from the URL.
 
 ### Obtaining Credentials
 

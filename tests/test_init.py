@@ -1,6 +1,6 @@
 """Tests for Sungrow component setup and the auth callback view."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
@@ -170,34 +170,28 @@ class TestSungrowAuthCallbackView:
         assert response.status == 400
 
     async def test_callback_success(self, hass: HomeAssistant):
-        """Test a successful callback configures the flow."""
+        """Test a successful callback signals the waiting flow future."""
+        import asyncio
+
+        future: asyncio.Future[str] = asyncio.Future()
+        hass.data.setdefault("sungrow", {})["flows"] = {"flow_abc": future}
+
         mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=auth_code_123&flow_id=flow_abc")
         mock_request.app["hass"] = hass
 
-        with patch.object(
-            hass.config_entries.flow,
-            "async_configure",
-            new_callable=AsyncMock,
-            return_value={"type": "create_entry"},
-        ) as mock_configure:
-            response = await self.view.get(mock_request)
+        response = await self.view.get(mock_request)
 
         assert response.status == 200
         assert "Authorization successful" in response.text
-        mock_configure.assert_called_once_with(flow_id="flow_abc", user_input={"code": "auth_code_123"})
+        assert future.done()
+        assert future.result() == "auth_code_123"
 
-    async def test_callback_flow_error(self, hass: HomeAssistant):
-        """Test callback returns 500 when flow configuration fails."""
+    async def test_callback_flow_not_found(self, hass: HomeAssistant):
+        """Test callback returns 400 when no pending flow future exists."""
         mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=auth_code&flow_id=bad_flow")
         mock_request.app["hass"] = hass
 
-        with patch.object(
-            hass.config_entries.flow,
-            "async_configure",
-            new_callable=AsyncMock,
-            side_effect=Exception("Flow not found"),
-        ):
-            response = await self.view.get(mock_request)
+        response = await self.view.get(mock_request)
 
-        assert response.status == 500
-        assert "Error occurred" in response.text
+        assert response.status == 400
+        assert "not found" in response.text.lower()

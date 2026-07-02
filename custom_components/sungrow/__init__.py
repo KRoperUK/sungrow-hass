@@ -177,7 +177,7 @@ class SungrowAuthCallbackView(HomeAssistantView):
     name = "api:sungrow_hass:callback"
 
     async def get(self, request: web.Request) -> web.Response:
-        """Handle callback."""
+        """Handle callback from iSolarCloud after user authorization."""
         hass: HomeAssistant = request.app["hass"]
         params = request.query
         code = params.get("code")
@@ -189,14 +189,18 @@ class SungrowAuthCallbackView(HomeAssistantView):
 
         _LOGGER.debug("Callback received with code: %s for flow_id: %s", code, flow_id)
 
-        # Retrieve the flow and update it
-        try:
-            await hass.config_entries.flow.async_configure(flow_id=flow_id, user_input={"code": code})
-        except Exception as err:
-            _LOGGER.error("Failed to pass code to config flow: %s", err)
-            return web.Response(text=f"Error occurred while resuming flow: {err}", status=500)
+        # Signal the waiting future so the config flow's background task can
+        # resume the flow cleanly.
+        future = hass.data.get(DOMAIN, {}).get("flows", {}).get(flow_id)
+        if future is not None and not future.done():
+            future.set_result(code)
+            return web.Response(
+                text="Authorization successful! You can close this window and return to Home Assistant.",
+                content_type="text/html",
+            )
 
+        _LOGGER.warning("OAuth callback received for flow %s but no pending future was found", flow_id)
         return web.Response(
-            text="Authorization successful! You can close this window and return to Home Assistant.",
-            content_type="text/html",
+            text="Authorization request not found or already completed. Please return to Home Assistant and try again.",
+            status=400,
         )
