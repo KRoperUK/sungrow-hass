@@ -183,15 +183,23 @@ class SungrowAuthCallbackView(HomeAssistantView):
         code = params.get("code")
         flow_id = params.get("flow_id")
 
-        if not code or not flow_id:
-            _LOGGER.warning("Callback received but missing code or flow_id. Params: %s", params)
-            return web.Response(text="Missing code or flow_id parameters. Please try again.", status=400)
+        if not code:
+            _LOGGER.warning("Callback received but missing code. Params: %s", params)
+            return web.Response(text="Missing code parameter. Please try again.", status=400)
 
-        _LOGGER.debug("Callback received with code: %s for flow_id: %s", code, flow_id)
+        _LOGGER.debug("Callback received with code: %s, flow_id: %s", code, flow_id)
 
         # Signal the waiting future so the config flow's background task can
         # resume the flow cleanly.
-        future = hass.data.get(DOMAIN, {}).get("flows", {}).get(flow_id)
+        flows = hass.data.get(DOMAIN, {}).get("flows", {})
+        if flow_id:
+            future = flows.get(flow_id)
+        elif len(flows) == 1:
+            # iSolarCloud doesn't preserve extra query params on the redirect URI,
+            # so flow_id may be absent — fall back to the only pending flow.
+            future = next(iter(flows.values()))
+        else:
+            future = None
         if future is not None and not future.done():
             future.set_result(code)
             return web.Response(
@@ -199,7 +207,7 @@ class SungrowAuthCallbackView(HomeAssistantView):
                 content_type="text/html",
             )
 
-        _LOGGER.warning("OAuth callback received for flow %s but no pending future was found", flow_id)
+        _LOGGER.warning("OAuth callback received (flow_id=%s) but no pending future was found", flow_id)
         return web.Response(
             text="Authorization request not found or already completed. Please return to Home Assistant and try again.",
             status=400,

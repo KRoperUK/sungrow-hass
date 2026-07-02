@@ -148,17 +148,20 @@ class TestSungrowAuthCallbackView:
         response = await self.view.get(mock_request)
 
         assert response.status == 400
-        assert "Missing code or flow_id" in response.text
+        assert "Missing code" in response.text
 
     async def test_callback_missing_flow_id(self, hass: HomeAssistant):
-        """Test callback returns 400 when flow_id is missing."""
+        """Test callback with no flow_id and no pending flows returns 400.
+
+        iSolarCloud strips extra query params from the redirect URI, so flow_id
+        may be absent. When there are no pending flows the callback still 400s.
+        """
         mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=abc")
         mock_request.app["hass"] = hass
 
         response = await self.view.get(mock_request)
 
         assert response.status == 400
-        assert "Missing code or flow_id" in response.text
 
     async def test_callback_missing_both_params(self, hass: HomeAssistant):
         """Test callback returns 400 when both params are missing."""

@@ -320,6 +320,32 @@ async def test_callback_view_resumes_flow(hass: HomeAssistant, mock_auth):
     mock_auth.async_authorize.assert_called_once_with("callback_code", MOCK_USER_INPUT["redirect_uri"])
 
 
+async def test_callback_view_resumes_flow_without_flow_id(hass: HomeAssistant, mock_auth):
+    """Callback with no flow_id falls back to the only pending future (#isolarcloud-strips-params)."""
+    from custom_components.sungrow import SungrowAuthCallbackView
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+    result3 = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={"next_step_id": "auth_callback"}
+    )
+    assert result3["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+
+    request = MagicMock()
+    request.app = {"hass": hass}
+    # iSolarCloud strips extra query params — flow_id is absent
+    request.query = {"code": "callback_code"}
+    view = SungrowAuthCallbackView()
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        response = await view.get(request)
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+
+    assert response.status == 200
+    mock_auth.async_authorize.assert_called_once_with("callback_code", MOCK_USER_INPUT["redirect_uri"])
+
+
 async def test_callback_view_rejects_unknown_flow(hass: HomeAssistant, mock_auth):
     """Test the HTTP callback view rejects callbacks for unknown flows."""
     from custom_components.sungrow import SungrowAuthCallbackView
