@@ -25,10 +25,8 @@ jobs:
               id: tag
               run: |
                   VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
-                  SHA="${GITHUB_SHA::7}"
-                  TAG="dev-v${VERSION}-${SHA}"
+                  TAG="dev-v${VERSION}-${{ github.run_number }}"
                   echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-                  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
             - name: Create pre-release
               env:
