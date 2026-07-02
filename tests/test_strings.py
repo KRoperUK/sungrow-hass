@@ -31,6 +31,8 @@ def test_strings_has_required_steps(strings_data):
     steps = strings_data["config"]["step"]
     assert "user" in steps, "Missing 'user' step"
     assert "auth" in steps, "Missing 'auth' step"
+    assert "auth_manual" in steps, "Missing 'auth_manual' step"
+    assert "auth_callback" in steps, "Missing 'auth_callback' step"
 
 
 def test_strings_user_step_has_required_fields(strings_data):
@@ -42,9 +44,9 @@ def test_strings_user_step_has_required_fields(strings_data):
     )
 
 
-def test_strings_auth_step_has_code_field(strings_data):
-    """Test the auth step defines the 'code' field."""
-    auth_data = strings_data["config"]["step"]["auth"]["data"]
+def test_strings_auth_manual_step_has_code_field(strings_data):
+    """Test the auth_manual step defines the 'code' field."""
+    auth_data = strings_data["config"]["step"]["auth_manual"]["data"]
     assert "code" in auth_data
 
 
