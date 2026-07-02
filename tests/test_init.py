@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pysolarcloud
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -18,7 +19,7 @@ from custom_components.sungrow import (
 )
 from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
 
-from .conftest import MOCK_CONFIG_DATA
+from .conftest import MOCK_CONFIG_DATA, MOCK_PLANT_LIST, MOCK_REALTIME_DATA
 
 # ---------------------------------------------------------------------------
 # async_setup (registers the HTTP callback view)
@@ -54,6 +55,54 @@ async def test_async_setup_entry_success(hass: HomeAssistant, mock_setup_auth, m
     assert len(coordinators) == 2
     # Entities were created for the data points.
     assert hass.states.async_all("sensor")
+
+
+async def test_setup_persists_rotated_tokens(hass: HomeAssistant):
+    """End-to-end: a token rotation during setup is written back to entry.data.
+
+    This is the fix for #14/#15/#20/#21 — the ``_save_tokens`` callback wired into
+    ``async_setup_entry`` must persist the rotated tokens so they survive a restart.
+    Uses the real ``SungrowAuth`` (not the ``mock_setup_auth`` fixture) so the
+    token_updater wiring is exercised for real.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    rotated = {"access_token": "new_access", "refresh_token": "new_refresh", "token_type": "bearer"}
+    captured: dict = {}
+
+    class _FakePlants:
+        def __init__(self, auth):
+            captured["auth"] = auth
+
+        async def async_get_plants(self):
+            # pysolarcloud refreshes the access token here and rotates the dict.
+            await captured["auth"].async_get_access_token()
+            return MOCK_PLANT_LIST
+
+        async def async_get_realtime_data(self, *args, **kwargs):
+            return MOCK_REALTIME_DATA
+
+        async def async_get_plant_devices(self, *args, **kwargs):
+            return []
+
+    async def _fake_parent_get_token(self):
+        # Simulate pysolarcloud assigning a brand-new tokens dict on refresh.
+        self.tokens = rotated
+        return "new_access"
+
+    with (
+        patch("custom_components.sungrow.Plants", _FakePlants),
+        patch("custom_components.sungrow.Control", MagicMock()),
+        patch("custom_components.sungrow.async_get_clientsession", return_value=MagicMock()),
+        patch.object(pysolarcloud.Auth, "async_get_access_token", _fake_parent_get_token),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # The rotated tokens must be persisted back to the entry, not just held in memory.
+    assert entry.data["tokens"] == rotated
 
 
 async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
@@ -293,3 +342,22 @@ class TestSungrowAuthCallbackView:
 
         assert response.status == 400
         assert "not found" in response.text.lower()
+
+    async def test_callback_single_pending_flow_fallback(self, hass: HomeAssistant):
+        """No flow_id but exactly one pending flow: resolve it.
+
+        iSolarCloud strips extra query params from the redirect URI, so the real
+        production callback usually has no flow_id. With a single pending flow the
+        view falls back to it (the ``elif len(flows) == 1`` branch).
+        """
+        future: asyncio.Future[str] = asyncio.Future()
+        hass.data.setdefault(DOMAIN, {})["flows"] = {"only_flow": future}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=the_code")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 200
+        assert future.done()
+        assert future.result() == "the_code"
