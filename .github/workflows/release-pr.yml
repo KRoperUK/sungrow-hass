@@ -53,6 +53,9 @@ jobs:
                   create-summary: true
                   skip-tag: true
                   skip-commit: true
+                  # Redundant with fetch-depth: 0 and the exact call that fails in
+                  # detached HEAD — skip it.
+                  skip-git-pull: true
 
             - name: Sync versions to manifest and pyproject
               if: steps.changelog.outputs.skipped != 'true'
