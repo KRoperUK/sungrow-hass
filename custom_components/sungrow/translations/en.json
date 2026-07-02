@@ -29,15 +29,18 @@
         }
       }
     },
+    "progress": {
+      "wait_for_callback": "Waiting for authorization. Open the link in your browser to approve the application:\n\n{auth_url}\n\nThis screen updates automatically once you are redirected back."
+    },
     "error": {
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
-      "invalid_auth_url": "Could not find 'applicationId' in the provided URL.",
       "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "library_missing": "The pysolarcloud library is not installed. Restart Home Assistant so the integration's requirements are installed, then try again.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful"
     }
@@ -51,6 +54,30 @@
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)"
         }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "charge_discharge_power": {
+        "name": "Charge/Discharge Power"
+      },
+      "soc_upper_limit": {
+        "name": "SOC Upper Limit"
+      },
+      "soc_lower_limit": {
+        "name": "SOC Lower Limit"
+      },
+      "forced_charging_target_soc_1": {
+        "name": "Forced Charge Target SOC"
+      }
+    },
+    "select": {
+      "charge_discharge_command": {
+        "name": "Charge/Discharge Command"
+      },
+      "forced_charging": {
+        "name": "Forced Charging"
       }
     }
   }

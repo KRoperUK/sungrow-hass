@@ -18,10 +18,12 @@ from .coordinator import SungrowPlantCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Dispatch writes go to a single device via one Control client; serialise them.
+PARALLEL_UPDATES = 1
+
 # Select parameters exposed as HA Select entities.
 DISPATCH_SELECTS: dict[str, dict] = {
     "charge_discharge_command": {
-        "name": "Charge/Discharge Command",
         "options_map": {
             "Stop": Control.CHARGE_DISCHARGE_COMMANDS["stop"],
             "Charge": Control.CHARGE_DISCHARGE_COMMANDS["charge"],
@@ -29,7 +31,6 @@ DISPATCH_SELECTS: dict[str, dict] = {
         },
     },
     "forced_charging": {
-        "name": "Forced Charging",
         "options_map": {
             "Disable": Control.FORCED_CHARGING["disable"],
             "Enable": Control.FORCED_CHARGING["enable"],
@@ -40,10 +41,10 @@ DISPATCH_SELECTS: dict[str, dict] = {
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow dispatch select entities."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    control: Control = entry_data["control"]
-    devices_by_plant: dict[str, list[dict]] = entry_data["devices"]
-    coordinators: list[SungrowPlantCoordinator] = entry_data["coordinators"]
+    data = entry.runtime_data
+    control = data.control
+    devices_by_plant = data.devices
+    coordinators = data.coordinators
 
     entities: list[SelectEntity] = []
     for coordinator in coordinators:
@@ -94,12 +95,15 @@ class SungrowDispatchSelect(CoordinatorEntity, SelectEntity):
         self.options_map = dict(meta["options_map"])
         reverse_map = {v: k for k, v in self.options_map.items()}
         self._reverse_map = reverse_map
-        self._attr_name = meta["name"]
+        # Entity name comes from translations (entity.select.<param>.name).
+        self._attr_translation_key = param
         self._attr_unique_id = f"{coordinator.plant_id}_{device_uuid}_{param}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_uuid)},
             name=device_name,
             manufacturer="Sungrow",
+            # Nest the dispatch device under the plant device the sensors created.
+            via_device=(DOMAIN, coordinator.plant_id),
         )
         self._attr_options = list(self.options_map.keys())
 
