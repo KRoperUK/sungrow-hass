@@ -1,5 +1,17 @@
 ## [1.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v1.1.0) (2026-07-02)
 
+> [!IMPORTANT]
+> **Upgrade note — dispatch (charge/discharge) users.** The dispatch number/select
+> controls now correctly attach to your **battery / energy-storage device** instead
+> of the first-listed device ([#68](https://github.com/KRoperUK/sungrow-hass/issues/68)).
+> On systems with **both an inverter and a battery**, this can change those entities'
+> unique IDs, so Home Assistant may **recreate the dispatch entities** — the old ones
+> appear as *unavailable* and can be deleted, and any automations/dashboards that
+> reference them should be re-checked after updating. **Sensors are unaffected**, and
+> plants without dispatch controls (or with a single device) see no change.
+>
+> Polling intervals are migrated automatically (the setting moved from minutes to
+> seconds — an existing 5 becomes 300s); no action needed.
 
 ### Features
 
