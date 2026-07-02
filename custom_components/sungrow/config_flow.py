@@ -15,6 +15,7 @@ from .const import (
     CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
+    CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
@@ -206,23 +207,65 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+def _parse_extra_measure_points(raw: str | None) -> dict[str, str]:
+    """Parse a comma-separated 'point_id=code' list into a mapping.
+
+    Whitespace around entries is ignored; duplicate point_ids keep the last value.
+    """
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise vol.Invalid(f"Extra measure point '{entry}' must be in the form point_id=code")
+        point_id, code = entry.split("=", 1)
+        point_id = point_id.strip()
+        code = code.strip()
+        if not point_id or not code:
+            raise vol.Invalid("point_id and code must not be empty")
+        if not point_id.isdigit():
+            raise vol.Invalid(f"point_id must be numeric, got '{point_id}'")
+        out[point_id] = code
+    return out
+
+
 class SungrowOptionsFlow(config_entries.OptionsFlow):
     """Handle Sungrow integration options (e.g. polling interval)."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage the integration options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Normalise the free-text mapping into a dict before storing.
+            try:
+                extras = _parse_extra_measure_points(user_input.get(CONF_EXTRA_MEASURE_POINTS))
+            except vol.Invalid as exc:
+                errors["base"] = "invalid_extra_measure_points"
+                _LOGGER.warning("Invalid extra measure points input: %s", exc)
+            else:
+                data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
+                return self.async_create_entry(title="", data=data)
 
-        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current_extras = self.config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {})
+        extras_str = ",".join(f"{pid}={code}" for pid, code in current_extras.items())
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SCAN_INTERVAL, default=current): vol.All(
+                    vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_EXTRA_MEASURE_POINTS,
+                        default=extras_str,
+                        description={"suggested_value": extras_str},
+                    ): str,
                 }
             ),
+            errors=errors,
         )

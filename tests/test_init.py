@@ -44,7 +44,8 @@ async def test_async_setup_entry_success(hass: HomeAssistant, mock_setup_auth, m
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    coordinators = hass.data[DOMAIN][entry.entry_id]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    coordinators = entry_data["coordinators"]
     # MOCK_PLANT_LIST has two plants.
     assert len(coordinators) == 2
     # Entities were created for the data points.
@@ -117,7 +118,8 @@ async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    coordinators = hass.data[DOMAIN][entry.entry_id]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    coordinators = entry_data["coordinators"]
     assert coordinators[0].update_interval.total_seconds() == 15 * 60
 
 

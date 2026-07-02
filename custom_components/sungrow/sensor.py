@@ -13,6 +13,32 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 
+# Friendly names for point codes that are otherwise opaque or overly generic.
+# These are applied in addition to the code-based naming, so existing entities
+# keep their unique_id while users see a clearer label.
+SENSOR_ALIASES: dict[str, str] = {
+    "total_field_energy_storage_active_power": "Battery Power",
+    "total_field_energy_storage_maximum_reactive_power": "Battery Max Reactive Power",
+    "total_field_chargeable_energy": "Battery Chargeable Energy",
+    "total_field_dischargeable_energy": "Battery Dischargeable Energy",
+    "total_field_maximum_rechargeable_power": "Battery Max Charge Power",
+    "total_field_maximum_dischargeable_power": "Battery Max Discharge Power",
+    "daily_field_charge_capacity": "Battery Daily Charge Capacity",
+    "daily_field_discharge_capacity": "Battery Daily Discharge Capacity",
+    "energy_storage_active_power_ems": "EMS Battery Power",
+    "energy_storage_soc_ems": "EMS Battery SOC",
+}
+
+# Per-issue custom codes that users commonly request. If the point_id is configured
+# via the options flow, the code is used as-is; we also supply a friendly alias here
+# so the UI label is meaningful.
+EXTRA_CODE_ALIASES: dict[str, str] = {
+    "battery_charge_power": "Battery Charge Power",
+    "battery_discharge_power": "Battery Discharge Power",
+    "ev_charger_power": "EV Charger Power",
+    "ev_charger_energy": "EV Charger Energy",
+}
+
 _LOGGER = logging.getLogger(__name__)
 
 # Map a (lower-cased) unit of measurement to the appropriate device and state class.
@@ -83,7 +109,8 @@ def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceC
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensors from the coordinators created during entry setup."""
-    coordinators: list[SungrowPlantCoordinator] = hass.data[DOMAIN][entry.entry_id]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    coordinators: list[SungrowPlantCoordinator] = entry_data["coordinators"]
 
     entities: list[SungrowSensor] = []
     for coordinator in coordinators:
@@ -120,6 +147,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         else:
             sensor_name = point_code.replace("_", " ").title()
 
+        # Apply friendly aliases for known opaque codes, including user-configured
+        # extra measure points that have a documented alias.
+        sensor_name = EXTRA_CODE_ALIASES.get(point_code, SENSOR_ALIASES.get(point_code, sensor_name))
+
         # With has_entity_name = True, HA prefixes the device name automatically
         self._attr_name = sensor_name
         _LOGGER.debug("Created sensor: %s %s (code: %s)", plant_name, sensor_name, point_code)
@@ -143,7 +174,8 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
         # Infer device class / state class / unit so the Energy dashboard and history
         # graphs work out of the box (issue #19).
-        self._attr_native_unit_of_measurement = init_data.get("unit")
+        unit = init_data.get("unit")
+        self._attr_native_unit_of_measurement = unit if unit else None
         device_class, state_class = infer_device_class(init_data.get("unit"), point_code)
         self._attr_device_class = device_class
         self._attr_state_class = state_class

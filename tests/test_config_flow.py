@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
+    CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -309,3 +310,46 @@ async def test_options_flow_sets_scan_interval(hass: HomeAssistant, mock_setup_a
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_SCAN_INTERVAL] == 10
+
+
+async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """The options flow parses the free-text extra measure point mapping."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 5,
+            CONF_EXTRA_MEASURE_POINTS: "99999=battery_charge_power, 99998=battery_discharge_power",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_EXTRA_MEASURE_POINTS] == {
+        "99999": "battery_charge_power",
+        "99998": "battery_discharge_power",
+    }
+
+
+async def test_options_flow_rejects_invalid_extra_measure_points(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """The options flow rejects malformed extra measure point input."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 5, CONF_EXTRA_MEASURE_POINTS: "not_a_mapping"},
+    )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["errors"] is not None

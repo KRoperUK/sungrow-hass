@@ -29,6 +29,7 @@
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
       "invalid_auth_url": "Could not find 'applicationId' in the provided URL.",
+      "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -42,7 +43,8 @@
         "title": "Sungrow Options",
         "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota.",
         "data": {
-          "scan_interval": "Polling interval (minutes)"
+          "scan_interval": "Polling interval (minutes)",
+          "extra_measure_points": "Extra measure points (point_id=code, comma separated)"
         }
       }
     }

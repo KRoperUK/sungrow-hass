@@ -73,6 +73,22 @@ class TestSungrowSensor:
         assert sensor._attr_name == "Total Active Power"
         assert sensor._attr_unique_id == "123_total_active_power"
 
+    def test_sensor_alias_for_battery_power(self):
+        """Known opaque battery codes get a friendly alias."""
+        coordinator = self._make_coordinator()
+        init_data = {"code": "total_field_energy_storage_active_power", "value": "-1.4", "unit": "kW"}
+        sensor = SungrowSensor(coordinator, "total_field_energy_storage_active_power", "123", "My Plant", init_data)
+
+        assert sensor._attr_name == "Battery Power"
+
+    def test_sensor_alias_for_extra_measure_point(self):
+        """User-configured extra measure points use documented aliases when available."""
+        coordinator = self._make_coordinator()
+        init_data = {"code": "battery_charge_power", "value": "1500", "unit": "W"}
+        sensor = SungrowSensor(coordinator, "battery_charge_power", "123", "My Plant", init_data)
+
+        assert sensor._attr_name == "Battery Charge Power"
+
     def test_sensor_name_numeric_code_fallback(self):
         """Test sensor with a numeric code falls back to init_data name."""
         coordinator = self._make_coordinator()
@@ -218,7 +234,12 @@ async def test_sensor_setup_creates_entities(hass: HomeAssistant):
         ),
         _coordinator_with("67890", "Plant B", {"total_active_power": {"value": "3.1", "unit": "kW"}}),
     ]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinators": coordinators,
+        "control": MagicMock(),
+        "devices": {},
+        "heartbeat_stop": {},
+    }
 
     added = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -234,7 +255,12 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
     entry.add_to_hass(hass)
 
     coordinators = [_coordinator_with("12345", "Plant A", {}), _coordinator_with("67890", "Plant B", {})]
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinators": coordinators,
+        "control": MagicMock(),
+        "devices": {},
+        "heartbeat_stop": {},
+    }
 
     added = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
