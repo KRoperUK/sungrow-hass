@@ -93,6 +93,32 @@ issue with the sensor's unit and the `code` shown in its attributes.
 
 ---
 
+## A device (EV charger, meter, etc.) isn't showing up
+
+The plant realtime endpoint only returns the point IDs the integration knows to
+ask for, so hardware the upstream library hasn't catalogued — e.g. a **Sungrow
+AC011E EV charger** ([#18](https://github.com/KRoperUK/sungrow-hass/issues/18)) —
+won't create sensors automatically even though it appears in the iSolarCloud app.
+
+To help map it:
+
+1. **Download diagnostics.** Go to **Settings → Devices & services → Sungrow
+   iSolarCloud → ⋮ → Download diagnostics**. The JSON is redacted (no tokens or
+   secrets) and now includes:
+   - `all_devices` — every device on your plant, including the charger, with its
+     `device_type` (unmapped hardware shows a raw numeric type).
+   - `device_realtime` — a best-effort per-device realtime fetch for each device
+     type, so any reachable charger points show up here.
+2. **Attach that JSON to [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)**
+   so the point IDs can be added to the default mapping.
+3. **Stopgap — surface points yourself.** If you already know a point ID (from the
+   iSolarCloud Developer Portal's *Common Measuring Point Enumeration*), add it
+   under **Configure → Extra measure points** as `point_id=code` (for example
+   `<id>=ev_charger_power`). Recognised codes like `ev_charger_power` /
+   `ev_charger_energy` get a friendly name automatically.
+
+---
+
 ## Still stuck?
 
 Open a [bug report](https://github.com/KRoperUK/sungrow-hass/issues/new/choose)
