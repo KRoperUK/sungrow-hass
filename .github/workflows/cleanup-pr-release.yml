@@ -1,0 +1,29 @@
+name: Cleanup PR dev releases
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete pre-releases for this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
+          TAG_PREFIX="dev-${BRANCH}-v"
+          echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
+          gh release list --json tagName,isPrerelease \
+            --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
+          | while read -r tag; do
+              echo "Deleting release and tag: ${tag}"
+              gh release delete "$tag" --yes --cleanup-tag
+            done
