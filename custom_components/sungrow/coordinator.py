@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -37,7 +38,7 @@ def is_auth_error(err: Exception) -> bool:
     return False
 
 
-class SungrowPlantCoordinator(DataUpdateCoordinator):
+class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage fetching data from a single plant."""
 
     def __init__(
@@ -47,7 +48,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         plants_service: Plants,
         plant_id: str,
         plant_name: str,
-        devices: list[dict] | None = None,
+        devices: list[dict[str, Any]] | None = None,
     ) -> None:
         """Initialize the coordinator."""
         scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -61,13 +62,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         self.plants_service = plants_service
         self.plant_id = plant_id
         self.plant_name = plant_name
-        self.devices: list[dict] = list(devices or [])
+        self.devices: list[dict[str, Any]] = list(devices or [])
         self.extra_measure_points: dict[str, str] = dict(config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {}))
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
         # uuid -> { code: point } for per-device realtime (populated when enabled).
-        self.device_data: dict[str, dict] = {}
+        self.device_data: dict[str, dict[str, Any]] = {}
 
-    async def _async_update_data(self):
+    async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
         try:
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
@@ -88,7 +89,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         if self.enable_device_sensors:
             self.device_data = await self._async_fetch_device_data()
 
-        return all_plants_data.get(self.plant_id, {})
+        # pysolarcloud is untyped, so the realtime payload is Any.
+        return cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
 
     async def _async_refresh_devices(self) -> None:
         """Re-fetch the plant's device list (best effort, non-fatal)."""
@@ -100,7 +102,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         # Mutate in place so holders of this list (runtime_data.devices) see updates.
         self.devices[:] = list(devices or [])
 
-    async def _async_fetch_device_data(self) -> dict[str, dict]:
+    async def _async_fetch_device_data(self) -> dict[str, dict[str, Any]]:
         """Fetch per-device realtime for each distinct device type (best effort).
 
         The plant realtime endpoint only returns the plant-level points, so devices
@@ -110,8 +112,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
         extra measure points are requested here too, so newly identified charger/meter
         point IDs surface without a code change.
         """
-        merged: dict[str, dict] = {}
-        seen_types: set = set()
+        merged: dict[str, dict[str, Any]] = {}
+        seen_types: set[Any] = set()
         for device in self.devices:
             device_type = device.get("device_type")
             if device_type is None:

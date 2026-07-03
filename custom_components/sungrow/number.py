@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
@@ -36,7 +37,7 @@ DEFAULT_MAX_DISPATCH_POWER = 5000
 _MODEL_POWER_RE = re.compile(r"S[GH](\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
-def rated_power_w(device: dict) -> int | None:
+def rated_power_w(device: dict[str, Any]) -> int | None:
     """Best-effort rated power in watts parsed from a device's model code.
 
     Returns ``None`` when no rating can be parsed, so callers fall back to the
@@ -56,7 +57,7 @@ def rated_power_w(device: dict) -> int | None:
 
 # Number parameters exposed as HA Number entities.
 # Keys are canonical Control parameter names; values describe the HA entity.
-DISPATCH_NUMBERS: dict[str, dict] = {
+DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
     "charge_discharge_power": {
         "device_class": NumberDeviceClass.POWER,
         "native_unit_of_measurement": "W",
@@ -92,7 +93,7 @@ DISPATCH_NUMBERS: dict[str, dict] = {
 }
 
 
-def _build_numbers(coordinator, control) -> list[NumberEntity]:
+def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> list[NumberEntity]:
     """Build the dispatch number entities for a coordinator's target device.
 
     Returns an empty list when no dispatch-capable device is present. Reads the
@@ -156,7 +157,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEn
         device_uuid: str,
         device_name: str,
         param: str,
-        meta: dict,
+        meta: dict[str, Any],
     ) -> None:
         """Initialize the dispatch number."""
         super().__init__(coordinator)

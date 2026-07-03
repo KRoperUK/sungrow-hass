@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 import voluptuous as vol
 from aiohttp import web
-from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.http import HomeAssistantView
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -46,15 +48,15 @@ class SungrowData:
 
     coordinators: list[SungrowPlantCoordinator]
     control: Control
-    devices: dict[str, list[dict]]
+    devices: dict[str, list[dict[str, Any]]]
     # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
-    heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task]] = field(default_factory=dict)
+    heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task[None]]] = field(default_factory=dict)
 
 
 type SungrowConfigEntry = ConfigEntry[SungrowData]
 
 
-def _matches_device_type(device: dict, target: DeviceType) -> bool:
+def _matches_device_type(device: dict[str, Any], target: DeviceType) -> bool:
     """Return True if a discovered device is of ``target`` type.
 
     pysolarcloud converts a *known* device type to a ``DeviceType`` enum, but the
@@ -65,7 +67,7 @@ def _matches_device_type(device: dict, target: DeviceType) -> bool:
     return dt in (target, target.value, target.name)
 
 
-def select_dispatch_device(devices: list[dict]) -> dict | None:
+def select_dispatch_device(devices: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Pick the device to attach dispatch (number/select) entities to.
 
     Only inverters and energy-storage systems accept charge/discharge dispatch, so
@@ -82,11 +84,11 @@ def select_dispatch_device(devices: list[dict]) -> dict | None:
 class IterableSchema(vol.Schema):
     """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         """Return an empty iterator."""
         return iter([])
 
-    def __contains__(self, item):
+    def __contains__(self, item: object) -> bool:
         """Return False for any item check."""
         return False
 
@@ -112,7 +114,7 @@ def _ensure_callback_view_registered(hass: HomeAssistant) -> None:
     domain_data["callback_view_registered"] = True
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the Sungrow iSolarCloud component."""
     _ensure_callback_view_registered(hass)
     return True
@@ -138,7 +140,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     session = async_get_clientsession(hass)
     host = GATEWAYS.get(entry.data[CONF_GATEWAY], DEFAULT_HOST)
 
-    def _save_tokens(tokens: dict) -> None:
+    def _save_tokens(tokens: dict[str, Any]) -> None:
         """Persist refreshed/rotated tokens back to the config entry."""
         hass.config_entries.async_update_entry(entry, data={**entry.data, "tokens": tokens})
 
@@ -164,7 +166,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
-    devices_by_plant: dict[str, list[dict]] = {}
+    devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
         plant_name = plant_info["ps_name"]
@@ -233,7 +235,7 @@ async def async_remove_config_entry_device(
     return not any(identifier in known for identifier in device_entry.identifiers)
 
 
-async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task]) -> None:
+async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -> None:
     """Signal a heartbeat loop to stop and wait for it to actually exit."""
     stop_event, task = heartbeat
     stop_event.set()
