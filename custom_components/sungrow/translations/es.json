@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar con iSolarCloud",
+        "description": "Introduzca sus credenciales de la API de iSolarCloud. Puede encontrarlas aquí: [iSolarCloud]({url})\n\nDespués de enviarlas, se crea el concentrador y Home Assistant le pedirá que lo autorice en su navegador.",
+        "data": {
+          "gateway": "Región de la pasarela",
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "app_id": "App ID",
+          "redirect_uri": "URI de redirección"
+        },
+        "data_description": {
+          "app_key": "AppKey de la plataforma para desarrolladores de iSolarCloud.",
+          "app_secret": "AppSecret de la plataforma para desarrolladores de iSolarCloud.",
+          "app_id": "App ID de la plataforma para desarrolladores de iSolarCloud. Para encontrarlo, vaya a su aplicación y busque «id» dentro de la URL, de esta forma: {app_id_url}."
+        }
+      },
+      "auth_callback": {
+        "title": "Esperando la autorización",
+        "description": "Abra el enlace siguiente para autorizar la aplicación:\n\n{auth_url}\n\nDespués de iniciar sesión y aprobar la aplicación, será redirigido de vuelta y esta pantalla se actualizará automáticamente.\n\nSi la redirección no se completa (por ejemplo, si la página muestra un error), espere un momento y podrá pegar el código manualmente."
+      },
+      "auth_manual": {
+        "title": "Introducir el código de autorización",
+        "description": "La redirección automática no se completó. Finalice la autorización manualmente:\n\n{auth_url}\n\n**Instrucciones:**\n1. Abra el enlace anterior e inicie sesión (omita este paso si ya lo hizo).\n2. Será redirigido (la página puede mostrar un error).\n3. Copie el parámetro **code** de la barra de direcciones de la URL.\n4. Pegue el código —o la URL de redirección completa— a continuación.",
+        "data": {
+          "code": "Código de autorización o URL de redirección completa"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigurar iSolarCloud",
+        "description": "Actualice su región o sus credenciales de la API (el App ID no cambia). Se le pedirá que vuelva a autorizar en su navegador, ya que unas credenciales nuevas o una región nueva requieren tokens nuevos.",
+        "data": {
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "gateway": "Región de la pasarela",
+          "redirect_uri": "URI de redirección"
+        }
+      }
+    },
+    "progress": {
+      "wait_for_callback": "Esperando la autorización. Abra el enlace en su navegador para aprobar la aplicación:\n\n{auth_url}\n\nEsta pantalla se actualiza automáticamente en cuanto sea redirigido de vuelta."
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar",
+      "invalid_auth": "Autenticación no válida",
+      "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
+      "unknown": "Error inesperado"
+    },
+    "abort": {
+      "already_configured": "El dispositivo ya está configurado",
+      "library_missing": "La biblioteca pysolarcloud no está instalada. Reinicie Home Assistant para que se instalen las dependencias de la integración y vuelva a intentarlo.",
+      "missing_code": "No se recibió el código de autorización. Vuelva a intentarlo.",
+      "reauth_successful": "La reautenticación se realizó correctamente",
+      "reconfigure_successful": "La reconfiguración se realizó correctamente",
+      "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Sungrow",
+        "description": "Ajuste la frecuencia con la que Home Assistant consulta iSolarCloud. Los valores más bajos actualizan con más frecuencia, pero consumen más de su cuota de la API. El plan gratuito permite unas 2000 llamadas/hora; el mínimo es de 10 segundos.",
+        "data": {
+          "scan_interval": "Intervalo de sondeo (segundos)",
+          "extra_measure_points": "Puntos de medición adicionales (point_id=code, separados por comas)",
+          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "charge_discharge_power": {
+        "name": "Potencia de carga/descarga"
+      },
+      "soc_upper_limit": {
+        "name": "Límite superior del SOC"
+      },
+      "soc_lower_limit": {
+        "name": "Límite inferior del SOC"
+      },
+      "forced_charging_target_soc_1": {
+        "name": "SOC objetivo de carga forzada (Ventana 1)"
+      },
+      "forced_charging_target_soc_2": {
+        "name": "SOC objetivo de carga forzada (Ventana 2)"
+      },
+      "feed_in_limitation_value": {
+        "name": "Límite de exportación (Potencia)"
+      },
+      "feed_in_limitation_ratio": {
+        "name": "Límite de exportación (%)"
+      },
+      "active_power_limit_ratio": {
+        "name": "Límite de potencia activa"
+      }
+    },
+    "select": {
+      "charge_discharge_command": {
+        "name": "Comando de carga/descarga"
+      },
+      "forced_charging": {
+        "name": "Carga forzada"
+      },
+      "feed_in_limitation": {
+        "name": "Limitación de exportación"
+      },
+      "limited_power_switch": {
+        "name": "Limitación de potencia activa"
+      },
+      "battery_first": {
+        "name": "Modo Batería primero"
+      }
+    }
+  },
+  "exceptions": {
+    "dispatch_write_failed": {
+      "message": "No se pudo actualizar {param} en el inversor: {error}"
+    }
+  }
+}
