@@ -116,3 +116,65 @@ def resolve_enum_value(point_id: str, value: Any) -> str | None:
     except (ValueError, TypeError):
         return str(value)
     return mapping.get(code, str(value))
+
+
+# Percentage / dimensionless codes that mean charge level (battery device class)
+# vs. health (numeric only) vs. power factor.
+_SOC_HINTS = ("soc", "battery_level", "state_of_charge")
+_SOH_HINTS = ("soh", "health")
+_POWER_FACTOR_HINTS = ("power_factor",)
+
+
+def _classify_percent(code: str) -> _ClassPair:
+    """Classify a ``%`` point using its code (charge vs. health vs. generic)."""
+    lowered = code.lower()
+    if any(h in lowered for h in _SOH_HINTS):
+        return (None, _MEASUREMENT)
+    if any(h in lowered for h in _SOC_HINTS) or "battery" in lowered or "capacity" in lowered:
+        return (SensorDeviceClass.BATTERY, _MEASUREMENT)
+    return (None, _MEASUREMENT)
+
+
+def _classify_by_code(code: str) -> _ClassPair | None:
+    """Fallback classification from a dimensionless code, else ``None``."""
+    lowered = code.lower()
+    if any(h in lowered for h in _POWER_FACTOR_HINTS):
+        return (SensorDeviceClass.POWER_FACTOR, _MEASUREMENT)
+    if any(h in lowered for h in _SOH_HINTS):
+        return (None, _MEASUREMENT)
+    if any(h in lowered for h in _SOC_HINTS):
+        return (SensorDeviceClass.BATTERY, _MEASUREMENT)
+    return None
+
+
+def resolve_classification(unit: str | None, code: str, point_id: str) -> _ClassPair:
+    """Resolve (device_class, state_class) for a measure point.
+
+    The API unit is authoritative; the catalog and code keywords are fallbacks
+    for the many documented points that report no unit.
+    """
+    if point_id in ENUM_MAPS:
+        return (SensorDeviceClass.ENUM, None)
+
+    by_unit = _classify_by_unit(unit)
+    if by_unit is not None:
+        return by_unit
+
+    if unit and unit.strip().lower() in ("%", "percent"):
+        return _classify_percent(code)
+
+    info = POINT_CATALOG.get(point_id)
+    if info is not None and (info.device_class is not None or info.state_class is not None):
+        return (info.device_class, info.state_class)
+
+    by_code = _classify_by_code(code)
+    if by_code is not None:
+        return by_code
+
+    return (None, None)
+
+
+# Populated with the full catalog in ``_build_catalog`` (Task 4); the stub keeps
+# ``resolve_classification`` importable and its catalog-fallback branch inert
+# until the catalog is built.
+POINT_CATALOG: dict[str, PointInfo] = {}

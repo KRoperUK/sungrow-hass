@@ -74,3 +74,50 @@ def test_enum_value_unmapped_code_falls_back_to_str():
 
 def test_enum_value_none_for_non_enum():
     assert mp.resolve_enum_value("8018", 5) is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_classification
+# ---------------------------------------------------------------------------
+
+
+def test_classify_enum_point():
+    assert mp.resolve_classification("", "ev_charger_status", "33716") == (
+        SensorDeviceClass.ENUM,
+        None,
+    )
+
+
+def test_classify_unit_wins():
+    assert mp.resolve_classification("kWh", "anything", "0") == (
+        SensorDeviceClass.ENERGY,
+        TI,
+    )
+
+
+def test_classify_percent_battery():
+    assert mp.resolve_classification("%", "battery_soc", "0") == (SensorDeviceClass.BATTERY, M)
+
+
+def test_classify_percent_soh_is_not_battery():
+    # SOH is health, not charge level — must NOT be BATTERY device class.
+    assert mp.resolve_classification("%", "battery_soh", "0") == (None, M)
+
+
+def test_classify_percent_generic():
+    assert mp.resolve_classification("%", "efficiency", "0") == (None, M)
+
+
+def test_classify_dimensionless_power_factor_by_code():
+    assert mp.resolve_classification("", "meter_power_factor", "0") == (
+        SensorDeviceClass.POWER_FACTOR,
+        M,
+    )
+
+
+def test_classify_dimensionless_soc_by_code():
+    assert mp.resolve_classification(None, "total_field_soc", "0") == (SensorDeviceClass.BATTERY, M)
+
+
+def test_classify_unknown_is_text():
+    assert mp.resolve_classification("", "some_status", "0") == (None, None)
