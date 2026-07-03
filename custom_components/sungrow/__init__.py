@@ -222,8 +222,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     for coordinator in coordinators:
         entry.async_on_unload(coordinator.async_add_listener(_prune))
 
-    # Reload the entry when its options (e.g. scan interval) change.
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    # NB: we deliberately do NOT register an update listener here. Options changes
+    # reload the entry via ``SungrowOptionsFlow`` (``OptionsFlowWithReload``); a bare
+    # update listener would also fire on every token rotation (a plain ``entry.data``
+    # write from ``_save_tokens``), needlessly reloading the whole integration (#110).
 
     return True
 
@@ -236,11 +238,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     heartbeats.clear()
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
-    """Reload the config entry when its options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _known_device_ids(entry: SungrowConfigEntry) -> set[tuple[str, str]]:

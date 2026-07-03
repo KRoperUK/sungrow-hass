@@ -457,8 +457,15 @@ def _parse_extra_measure_points(raw: str | None) -> dict[str, str]:
     return out
 
 
-class SungrowOptionsFlow(config_entries.OptionsFlow):
-    """Handle Sungrow integration options (e.g. polling interval)."""
+class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Handle Sungrow integration options (e.g. polling interval).
+
+    Subclasses ``OptionsFlowWithReload`` so an options change reloads the entry
+    automatically. This replaces the old manual ``add_update_listener`` — which
+    also fired on every token rotation (a plain ``entry.data`` write) and reloaded
+    the whole integration on each refresh (#110). Because ``OptionsFlowWithReload``
+    forbids config-entry update listeners, none are registered in ``__init__``.
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the integration options."""

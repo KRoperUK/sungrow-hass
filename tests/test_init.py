@@ -304,18 +304,52 @@ async def test_prune_stale_devices(hass: HomeAssistant):
 
 
 async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """Updating options should reload the entry and apply the new scan interval."""
+    """Changing an option via the options flow reloads the entry (#110).
+
+    ``OptionsFlowWithReload`` schedules the reload when the flow stores new
+    options, so the fresh scan interval takes effect on a brand-new coordinator.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 15})
+    runtime_before = entry.runtime_data
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(result["flow_id"], user_input={CONF_SCAN_INTERVAL: 15})
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
+    # A reload replaced runtime_data and applied the new interval.
+    assert entry.runtime_data is not runtime_before
     coordinators = entry.runtime_data.coordinators
     assert coordinators[0].update_interval.total_seconds() == 15
+
+
+async def test_token_write_does_not_reload_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A token rotation (an ``entry.data`` write) must NOT reload the integration (#110).
+
+    ``_save_tokens`` writes rotated tokens back to ``entry.data`` on every refresh.
+    Only an options change should reload; a token-only write must leave the running
+    integration untouched (no extra API calls, no brief unavailability, no cancelled
+    EMS heartbeat), which we assert by the ``runtime_data`` object surviving intact.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    runtime_before = entry.runtime_data
+
+    rotated = {"access_token": "rotated", "refresh_token": "rotated_r", "token_type": "bearer"}
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "tokens": rotated})
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # No reload happened: the same runtime_data object, and the tokens were persisted.
+    assert entry.runtime_data is runtime_before
+    assert entry.data["tokens"] == rotated
 
 
 # ---------------------------------------------------------------------------
