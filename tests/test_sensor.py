@@ -209,20 +209,23 @@ class TestSungrowSensor:
 
         assert sensor.native_value is None
 
-    def test_extra_state_attributes(self):
-        """Test extra_state_attributes returns the full data point dict."""
+    def test_native_value_unclassified_numeric_stays_string(self):
+        """A numeric-looking status point without a class is not coerced to a float."""
+        data = {"status": {"code": "status", "value": "1", "unit": "", "name": "Status"}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "status", "123", "Plant", data["status"])
+
+        # No unit -> no device/state class -> left as a string, not 1.0.
+        assert sensor.native_value == "1"
+        assert isinstance(sensor.native_value, str)
+
+    def test_no_raw_extra_state_attributes(self):
+        """The raw API point payload is not exposed as state attributes (recorder bloat)."""
         point_data = {"code": "power", "value": "5.0", "unit": "kW", "name": "Power"}
         coordinator = self._make_coordinator({"power": point_data})
         sensor = SungrowSensor(coordinator, "power", "123", "Plant", point_data)
 
-        assert sensor.extra_state_attributes == point_data
-
-    def test_extra_state_attributes_empty_when_missing(self):
-        """Test extra_state_attributes returns {} when data is missing."""
-        coordinator = self._make_coordinator({})
-        sensor = SungrowSensor(coordinator, "x", "123", "Plant", {"value": "0"})
-
-        assert sensor.extra_state_attributes == {}
+        assert sensor.extra_state_attributes is None
 
 
 # ---------------------------------------------------------------------------
