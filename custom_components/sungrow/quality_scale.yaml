@@ -3,7 +3,7 @@
 # Note: hassfest only *validates* this file for core integrations; for a custom
 # (HACS) integration it is an honest status record. Every Bronze, Silver and Gold
 # rule is done or exempt, and all three Platinum rules (async-dependency,
-# inject-websession, strict-typing) are met. The manifest declares "gold".
+# inject-websession, strict-typing) are met. The manifest declares "platinum".
 rules:
   # --- Bronze ---
   action-setup:
