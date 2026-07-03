@@ -156,6 +156,22 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         last = await self.async_get_last_state()
         if last is not None and last.state in self.options_map:
             self._attr_current_option = last.state
+            # If we were mid-charge/discharge before the restart, resume the EMS
+            # heartbeat: restoring current_option alone would leave the UI showing
+            # Charge/Discharge while the inverter silently times out of External-EMS
+            # mode. Only the command select owns the heartbeat, so this restarts it
+            # exactly once per plant; async_start_heartbeat is idempotent (it stops
+            # any existing loop first), so a stale loop is never double-started (#112).
+            if self.param == "charge_discharge_command" and last.state in {"Charge", "Discharge"}:
+                entry = self.coordinator.config_entry
+                assert entry is not None
+                await async_start_heartbeat(
+                    self.hass,
+                    entry,
+                    self.coordinator.plant_id,
+                    self.device_uuid,
+                    interval=60,
+                )
 
     async def async_select_option(self, option: str) -> None:
         """Update the dispatch parameter on the inverter."""
@@ -186,9 +202,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         elif self.param == "charge_discharge_command" and option == "Stop":
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
 
-    async def async_will_remove_from_hass(self) -> None:
-        """Stop the heartbeat when the entity is removed."""
-        entry = self.coordinator.config_entry
-        assert entry is not None
-        await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
-        await super().async_will_remove_from_hass()
+    # NOTE: the heartbeat is deliberately NOT stopped from async_will_remove_from_hass.
+    # All ~13 dispatch entities share one heartbeat keyed by plant_id, so stopping it
+    # on any single entity's removal (e.g. disabling "SOC Upper Limit") would kill
+    # dispatch for the whole plant. Teardown is handled once by async_unload_entry (#112).

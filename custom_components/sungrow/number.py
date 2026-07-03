@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import async_start_heartbeat, async_stop_heartbeat, select_dispatch_device
+from . import select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 
@@ -262,23 +262,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
                 translation_placeholders={"param": self.param, "error": str(err)},
             ) from err
         # Remember the commanded value so the UI reflects it and it survives restarts.
+        # Writing power only sets the target: the EMS heartbeat is owned solely by the
+        # command select (Charge/Discharge start it, Stop stops it), so writing power
+        # — even 0 — never arms or re-arms dispatch here (see #112).
         self._attr_native_value = value
-        # If the user is actively dispatching, ensure a heartbeat is running so the
-        # inverter stays in External EMS mode.
-        if self.param == "charge_discharge_power":
-            entry = self.coordinator.config_entry
-            assert entry is not None
-            await async_start_heartbeat(
-                self.hass,
-                entry,
-                self.coordinator.plant_id,
-                self.device_uuid,
-                interval=60,
-            )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Stop the heartbeat when the entity is removed."""
-        entry = self.coordinator.config_entry
-        assert entry is not None
-        await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
-        await super().async_will_remove_from_hass()

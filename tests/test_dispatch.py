@@ -160,8 +160,7 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
 
-    with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
-        await power.async_set_native_value(2500)
+    await power.async_set_native_value(2500)
 
     # Power is sent verbatim in watts.
     entry_data.control.async_update_parameters.assert_awaited_once_with(
@@ -169,22 +168,30 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     )
 
 
-async def test_number_starts_heartbeat_for_power_changes(hass: HomeAssistant):
-    """Changing charge/discharge power starts the EMS heartbeat loop."""
+async def test_number_power_does_not_arm_heartbeat(hass: HomeAssistant):
+    """Writing charge/discharge power never arms the EMS heartbeat (#112).
+
+    The heartbeat is owned solely by the command select (Charge/Discharge start it,
+    Stop stops it); the power number just writes the power parameter. Writing a
+    non-zero power — and writing 0 — must both leave the heartbeat untouched.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    _setup_entry_data(entry, devices)
+    data = _setup_entry_data(entry, devices)
+    # Point the coordinator at the real entry so any armed heartbeat would be observable.
+    data.coordinators[0].config_entry = entry
 
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
+    power.hass = hass
 
-    with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()) as mock_start:
-        await power.async_set_native_value(1500)
-
-    mock_start.assert_awaited_once()
-    assert mock_start.call_args.args[3] == "dev-uuid-1"
+    await power.async_set_native_value(1500)
+    assert data.heartbeats == {}  # non-zero power must not start a heartbeat
+    await power.async_set_native_value(0)
+    assert data.heartbeats == {}  # ...and neither does zero
+    data.control.async_update_parameters.assert_awaited()
 
 
 async def test_number_availability_follows_coordinator(hass: HomeAssistant):
@@ -281,40 +288,36 @@ async def test_select_availability_follows_coordinator(hass: HomeAssistant):
     assert command.available is False
 
 
-async def test_select_removal_stops_heartbeat(hass: HomeAssistant):
-    """Removing a select entity stops the heartbeat for the plant."""
+async def test_removing_one_entity_keeps_plant_heartbeat(hass: HomeAssistant):
+    """Removing a single dispatch entity must not stop the shared plant heartbeat (#112).
+
+    All ~13 dispatch entities share one heartbeat keyed by plant_id. Disabling or
+    removing one (e.g. "SOC Upper Limit") mid-charge must not kill dispatch for the
+    whole plant; teardown is handled once by async_unload_entry (see
+    test_unload_cancels_running_heartbeat in test_init.py).
+    """
+    import asyncio
+
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    _setup_entry_data(entry, devices)
+    data = _setup_entry_data(entry, devices)
 
-    added = []
-    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = added[0]
+    numbers: list = []
+    await number_setup_entry(hass, entry, lambda entities: numbers.extend(entities))
+    selects: list = []
+    await select_setup_entry(hass, entry, lambda entities: selects.extend(entities))
 
-    command.hass = hass
-    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
-        await command.async_will_remove_from_hass()
+    # A heartbeat is active for the plant.
+    data.heartbeats["12345"] = (asyncio.Event(), MagicMock())
 
-    mock_stop.assert_awaited_once_with(hass, command.coordinator.config_entry, "12345")
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as sel_stop:
+        for entity in (numbers[0], selects[0]):
+            entity.hass = hass
+            await entity.async_will_remove_from_hass()
 
-
-async def test_entity_removal_stops_heartbeat(hass: HomeAssistant):
-    """Removing a dispatch entity stops the heartbeat for the plant."""
-    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
-    entry.add_to_hass(hass)
-    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    _setup_entry_data(entry, devices)
-
-    added = []
-    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    number = added[0]
-
-    number.hass = hass
-    with patch("custom_components.sungrow.number.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
-        await number.async_will_remove_from_hass()
-
-    mock_stop.assert_awaited_once_with(hass, number.coordinator.config_entry, "12345")
+    sel_stop.assert_not_awaited()
+    assert "12345" in data.heartbeats  # heartbeat survives single-entity removal
 
 
 def test_select_dispatch_device_ignores_non_dispatch_devices():
@@ -395,8 +398,7 @@ async def test_param_write_encodings(hass: HomeAssistant):
     by_param = {e.param: e for e in added}
 
     # Power is sent verbatim in watts (not kW).
-    with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
-        await by_param["charge_discharge_power"].async_set_native_value(2500)
+    await by_param["charge_discharge_power"].async_set_native_value(2500)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_power": "2500"})
 
     # SOC limits and ratios are sent as tenths of a percent (x10).
@@ -567,12 +569,70 @@ async def test_select_restores_last_option(hass: HomeAssistant):
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
     command = next(e for e in added if e.param == "charge_discharge_command")
     command.hass = hass
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge"))
+    # Restore a non-dispatching option so this stays a pure restore test; the
+    # Charge/Discharge heartbeat-resume path is covered separately (#112).
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Stop"))
 
     with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
         await command.async_added_to_hass()
 
+    assert command.current_option == "Stop"
+
+
+async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
+    """A restored Charge command restarts the EMS heartbeat after a restart/reload (#112).
+
+    Otherwise the inverter times out of External-EMS mode while the UI still shows
+    "Charge" — the command select must restore state AND resume the heartbeat.
+    """
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge"))
+
+    with (
+        patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+    ):
+        await command.async_added_to_hass()
+
     assert command.current_option == "Charge"
+    mock_start.assert_awaited_once()
+    # The heartbeat is started for the restored command's device.
+    assert mock_start.call_args.args[3] == "ess-1"
+
+
+async def test_restored_stop_command_leaves_heartbeat_off(hass: HomeAssistant):
+    """A restored 'Stop' command must not start the heartbeat (#112)."""
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Stop"))
+
+    with (
+        patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+    ):
+        await command.async_added_to_hass()
+
+    assert command.current_option == "Stop"
+    mock_start.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -624,10 +684,7 @@ async def test_number_set_value_api_error_raises_translated_error(hass: HomeAssi
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
 
-    with (
-        patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()),
-        pytest.raises(HomeAssistantError) as exc,
-    ):
+    with pytest.raises(HomeAssistantError) as exc:
         await power.async_set_native_value(2500)
 
     assert exc.value.translation_key == "dispatch_write_failed"
