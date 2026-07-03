@@ -170,7 +170,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         token_updater=_save_tokens,
     )
     # Restore previously stored tokens (a copy so we never mutate entry.data in place).
-    auth.tokens = dict(entry.data["tokens"])
+    # pysolarcloud annotates Auth.tokens as None, but it holds a dict at runtime.
+    auth.tokens = dict(entry.data["tokens"])  # type: ignore[assignment]
 
     plants_service = Plants(auth)
     control_service = Control(auth)

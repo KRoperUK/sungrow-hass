@@ -32,9 +32,8 @@ from .const import (
 try:
     from pysolarcloud import Auth
 except ImportError:
-    Auth = None
-    # For local development if pysolarcloud is not installed but in path or similar
-    # In a real environment, it should be installed via requirements.
+    # Optional import for local dev; production always has it via requirements.
+    Auth = None  # type: ignore[assignment,misc]
 
 _LOGGER = logging.getLogger(__name__)
 
