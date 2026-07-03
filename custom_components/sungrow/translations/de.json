@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit iSolarCloud verbinden",
+        "description": "Geben Sie Ihre iSolarCloud-API-Zugangsdaten ein. Sie finden diese hier: [iSolarCloud]({url})\n\nNach dem Absenden wird der Hub erstellt und Home Assistant fordert Sie auf, ihn in Ihrem Browser zu autorisieren.",
+        "data": {
+          "gateway": "Gateway-Region",
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "app_id": "App ID",
+          "redirect_uri": "Weiterleitungs-URI"
+        },
+        "data_description": {
+          "app_key": "AppKey aus der iSolarCloud-Entwicklerplattform.",
+          "app_secret": "AppSecret aus der iSolarCloud-Entwicklerplattform.",
+          "app_id": "App ID aus der iSolarCloud-Entwicklerplattform. Um diese zu finden, öffnen Sie Ihre Anwendung und suchen Sie in der URL nach 'id', wie hier: {app_id_url}."
+        }
+      },
+      "auth_callback": {
+        "title": "Warten auf Autorisierung",
+        "description": "Öffnen Sie den folgenden Link, um die Anwendung zu autorisieren:\n\n{auth_url}\n\nNachdem Sie sich angemeldet und die App genehmigt haben, werden Sie zurückgeleitet und diese Ansicht aktualisiert sich automatisch.\n\nFalls die Weiterleitung nicht abgeschlossen wird (zum Beispiel, wenn die Seite einen Fehler anzeigt), warten Sie einen Moment und Sie können den Code manuell einfügen."
+      },
+      "auth_manual": {
+        "title": "Autorisierungscode eingeben",
+        "description": "Die automatische Weiterleitung wurde nicht abgeschlossen. Schließen Sie die Autorisierung manuell ab:\n\n{auth_url}\n\n**Anleitung:**\n1. Öffnen Sie den obigen Link und melden Sie sich an (überspringen, falls bereits geschehen).\n2. Sie werden weitergeleitet (die Seite zeigt möglicherweise einen Fehler an).\n3. Kopieren Sie den Parameter **code** aus der URL-Adressleiste.\n4. Fügen Sie den Code — oder die vollständige Weiterleitungs-URL — unten ein.",
+        "data": {
+          "code": "Autorisierungscode oder vollständige Weiterleitungs-URL"
+        }
+      },
+      "reconfigure": {
+        "title": "iSolarCloud neu konfigurieren",
+        "description": "Aktualisieren Sie Ihre Region oder Ihre API-Zugangsdaten (die App ID bleibt gleich). Sie werden erneut aufgefordert, sich in Ihrem Browser zu autorisieren, da neue Zugangsdaten oder eine neue Region frische Tokens erfordern.",
+        "data": {
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "gateway": "Gateway-Region",
+          "redirect_uri": "Weiterleitungs-URI"
+        }
+      }
+    },
+    "progress": {
+      "wait_for_callback": "Warten auf Autorisierung. Öffnen Sie den Link in Ihrem Browser, um die Anwendung zu genehmigen:\n\n{auth_url}\n\nDiese Ansicht aktualisiert sich automatisch, sobald Sie zurückgeleitet werden."
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "invalid_auth": "Ungültige Authentifizierung",
+      "invalid_extra_measure_points": "Zusätzliche Messpunkte müssen im Format point_id=code, durch Kommata getrennt, angegeben werden",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "already_configured": "Das Gerät ist bereits konfiguriert",
+      "library_missing": "Die Bibliothek pysolarcloud ist nicht installiert. Starten Sie Home Assistant neu, damit die Anforderungen der Integration installiert werden, und versuchen Sie es dann erneut.",
+      "missing_code": "Der Autorisierungscode wurde nicht empfangen. Bitte versuchen Sie es erneut.",
+      "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
+      "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
+      "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sungrow-Optionen",
+        "description": "Legen Sie fest, wie oft Home Assistant iSolarCloud abfragt. Niedrigere Werte aktualisieren häufiger, verbrauchen aber mehr Ihres API-Kontingents. Der kostenlose Tarif erlaubt ~2000 Aufrufe/Stunde; das Minimum beträgt 10 Sekunden.",
+        "data": {
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "extra_measure_points": "Zusätzliche Messpunkte (point_id=code, durch Kommata getrennt)",
+          "enable_device_sensors": "Sensoren pro Gerät erstellen (EV-Ladegeräte, Zähler, zusätzliche Batterien)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "charge_discharge_power": {
+        "name": "Lade-/Entladeleistung"
+      },
+      "soc_upper_limit": {
+        "name": "SOC-Obergrenze"
+      },
+      "soc_lower_limit": {
+        "name": "SOC-Untergrenze"
+      },
+      "forced_charging_target_soc_1": {
+        "name": "Ziel-SOC für erzwungenes Laden (Fenster 1)"
+      },
+      "forced_charging_target_soc_2": {
+        "name": "Ziel-SOC für erzwungenes Laden (Fenster 2)"
+      },
+      "feed_in_limitation_value": {
+        "name": "Einspeisegrenze (Leistung)"
+      },
+      "feed_in_limitation_ratio": {
+        "name": "Einspeisegrenze (%)"
+      },
+      "active_power_limit_ratio": {
+        "name": "Wirkleistungsbegrenzung"
+      }
+    },
+    "select": {
+      "charge_discharge_command": {
+        "name": "Lade-/Entladebefehl"
+      },
+      "forced_charging": {
+        "name": "Erzwungenes Laden"
+      },
+      "feed_in_limitation": {
+        "name": "Einspeisebegrenzung"
+      },
+      "limited_power_switch": {
+        "name": "Wirkleistungsbegrenzung aktiv"
+      },
+      "battery_first": {
+        "name": "Batterie-zuerst-Modus"
+      }
+    }
+  },
+  "exceptions": {
+    "dispatch_write_failed": {
+      "message": "{param} konnte auf dem Wechselrichter nicht aktualisiert werden: {error}"
+    }
+  }
+}
