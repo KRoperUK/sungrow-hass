@@ -290,6 +290,8 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
 
     coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
     coordinator.enable_device_sensors = True
+    # The platform reads the live device list from the coordinator for naming.
+    coordinator.devices = [{"uuid": "chg-1", "device_name": "AC011E", "device_type": 999}]
     coordinator.device_data = {
         "chg-1": {
             "ev_charger_power": {"code": "ev_charger_power", "value": "7.2", "unit": "kW"},
@@ -300,7 +302,7 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     entry.runtime_data = SungrowData(
         coordinators=[coordinator],
         control=MagicMock(),
-        devices={"12345": [{"uuid": "chg-1", "device_name": "AC011E", "device_type": 999}]},
+        devices={"12345": coordinator.devices},
     )
 
     added = []
@@ -312,10 +314,39 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     assert sensor.point_code == "ev_charger_power"
     assert sensor.device_uuid == "chg-1"
     assert sensor._attr_unique_id == "12345_chg-1_ev_charger_power"
+    # Name is derived from the coordinator's device metadata.
+    assert sensor._attr_device_info["name"] == "AC011E"
     assert (DOMAIN, "chg-1") in sensor._attr_device_info["identifiers"]
     assert sensor._attr_device_info["via_device"] == (DOMAIN, "12345")
     # Reads its value from the coordinator's per-device data.
     assert sensor.native_value == 7.2
+
+
+async def test_sensor_dynamic_add_on_new_point(hass: HomeAssistant):
+    """A plant point that appears after setup is added at runtime (dynamic-devices)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    listeners: list = []
+    coordinator.async_add_listener = lambda cb, *a: listeners.append(cb) or (lambda: None)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert len(added) == 1
+
+    # A new point appears on a later poll; the coordinator notifies its listeners.
+    coordinator.data = {**coordinator.data, "daily_energy": {"value": "12.0", "unit": "kWh"}}
+    for cb in listeners:
+        cb()
+    assert len(added) == 2
+    assert any(e.point_code == "daily_energy" for e in added)
+
+    # Firing again with nothing new must not re-add existing sensors.
+    for cb in listeners:
+        cb()
+    assert len(added) == 2
 
 
 async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):

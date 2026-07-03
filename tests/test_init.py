@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow import (
     SungrowAuthCallbackView,
     SungrowData,
+    async_remove_config_entry_device,
     async_setup,
     async_start_heartbeat,
     async_stop_heartbeat,
@@ -253,6 +254,27 @@ async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_async_remove_config_entry_device(hass: HomeAssistant):
+    """Stale devices can be removed from the UI; present ones are protected."""
+    from types import SimpleNamespace
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.devices = [{"uuid": "dev-1"}, {"uuid": "dev-2"}]
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    # The plant device and a present device are still known -> not removable.
+    plant = SimpleNamespace(identifiers={(DOMAIN, "12345")})
+    present = SimpleNamespace(identifiers={(DOMAIN, "dev-1")})
+    assert await async_remove_config_entry_device(hass, entry, plant) is False
+    assert await async_remove_config_entry_device(hass, entry, present) is False
+
+    # A device the API no longer reports -> removable.
+    gone = SimpleNamespace(identifiers={(DOMAIN, "old-device")})
+    assert await async_remove_config_entry_device(hass, entry, gone) is True
 
 
 async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):

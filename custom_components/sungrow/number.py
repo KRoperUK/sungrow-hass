@@ -7,7 +7,7 @@ import re
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -92,43 +92,56 @@ DISPATCH_NUMBERS: dict[str, dict] = {
 }
 
 
+def _build_numbers(coordinator, control) -> list[NumberEntity]:
+    """Build the dispatch number entities for a coordinator's target device.
+
+    Returns an empty list when no dispatch-capable device is present. Reads the
+    coordinator's live device list so a dispatchable device that appears after
+    setup gets its controls at runtime (dynamic-devices).
+    """
+    # Prefer the ESS device if present, otherwise fall back to an inverter.
+    target = select_dispatch_device(coordinator.devices)
+    if target is None:
+        return []
+    device_uuid = target.get("uuid")
+    if not device_uuid:
+        return []
+    device_name = target.get("device_name") or coordinator.plant_name
+    # Size the charge/discharge power slider to the device's rated power when it
+    # can be derived from the model code; otherwise use the conservative default.
+    max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
+    entities: list[NumberEntity] = []
+    for param, meta in DISPATCH_NUMBERS.items():
+        if param == "charge_discharge_power" and max_power != meta["native_max_value"]:
+            meta = {**meta, "native_max_value": max_power}
+        entities.append(SungrowDispatchNumber(coordinator, control, device_uuid, device_name, param, meta))
+    return entities
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow dispatch number entities."""
     data = entry.runtime_data
     control = data.control
-    devices_by_plant = data.devices
     coordinators = data.coordinators
 
-    entities: list[NumberEntity] = []
-    for coordinator in coordinators:
-        plant_id = coordinator.plant_id
-        devices = devices_by_plant.get(plant_id, [])
-        # Prefer the ESS device if present, otherwise fall back to the first device.
-        target = select_dispatch_device(devices)
-        if target is None:
-            continue
-        device_uuid = target.get("uuid")
-        if not device_uuid:
-            continue
-        device_name = target.get("device_name") or coordinator.plant_name
-        # Size the charge/discharge power slider to the device's rated power when it
-        # can be derived from the model code; otherwise use the conservative default.
-        max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
-        for param, meta in DISPATCH_NUMBERS.items():
-            if param == "charge_discharge_power" and max_power != meta["native_max_value"]:
-                meta = {**meta, "native_max_value": max_power}
-            entities.append(
-                SungrowDispatchNumber(
-                    coordinator,
-                    control,
-                    device_uuid,
-                    device_name,
-                    param,
-                    meta,
-                )
-            )
+    known_unique_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _add_new_entities() -> None:
+        new_entities: list[NumberEntity] = []
+        for coordinator in coordinators:
+            for entity in _build_numbers(coordinator, control):
+                uid = entity.unique_id
+                if uid is None or uid in known_unique_ids:
+                    continue
+                known_unique_ids.add(uid)
+                new_entities.append(entity)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    _add_new_entities()
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEntity):

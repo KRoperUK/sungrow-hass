@@ -80,10 +80,25 @@ class SungrowPlantCoordinator(DataUpdateCoordinator):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
             raise UpdateFailed(f"Error communicating with iSolarCloud API: {err}") from err
 
+        # Refresh the device list so devices added to the plant after setup are
+        # picked up at runtime (dynamic-devices) and removed ones can be pruned
+        # (stale-devices). Best-effort: keep the previous list on failure.
+        await self._async_refresh_devices()
+
         if self.enable_device_sensors:
             self.device_data = await self._async_fetch_device_data()
 
         return all_plants_data.get(self.plant_id, {})
+
+    async def _async_refresh_devices(self) -> None:
+        """Re-fetch the plant's device list (best effort, non-fatal)."""
+        try:
+            devices = await self.plants_service.async_get_plant_devices(self.plant_id)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Could not refresh devices for plant %s: %s", self.plant_id, err)
+            return
+        # Mutate in place so holders of this list (runtime_data.devices) see updates.
+        self.devices[:] = list(devices or [])
 
     async def _async_fetch_device_data(self) -> dict[str, dict]:
         """Fetch per-device realtime for each distinct device type (best effort).

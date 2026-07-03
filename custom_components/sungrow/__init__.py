@@ -14,6 +14,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntry
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -211,6 +212,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
 async def async_reload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
     """Reload the config entry when its options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: SungrowConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow deletion of a device the API no longer reports (stale-devices).
+
+    Returns True (permit removal) only when none of the device's identifiers match
+    a currently-known plant or device across the entry's coordinators, so devices
+    that are still present cannot be removed by accident.
+    """
+    known: set[tuple[str, str]] = set()
+    for coordinator in config_entry.runtime_data.coordinators:
+        known.add((DOMAIN, coordinator.plant_id))
+        for device in coordinator.devices:
+            uuid = device.get("uuid")
+            if uuid:
+                known.add((DOMAIN, str(uuid)))
+    return not any(identifier in known for identifier in device_entry.identifiers)
 
 
 async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task]) -> None:
