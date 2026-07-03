@@ -84,6 +84,28 @@ def test_enum_value_none_for_non_enum():
     assert mp.resolve_enum_value("8018", 5) is None
 
 
+@pytest.mark.parametrize("point_id", ["29", "13146"])
+def test_operating_status_enum_classifies_and_maps(point_id):
+    """The operating-status points (29/13146) are ENUM, map a known code, and drop unknowns.
+
+    Both point IDs share the documented operating-status map. A listed code resolves
+    to its human label; an unlisted firmware code must return None rather than leak a
+    value outside _attr_options (HA rejects a state not in the options list — #113).
+    """
+    # Classified as an enum (no state class).
+    assert mp.resolve_classification("", "operating_status", point_id) == (SensorDeviceClass.ENUM, None)
+    # A documented code maps to its label...
+    assert mp.resolve_enum_value(point_id, 0) == "Grid-connected operation"
+    # ...and the label is one of the fixed options for the point.
+    options = mp.resolve_enum_options(point_id)
+    assert options is not None
+    assert "Grid-connected operation" in options
+    # An unmapped code yields None (not an out-of-options value).
+    result = mp.resolve_enum_value(point_id, 40000)
+    assert result is None
+    assert not isinstance(result, str)
+
+
 # ---------------------------------------------------------------------------
 # resolve_classification
 # ---------------------------------------------------------------------------
@@ -131,6 +153,12 @@ def test_classify_dimensionless_power_factor_by_code():
 
 def test_classify_dimensionless_soc_by_code():
     assert mp.resolve_classification(None, "total_field_soc", "0") == (SensorDeviceClass.BATTERY, M)
+
+
+def test_classify_dimensionless_soh_by_code_is_not_battery():
+    # An unrecognised, unitless SOH/health code falls through to the code heuristic
+    # and must stay numeric-only (measurement), never a BATTERY charge level.
+    assert mp.resolve_classification("", "inverter_soh", "999999") == (None, M)
 
 
 def test_classify_unknown_is_text():

@@ -347,6 +347,9 @@ def test_rated_power_w_parses_model_codes():
     assert rated_power_w({"device_model_code": "SBR256"}) is None  # battery
     assert rated_power_w({"device_model_code": "SGSmartMeter"}) is None  # meter
     assert rated_power_w({}) is None
+    # Nonsense parses are rejected by the sanity guard (0 kW or absurdly large).
+    assert rated_power_w({"device_model_code": "SG0RS"}) is None  # parses to 0 kW
+    assert rated_power_w({"device_model_code": "SG9999"}) is None  # parses to >1000 kW
 
 
 async def test_charge_power_max_from_model_code(hass: HomeAssistant):
@@ -411,6 +414,22 @@ async def test_param_write_encodings(hass: HomeAssistant):
     # Forced-charge target SOC is a direct percent (x1).
     await by_param["forced_charging_target_soc_1"].async_set_native_value(75)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"forced_charging_target_soc_1": "75"})
+
+    # The lower SOC bound is also tenths of a percent (x10).
+    await by_param["soc_lower_limit"].async_set_native_value(20)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"soc_lower_limit": "200"})
+
+    # Active-power / feed-in *ratio* caps are percentages sent as tenths (x10).
+    await by_param["active_power_limit_ratio"].async_set_native_value(60)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"active_power_limit_ratio": "600"})
+
+    # The absolute feed-in limit is a power in watts, sent verbatim (x1).
+    await by_param["feed_in_limitation_value"].async_set_native_value(3000)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"feed_in_limitation_value": "3000"})
+
+    # The second forced-charge target SOC mirrors the first: a direct percent (x1).
+    await by_param["forced_charging_target_soc_2"].async_set_native_value(80)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"forced_charging_target_soc_2": "80"})
 
 
 async def test_new_selects_write_verified_codes(hass: HomeAssistant):
@@ -665,6 +684,33 @@ async def test_number_dynamic_add_when_device_appears(hass: HomeAssistant):
     for cb in listeners:
         cb()
     assert len(added) == len(DISPATCH_NUMBERS)
+
+
+async def test_select_dynamic_add_when_device_appears(hass: HomeAssistant):
+    """A dispatchable device appearing after setup gets its select entities once."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [])  # no dispatchable device yet
+    coordinator = data.coordinators[0]
+    listeners: list = []
+    coordinator.async_add_listener = lambda cb, *a: listeners.append(cb) or (lambda: None)
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert added == []  # nothing dispatchable at setup
+
+    # An ESS appears on a later poll; the coordinator notifies its listeners.
+    coordinator.devices = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    for cb in listeners:
+        cb()
+
+    assert len(added) == len(DISPATCH_SELECTS)
+    assert all(e.device_uuid == "ess-1" for e in added)
+
+    # Firing again must not duplicate the controls (unique-id guard).
+    for cb in listeners:
+        cb()
+    assert len(added) == len(DISPATCH_SELECTS)
 
 
 # ---------------------------------------------------------------------------

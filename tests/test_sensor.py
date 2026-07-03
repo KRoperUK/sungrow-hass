@@ -238,6 +238,14 @@ class TestSungrowSensor:
 
         assert sensor.native_value is None
 
+    def test_native_value_none_when_point_value_null(self):
+        """A present point whose value is None returns None (not a crash/coercion)."""
+        data = {"power": {"code": "power", "value": None, "unit": "W", "name": "Power"}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"])
+
+        assert sensor.native_value is None
+
     def test_native_value_unclassified_numeric_stays_string(self):
         """A numeric-looking status point without a class is not coerced to a float."""
         data = {"status": {"code": "status", "value": "1", "unit": "", "name": "Status"}}
