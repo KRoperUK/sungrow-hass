@@ -82,8 +82,10 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
     assert charger["uuid"] == "**REDACTED**"
     ess = next(d for d in plant["all_devices"] if d["device_name"] == "Inverter")
     assert ess["device_type"] == "ENERGY_STORAGE_SYSTEM (14)"
-    # Per-device realtime is captured, keyed by device type id.
-    assert plant["device_realtime"]["999"]["chg-1"]["ev_charger_power"]["value"] == "7.2"
+    # Per-device realtime is captured, keyed by device type id; the per-device
+    # uuid key is anonymised to a stable device_N placeholder (#122).
+    assert "chg-1" not in plant["device_realtime"]["999"]
+    assert plant["device_realtime"]["999"]["device_1"]["ev_charger_power"]["value"] == "7.2"
 
     # The whole payload must be JSON-serialisable (no leftover enums).
     json.dumps(diag)
@@ -144,6 +146,56 @@ async def test_diagnostics_per_device_realtime_failure_is_captured(hass: HomeAss
 
     assert diag["plants"]["1"]["device_realtime"]["999"] == {"error": "nope"}
     json.dumps(diag)
+
+
+async def test_diagnostics_anonymises_device_realtime_uuid_keys(hass: HomeAssistant):
+    """Per-device realtime is keyed by device uuid; those uuid keys must not leak (#122).
+
+    ``async_redact_data`` only scrubs values under known key names, so device uuids used
+    as dict *keys* need explicit anonymisation to stable ``device_N`` placeholders.
+    """
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    service = MagicMock()
+    service.async_get_plant_devices = AsyncMock(
+        return_value=[
+            {"uuid": "ess-aaaa", "device_name": "ESS", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM},
+            {"uuid": "chg-bbbb", "device_name": "Charger", "device_type": 999},
+        ]
+    )
+
+    async def _fake_realtime(plant_id, device_type):
+        if getattr(device_type, "value", device_type) == DeviceType.ENERGY_STORAGE_SYSTEM.value:
+            # Two batteries of the same type -> two distinct uuid keys.
+            return {
+                "ess-aaaa": {"battery_level_soc": {"code": "battery_level_soc", "value": "55"}},
+                "batt-cccc": {"battery_level_soc": {"code": "battery_level_soc", "value": "60"}},
+            }
+        return {"chg-bbbb": {"ev_charger_power": {"code": "ev_charger_power", "value": "7.2"}}}
+
+    service.async_get_device_realtime = AsyncMock(side_effect=_fake_realtime)
+    coordinator = _make_coordinator("1", "P", {}, plants_service=service)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    realtime = diag["plants"]["1"]["device_realtime"]
+
+    # No raw device uuid appears anywhere in the serialised diagnostics payload.
+    dumped = json.dumps(diag)
+    for raw in ("ess-aaaa", "batt-cccc", "chg-bbbb"):
+        assert raw not in dumped
+
+    ess_type = str(DeviceType.ENERGY_STORAGE_SYSTEM.value)
+    # Both same-type devices get distinct stable placeholders; their points survive.
+    assert set(realtime[ess_type]) == {"device_1", "device_2"}
+    soc_values = {realtime[ess_type][k]["battery_level_soc"]["value"] for k in realtime[ess_type]}
+    assert soc_values == {"55", "60"}
+    # A device of a different type continues the same counter (no collision).
+    assert list(realtime["999"]) == ["device_3"]
+    assert realtime["999"]["device_3"]["ev_charger_power"]["value"] == "7.2"
 
 
 async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
