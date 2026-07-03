@@ -42,3 +42,35 @@ def test_classify_by_unit_known(unit, expected):
 @pytest.mark.parametrize("unit", ["", None, "widgets", "%"])
 def test_classify_by_unit_unknown_returns_none(unit):
     assert mp._classify_by_unit(unit) is None
+
+
+# ---------------------------------------------------------------------------
+# Enum resolvers
+# ---------------------------------------------------------------------------
+
+
+def test_enum_options_charger_status():
+    opts = mp.resolve_enum_options("33716")
+    assert opts is not None
+    assert "Charging" in opts
+    assert "Idle (not plugged in)" in opts
+    # Distinct + order-preserving.
+    assert len(opts) == len(set(opts))
+
+
+def test_enum_options_none_for_non_enum():
+    assert mp.resolve_enum_options("8018") is None
+
+
+def test_enum_value_maps_int():
+    assert mp.resolve_enum_value("33716", 3) == "Charging"
+    assert mp.resolve_enum_value("33716", "3") == "Charging"
+    assert mp.resolve_enum_value("33716", 3.0) == "Charging"
+
+
+def test_enum_value_unmapped_code_falls_back_to_str():
+    assert mp.resolve_enum_value("33716", 999) == "999"
+
+
+def test_enum_value_none_for_non_enum():
+    assert mp.resolve_enum_value("8018", 5) is None

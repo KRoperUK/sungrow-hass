@@ -14,6 +14,8 @@ from typing import Any, NamedTuple
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
+from .measure_points_data import CODE_ALIASES, ENUM_MAPS, RAW_POINTS
+
 _MEASUREMENT = SensorStateClass.MEASUREMENT
 _TOTAL_INCREASING = SensorStateClass.TOTAL_INCREASING
 
@@ -88,3 +90,29 @@ def _classify_by_unit(unit: str | None) -> _ClassPair | None:
     if not unit:
         return None
     return _UNIT_CLASS_MAP.get(unit.strip().lower())
+
+
+def resolve_enum_options(point_id: str) -> tuple[str, ...] | None:
+    """Return the distinct enum labels for an enum point, else ``None``."""
+    mapping = ENUM_MAPS.get(point_id)
+    if not mapping:
+        return None
+    # dict preserves insertion order; dedupe labels while keeping order.
+    return tuple(dict.fromkeys(mapping.values()))
+
+
+def resolve_enum_value(point_id: str, value: Any) -> str | None:
+    """Map a raw value to its enum label.
+
+    Returns ``None`` when the point is not an enum, the mapped label when the
+    value is a known code, and ``str(value)`` when the point is an enum but the
+    code is not in the table (forward-compatible with new firmware codes).
+    """
+    mapping = ENUM_MAPS.get(point_id)
+    if not mapping:
+        return None
+    try:
+        code = int(float(value))
+    except (ValueError, TypeError):
+        return str(value)
+    return mapping.get(code, str(value))
