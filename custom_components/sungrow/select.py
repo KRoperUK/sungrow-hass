@@ -43,6 +43,21 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
         # Enabling/disabling forced charging is a policy setting, not actuation.
         "entity_category": EntityCategory.CONFIG,
     },
+    # Sungrow enable/disable enum (device-verified): Enable=170, Disable=85.
+    "feed_in_limitation": {
+        "options_map": {"Disable": "85", "Enable": "170"},
+        "entity_category": EntityCategory.CONFIG,
+    },
+    "limited_power_switch": {
+        "options_map": {"Disable": "85", "Enable": "170"},
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Battery-first mode (hybrid inverters only; a graceful write error is raised
+    # on devices that don't support it).
+    "battery_first": {
+        "options_map": {"Disable": "85", "Enable": "170"},
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
 
@@ -53,6 +68,9 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: Control) -> li
     coordinator's live device list so a dispatchable device that appears after
     setup gets its controls at runtime (dynamic-devices).
     """
+    # Skip entirely if the device reported that it doesn't accept parameter writes.
+    if not coordinator.dispatch_update_supported:
+        return []
     # Prefer the ESS device if present, otherwise fall back to an inverter.
     target = select_dispatch_device(coordinator.devices)
     if target is None:

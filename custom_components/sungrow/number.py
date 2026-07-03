@@ -125,10 +125,42 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
     },
+    # Export (feed-in) limit as an absolute power. Only takes effect when the
+    # feed_in_limitation select is enabled. Watts UI, sent as kW, sized to rating.
+    "feed_in_limitation_value": {
+        "device_class": NumberDeviceClass.POWER,
+        "native_unit_of_measurement": "W",
+        "native_min_value": 0,
+        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
+        "native_step": 100,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Export limit as a percentage of rated power (0-100%).
+    "feed_in_limitation_ratio": {
+        "native_unit_of_measurement": "%",
+        "native_min_value": 0,
+        "native_max_value": 100,
+        "native_step": 1,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Active power output cap as a percentage of rated power (0-100%).
+    "active_power_limit_ratio": {
+        "native_unit_of_measurement": "%",
+        "native_min_value": 0,
+        "native_max_value": 100,
+        "native_step": 1,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
-# Power parameters whose slider maximum is sized to the device's rated power.
-_RATED_POWER_PARAMS = frozenset({"charge_discharge_power", "max_charging_power", "max_discharging_power"})
+# Power parameters: sent to the API in kW (converted from the entities' W), and
+# their slider maximum is sized to the device's rated power.
+_RATED_POWER_PARAMS = frozenset(
+    {"charge_discharge_power", "max_charging_power", "max_discharging_power", "feed_in_limitation_value"}
+)
 
 
 def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> list[NumberEntity]:
@@ -138,6 +170,9 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
     coordinator's live device list so a dispatchable device that appears after
     setup gets its controls at runtime (dynamic-devices).
     """
+    # Skip entirely if the device reported that it doesn't accept parameter writes.
+    if not coordinator.dispatch_update_supported:
+        return []
     # Prefer the ESS device if present, otherwise fall back to an inverter.
     target = select_dispatch_device(coordinator.devices)
     if target is None:
@@ -234,8 +269,12 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
     async def async_set_native_value(self, value: float) -> None:
         """Update the dispatch parameter on the inverter."""
         _LOGGER.debug("Setting %s to %s for %s", self.param, value, self.device_uuid)
+        # The API expects power parameters in kW (the entities present them in W for a
+        # familiar UI), and the client sends the value verbatim — so convert W->kW on
+        # the way out. Percentage/other params are sent as integers.
+        wire_value = str(round(value / 1000, 2)) if self.param in _RATED_POWER_PARAMS else str(int(value))
         try:
-            await self.control.async_update_parameters(self.device_uuid, {self.param: str(int(value))})
+            await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
         except PySolarCloudException as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
