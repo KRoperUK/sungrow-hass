@@ -15,6 +15,7 @@
   "loggers": [
     "pysolarcloud"
   ],
+  "quality_scale": "silver",
   "requirements": [
     "sungrow-isolarcloud==0.5.0"
   ],
