@@ -18,7 +18,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
+    CONF_APP_SECRET,
     CONF_EXTRA_MEASURE_POINTS,
+    CONF_GATEWAY,
+    CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -380,6 +383,68 @@ async def test_callback_view_rejects_unknown_flow(hass: HomeAssistant, mock_auth
 
     response = await view.get(request)
     assert response.status == 400
+
+
+# ---------------------------------------------------------------------------
+# Reconfigure flow
+# ---------------------------------------------------------------------------
+
+
+async def test_reconfigure_shows_form(hass: HomeAssistant, mock_auth):
+    """Reconfigure opens a form pre-filled with the current settings."""
+    entry = _hub_entry(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+
+async def test_reconfigure_updates_settings_and_reauthorizes(hass: HomeAssistant, mock_auth):
+    """Reconfigure changes region/credentials (App ID fixed) and re-authorizes in place (#80)."""
+    entry = _hub_entry(hass)  # gateway=Europe, app_id=test_app_id
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    assert result["step_id"] == "reconfigure"
+
+    async def _timeout(*args, **kwargs):
+        await asyncio.sleep(0)
+        raise TimeoutError
+
+    new_input = {
+        CONF_APP_KEY: "new_key",
+        CONF_APP_SECRET: "new_secret",
+        CONF_GATEWAY: "Australia",
+        CONF_REDIRECT_URI: MOCK_USER_INPUT[CONF_REDIRECT_URI],
+    }
+    # Submitting drives to the OAuth wait; force it to time out -> manual entry.
+    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_timeout):
+        result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=new_input)
+        assert result2["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["step_id"] == "auth_manual"
+
+    mock_auth.tokens = {"access_token": "reconf_token", "refresh_token": "r", "expires_at": 9999999999}
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"code": "reconf_code"})
+        await hass.async_block_till_done()
+
+    assert result3["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result3["reason"] == "reconfigure_successful"
+    # Entry updated in place: new region + credentials, App ID preserved, fresh tokens.
+    assert entry.data[CONF_GATEWAY] == "Australia"
+    assert entry.data[CONF_APP_KEY] == "new_key"
+    assert entry.data[CONF_APP_ID] == "test_app_id"
+    assert entry.data["tokens"]["access_token"] == "reconf_token"
 
 
 # ---------------------------------------------------------------------------
