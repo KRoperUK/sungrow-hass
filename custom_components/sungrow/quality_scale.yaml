@@ -112,7 +112,11 @@ rules:
     status: done
     comment: README "Use cases" describes monitoring, time-of-use battery control and alerting.
   dynamic-devices:
-    status: todo
+    status: done
+    comment: >-
+      The coordinator refreshes each plant's device list every poll; the sensor
+      and dispatch platforms add entities for devices/points that appear after
+      setup via a coordinator listener.
   entity-category:
     status: exempt
     comment: >-
@@ -146,7 +150,10 @@ rules:
   repair-issues:
     status: todo
   stale-devices:
-    status: todo
+    status: done
+    comment: >-
+      async_remove_config_entry_device lets the user delete a device once the API
+      no longer reports it; devices still present are protected.
 
   # --- Platinum ---
   async-dependency:

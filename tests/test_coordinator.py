@@ -134,6 +134,37 @@ async def test_update_data_keyerror_raises_update_failed(hass: HomeAssistant):
 
 
 # ---------------------------------------------------------------------------
+# Device list refresh (dynamic / stale devices)
+# ---------------------------------------------------------------------------
+
+
+async def test_refresh_devices_updates_list(hass: HomeAssistant):
+    """Each poll refreshes the plant's device list so new devices are picked up."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
+    plants.async_get_plant_devices = AsyncMock(return_value=[{"uuid": "new-dev"}])
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices=[])
+    await coordinator._async_update_data()
+
+    assert coordinator.devices == [{"uuid": "new-dev"}]
+
+
+async def test_refresh_devices_failure_keeps_previous_list(hass: HomeAssistant):
+    """A device-list fetch failure keeps the previous list (best effort, non-fatal)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
+    plants.async_get_plant_devices = AsyncMock(side_effect=ConnectionError("boom"))
+
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry(), plants, "12345", "Test Plant", devices=[{"uuid": "keep"}]
+    )
+    await coordinator._async_update_data()
+
+    assert coordinator.devices == [{"uuid": "keep"}]
+
+
+# ---------------------------------------------------------------------------
 # scan interval from options
 # ---------------------------------------------------------------------------
 
