@@ -224,3 +224,20 @@ def _build_catalog() -> dict[str, PointInfo]:
 
 
 POINT_CATALOG: dict[str, PointInfo] = _build_catalog()
+
+
+def resolve_name(point_id: str, code: str, api_name: str | None) -> str:
+    """Resolve the display name for a point.
+
+    Precedence: curated alias -> catalog English name for opaque numeric codes
+    -> title-cased readable code -> API name -> ``Sensor {id}``.
+    """
+    alias = CODE_ALIASES.get(code)
+    if alias:
+        return alias
+    if code.isdigit():
+        info = POINT_CATALOG.get(point_id)
+        if info is not None:
+            return info.name
+        return api_name or f"Sensor {point_id}"
+    return code.replace("_", " ").title()

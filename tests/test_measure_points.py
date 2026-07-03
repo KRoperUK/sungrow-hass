@@ -164,3 +164,26 @@ def test_enum_maps_reference_real_catalog_points():
 def test_classify_uses_catalog_fallback_for_unitless():
     # No unit passed at runtime, but the catalog knows 8014 is a power factor.
     assert mp.resolve_classification(None, "8014", "8014") == (SensorDeviceClass.POWER_FACTOR, M)
+
+
+# ---------------------------------------------------------------------------
+# resolve_name
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_name_alias_wins():
+    assert mp.resolve_name("83240", "total_field_power_factor", "PF-cn") == "Battery Power Factor"
+
+
+def test_resolve_name_numeric_code_uses_catalog():
+    # Opaque numeric code -> English catalog name, not the (often Chinese) API name.
+    assert mp.resolve_name("58601", "58601", "电池电压") == "Battery Voltage"
+
+
+def test_resolve_name_readable_code_title_cases():
+    assert mp.resolve_name("0", "total_active_power", None) == "Total Active Power"
+
+
+def test_resolve_name_unknown_numeric_falls_back():
+    assert mp.resolve_name("99999", "99999", None) == "Sensor 99999"
+    assert mp.resolve_name("99999", "99999", "Some API Name") == "Some API Name"
