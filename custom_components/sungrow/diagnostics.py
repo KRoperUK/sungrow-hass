@@ -27,6 +27,26 @@ PROBE_TIMEOUT = 30
 TO_REDACT = {"app_id", "uuid", "ps_key", "dev_sn", "sn", "device_sn"}
 
 
+def _anonymise_device_keys(realtime: Any, uuid_map: dict[str, str]) -> Any:
+    """Replace device-uuid keys in a per-device realtime dict with stable placeholders.
+
+    ``async_get_device_realtime`` returns ``{device_uuid: {...points...}}`` — the device
+    uuids are dict *keys*, not values named ``uuid``, so ``async_redact_data`` (which only
+    scrubs values under known key names) can't reach them and they would otherwise leak
+    into a diagnostics download (#122). Map each uuid to a stable ``device_N`` placeholder,
+    sharing ``uuid_map`` across device types within a plant so the same device keeps the
+    same label. Non-dict payloads (e.g. an ``{"error": ...}`` capture) pass through
+    untouched — their keys are not uuids.
+    """
+    if not isinstance(realtime, dict):
+        return realtime
+    anonymised: dict[str, Any] = {}
+    for uuid, payload in realtime.items():
+        placeholder = uuid_map.setdefault(str(uuid), f"device_{len(uuid_map) + 1}")
+        anonymised[placeholder] = payload
+    return anonymised
+
+
 def _jsonable(obj: Any) -> Any:
     """Make API payloads JSON-serialisable for the diagnostics download.
 
@@ -65,6 +85,9 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
 
     device_realtime: dict[str, Any] = {}
     seen_types: set[Any] = set()
+    # Shared across device types so a given device uuid always maps to the same
+    # ``device_N`` placeholder within this plant's per-device realtime section (#122).
+    uuid_map: dict[str, str] = {}
     for device in all_devices:
         if not isinstance(device, dict):
             continue
@@ -78,7 +101,7 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
         try:
             async with asyncio.timeout(PROBE_TIMEOUT):
                 realtime = await service.async_get_device_realtime(plant_id, device_type)
-            device_realtime[str(type_id)] = _jsonable(realtime)
+            device_realtime[str(type_id)] = _anonymise_device_keys(_jsonable(realtime), uuid_map)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}
