@@ -121,3 +121,46 @@ def test_classify_dimensionless_soc_by_code():
 
 def test_classify_unknown_is_text():
     assert mp.resolve_classification("", "some_status", "0") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Catalog integrity
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_covers_all_device_types():
+    ids = {pid for pid, _n, _u in mp.RAW_POINTS}
+    # Anchor points from each catalog must be present.
+    for pid in ("58604", "33716", "8014", "24629", "13141", "24", "83252", "51301", "2016", "44012"):
+        assert pid in ids, f"missing catalog point {pid}"
+    # Comprehensive coverage — the union of catalogs is well over 300 points.
+    assert len(mp.RAW_POINTS) >= 300
+
+
+def test_catalog_no_duplicate_ids():
+    ids = [pid for pid, _n, _u in mp.RAW_POINTS]
+    assert len(ids) == len(set(ids)), "duplicate point IDs in RAW_POINTS"
+
+
+def test_catalog_entry_names_and_classes():
+    info = mp.POINT_CATALOG["58601"]  # Battery Voltage, V
+    assert info.name == "Battery Voltage"
+    assert info.device_class == SensorDeviceClass.VOLTAGE
+    # Dimensionless SOH is numeric, not a battery device class.
+    assert mp.POINT_CATALOG["58605"].device_class is None
+    assert mp.POINT_CATALOG["58605"].state_class == M
+    # Dimensionless power factor.
+    assert mp.POINT_CATALOG["8014"].device_class == SensorDeviceClass.POWER_FACTOR
+    # Battery level -> battery device class even with no unit.
+    assert mp.POINT_CATALOG["58604"].device_class == SensorDeviceClass.BATTERY
+
+
+def test_enum_maps_reference_real_catalog_points():
+    for pid in mp.ENUM_MAPS:
+        assert pid in mp.POINT_CATALOG, f"enum point {pid} not in catalog"
+        assert mp.POINT_CATALOG[pid].options, f"enum point {pid} missing options"
+
+
+def test_classify_uses_catalog_fallback_for_unitless():
+    # No unit passed at runtime, but the catalog knows 8014 is a power factor.
+    assert mp.resolve_classification(None, "8014", "8014") == (SensorDeviceClass.POWER_FACTOR, M)

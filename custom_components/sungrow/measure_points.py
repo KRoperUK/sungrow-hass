@@ -174,7 +174,53 @@ def resolve_classification(unit: str | None, code: str, point_id: str) -> _Class
     return (None, None)
 
 
-# Populated with the full catalog in ``_build_catalog`` (Task 4); the stub keeps
-# ``resolve_classification`` importable and its catalog-fallback branch inert
-# until the catalog is built.
-POINT_CATALOG: dict[str, PointInfo] = {}
+# --- Build-time catalog classification (from documented name + unit) ----------
+
+# Categorical points return string states (statuses, versions, serials, IDs) and
+# must stay text even if a numeric keyword also appears in the name.
+_TEXT_NAME_HINTS = ("status", "mode", "version", "s/n", "serial", "card id")
+# Dimensionless-but-numeric name tokens (checked as whole words to avoid e.g.
+# "pr" matching "purchased").
+_NUMERIC_NAME_TOKENS = frozenset({"pr", "rate", "ratio", "number", "normalization", "fraction"})
+
+
+def _name_tokens(name: str) -> set[str]:
+    cleaned = name.lower()
+    for ch in "/-().,#":
+        cleaned = cleaned.replace(ch, " ")
+    return set(cleaned.split())
+
+
+def _classify_point(name: str, unit: str, point_id: str) -> _ClassPair:
+    """Classify a catalog row from its documented name and unit (build time)."""
+    if point_id in ENUM_MAPS:
+        return (SensorDeviceClass.ENUM, None)
+    by_unit = _classify_by_unit(unit)
+    if by_unit is not None:
+        return by_unit
+
+    lowered = name.lower()
+    tokens = _name_tokens(name)
+    # Text/categorical points first so "Version Number" isn't read as numeric.
+    if any(h in lowered for h in _TEXT_NAME_HINTS):
+        return (None, None)
+    if "soh" in lowered or "health" in lowered:
+        return (None, _MEASUREMENT)
+    if "soc" in tokens or "battery level" in lowered or "state of charge" in lowered:
+        return (SensorDeviceClass.BATTERY, _MEASUREMENT)
+    if "power factor" in lowered:
+        return (SensorDeviceClass.POWER_FACTOR, _MEASUREMENT)
+    if tokens & _NUMERIC_NAME_TOKENS or "signal strength" in lowered:
+        return (None, _MEASUREMENT)
+    return (None, None)
+
+
+def _build_catalog() -> dict[str, PointInfo]:
+    catalog: dict[str, PointInfo] = {}
+    for point_id, name, unit in RAW_POINTS:
+        device_class, state_class = _classify_point(name, unit, point_id)
+        catalog[point_id] = PointInfo(name, device_class, state_class, resolve_enum_options(point_id))
+    return catalog
+
+
+POINT_CATALOG: dict[str, PointInfo] = _build_catalog()
