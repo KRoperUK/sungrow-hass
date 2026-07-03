@@ -7,10 +7,12 @@ from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
@@ -38,6 +40,8 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
             "Disable": Control.FORCED_CHARGING["disable"],
             "Enable": Control.FORCED_CHARGING["enable"],
         },
+        # Enabling/disabling forced charging is a policy setting, not actuation.
+        "entity_category": EntityCategory.CONFIG,
     },
 }
 
@@ -89,7 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
-class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEntity):
+class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreEntity, SelectEntity):
     """Select entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
@@ -122,16 +126,18 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEn
             via_device=(DOMAIN, coordinator.plant_id),
         )
         self._attr_options = list(self.options_map.keys())
+        self._attr_entity_category = meta.get("entity_category")
 
-    @property
-    def current_option(self) -> str | None:
-        """Return the current option.
+    async def async_added_to_hass(self) -> None:
+        """Restore the last selected option across restarts.
 
         Dispatch commands are write-only (not polled back from the API), so the
-        current option is unknown. Availability is inherited from
-        CoordinatorEntity (tracks ``coordinator.last_update_success``).
+        last option the user chose is restored from state rather than fetched.
         """
-        return None
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in self.options_map:
+            self._attr_current_option = last.state
 
     async def async_select_option(self, option: str) -> None:
         """Update the dispatch parameter on the inverter."""
@@ -145,6 +151,8 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEn
                 translation_key="dispatch_write_failed",
                 translation_placeholders={"param": self.param, "error": str(err)},
             ) from err
+        # Remember the selected option so the UI reflects it and it survives restarts.
+        self._attr_current_option = option
 
         # Keep the inverter in dispatch mode while actively charging/discharging.
         entry = self.coordinator.config_entry

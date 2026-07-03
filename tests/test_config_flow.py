@@ -137,6 +137,25 @@ async def test_reauth_completes_with_manual_code(hass: HomeAssistant, mock_auth)
     assert entry.data["tokens"]["access_token"] == "fresh_token"
 
 
+async def test_reauth_wrong_account_aborts(hass: HomeAssistant, mock_auth):
+    """Re-authorizing when the App ID no longer matches the entry aborts (wrong account)."""
+    # unique_id is the App ID; construct an entry whose stored App ID diverges from it.
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_CONFIG_DATA, CONF_APP_ID: "a_different_app"},
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+    flow_id = await _reauth_to_manual(hass, entry)
+
+    mock_auth.tokens = {"access_token": "t", "refresh_token": "r", "expires_at": 9999999999}
+    result = await hass.config_entries.flow.async_configure(flow_id, user_input={"code": "c"})
+    await hass.async_block_till_done()
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "wrong_account"
+
+
 async def test_reauth_extracts_code_from_url(hass: HomeAssistant, mock_auth):
     """Pasting a full callback URL extracts the code automatically."""
     entry = _hub_entry(hass)
