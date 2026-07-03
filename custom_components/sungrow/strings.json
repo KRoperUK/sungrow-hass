@@ -92,6 +92,15 @@
       },
       "max_discharging_power": {
         "name": "Max Discharging Power"
+      },
+      "feed_in_limitation_value": {
+        "name": "Export Limit (Power)"
+      },
+      "feed_in_limitation_ratio": {
+        "name": "Export Limit (%)"
+      },
+      "active_power_limit_ratio": {
+        "name": "Active Power Limit"
       }
     },
     "select": {
@@ -100,6 +109,15 @@
       },
       "forced_charging": {
         "name": "Forced Charging"
+      },
+      "feed_in_limitation": {
+        "name": "Export Limitation"
+      },
+      "limited_power_switch": {
+        "name": "Active Power Limiting"
+      },
+      "battery_first": {
+        "name": "Battery First Mode"
       }
     }
   },

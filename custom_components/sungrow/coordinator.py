@@ -67,6 +67,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
         # uuid -> { code: point } for per-device realtime (populated when enabled).
         self.device_data: dict[str, dict[str, Any]] = {}
+        # Whether the dispatch device accepts parameter writes. Checked once at
+        # setup; defaults True (fail-open) so an unavailable/unknown check never
+        # hides working controls.
+        self.dispatch_update_supported: bool = True
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""

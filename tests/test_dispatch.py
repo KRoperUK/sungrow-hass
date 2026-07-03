@@ -163,9 +163,8 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
         await power.async_set_native_value(2500)
 
-    entry_data.control.async_update_parameters.assert_awaited_once_with(
-        "dev-uuid-1", {"charge_discharge_power": "2500"}
-    )
+    # The API expects kW; the 2500 W slider value is sent as 2.5 kW.
+    entry_data.control.async_update_parameters.assert_awaited_once_with("dev-uuid-1", {"charge_discharge_power": "2.5"})
 
 
 async def test_number_starts_heartbeat_for_power_changes(hass: HomeAssistant):
@@ -376,6 +375,88 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
 
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
+
+
+# ---------------------------------------------------------------------------
+# kW unit conversion + additional controls (device-verified formats)
+# ---------------------------------------------------------------------------
+
+
+async def test_power_params_written_in_kw(hass: HomeAssistant):
+    """Power params convert W->kW on write; percentage params are sent as integers."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    by_param = {e.param: e for e in added}
+
+    with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
+        await by_param["max_charging_power"].async_set_native_value(3700)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"max_charging_power": "3.7"})
+
+    await by_param["feed_in_limitation_ratio"].async_set_native_value(80)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"feed_in_limitation_ratio": "80"})
+
+
+async def test_new_selects_write_verified_codes(hass: HomeAssistant):
+    """Feed-in / battery-first selects write the device-verified enable/disable codes."""
+    from homeassistant.const import EntityCategory
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    by_param = {e.param: e for e in added}
+
+    assert {"feed_in_limitation", "limited_power_switch", "battery_first"} <= by_param.keys()
+    await by_param["feed_in_limitation"].async_select_option("Enable")
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"feed_in_limitation": "170"})
+    await by_param["battery_first"].async_select_option("Disable")
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"battery_first": "85"})
+    assert by_param["battery_first"]._attr_entity_category == EntityCategory.CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Dispatch support gating
+# ---------------------------------------------------------------------------
+
+
+async def test_no_controls_when_updates_unsupported(hass: HomeAssistant):
+    """No number/select controls are created when the device rejects writes."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    data.coordinators[0].dispatch_update_supported = False
+
+    numbers: list = []
+    await number_setup_entry(hass, entry, lambda entities: numbers.extend(entities))
+    selects: list = []
+    await select_setup_entry(hass, entry, lambda entities: selects.extend(entities))
+
+    assert numbers == []
+    assert selects == []
+
+
+async def test_dispatch_supported_check_fails_open():
+    """_async_dispatch_supported only returns False on an explicit API 'no'."""
+    from custom_components.sungrow import _async_dispatch_supported
+
+    ess = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    control = MagicMock()
+
+    control.async_check_update_support = AsyncMock(return_value=False)
+    assert await _async_dispatch_supported(control, ess) is False
+
+    # No dispatch device yet -> unknown -> fail open (a later device still gets controls).
+    assert await _async_dispatch_supported(control, []) is True
+
+    # A failing check must not hide working controls.
+    control.async_check_update_support = AsyncMock(side_effect=Exception("boom"))
+    assert await _async_dispatch_supported(control, ess) is True
 
 
 # ---------------------------------------------------------------------------

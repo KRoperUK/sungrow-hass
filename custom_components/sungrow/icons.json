@@ -21,6 +21,15 @@
       },
       "max_discharging_power": {
         "default": "mdi:battery-arrow-down"
+      },
+      "feed_in_limitation_value": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "feed_in_limitation_ratio": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "active_power_limit_ratio": {
+        "default": "mdi:speedometer"
       }
     },
     "select": {
@@ -29,6 +38,15 @@
       },
       "forced_charging": {
         "default": "mdi:battery-lock"
+      },
+      "feed_in_limitation": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "limited_power_switch": {
+        "default": "mdi:speedometer"
+      },
+      "battery_first": {
+        "default": "mdi:battery-heart-variant"
       }
     }
   }
