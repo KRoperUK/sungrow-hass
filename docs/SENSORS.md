@@ -51,9 +51,11 @@ You can find the actual point IDs for your hardware by:
 
 ### Recommended measure points (from the official docs)
 
-The official iSolarCloud measuring-point catalogs — also served by the [mcp-isolarcloud](https://github.com/KRoperUK/mcp-isolarcloud) docs server — list the point IDs, names and units per device type. The integration ships friendly names for the codes below, so pasting the matching `point_id=code` pairs into **Extra measure points** gives nicely-named, correctly-classified sensors (device/state class is inferred from the reported unit, so the energy points feed the Energy dashboard automatically).
+The official iSolarCloud measuring-point catalogs — also served by the [mcp-isolarcloud](https://github.com/KRoperUK/mcp-isolarcloud) docs server — list the point IDs, names and units per device type. The integration ships a **grounded catalog of ~640 documented points** (all 17 device types), so pasting the matching `point_id=code` pairs into **Extra measure points** gives nicely-named, correctly-classified sensors.
 
-**Battery** (Common Battery Measuring Points):
+**Classification is automatic.** Device and state class are inferred from the API-reported unit, and — new in this release — from the documented point when the API reports *no* unit. So the dimensionless points (SOC, SOH, power factor, performance ratio, charge/discharge cycle counts) now classify correctly instead of showing up as plain text, and status points (EV charger status, inverter operating state) render as human-readable text via a `SensorDeviceClass.ENUM`. Energy points feed the Energy dashboard automatically. The friendly name comes from the point ID even if you pick your own `code`, so you don't have to memorise the exact code.
+
+**Battery** ([Common Battery Measuring Points](https://github.com/KRoperUK/mcp-isolarcloud)):
 ```
 58604=battery_level, 58605=battery_soh, 58601=battery_voltage, 58602=battery_current, 58603=battery_temperature, 58606=battery_total_charge_energy, 58607=battery_total_discharge_energy
 ```
@@ -65,10 +67,25 @@ The official iSolarCloud measuring-point catalogs — also served by the [mcp-is
 
 **Energy meter** (Common Energy Meter Measuring Points):
 ```
-8030=meter_forward_active_energy, 8031=meter_reverse_active_energy, 8062=meter_daily_forward_active_energy, 8063=meter_daily_reverse_active_energy, 8018=meter_active_power, 8014=meter_power_factor
+8030=meter_forward_active_energy, 8031=meter_reverse_active_energy, 8062=meter_daily_forward_active_energy, 8063=meter_daily_reverse_active_energy, 8018=meter_active_power, 8014=meter_power_factor, 8026=meter_apparent_power, 8064=meter_frequency
 ```
 
-EMS, PCS, combiner-box and microinverter catalogs are available via the docs server too. Point IDs are consistent per device *type* but not guaranteed across every model/firmware, so confirm against your hardware if a point is missing.
+**Energy storage inverter** (Common Energy Storage Inverter Measuring Points):
+```
+13126=battery_charge_power, 13150=battery_discharge_power, 13141=battery_soc, 13142=battery_soh, 13034=battery_total_charge_energy, 13035=battery_total_discharge_energy, 13119=load_power, 13121=feed_in_power, 13149=purchased_power, 13146=inverter_operating_status
+```
+
+**EMS device** (Common EMS Device Measuring Points):
+```
+24625=ems_storage_power, 24629=ems_storage_soc, 24626=ems_grid_power, 24624=ems_pv_power, 24631=ems_active_load, 24622=ems_total_charge, 24623=ems_total_discharge
+```
+
+**Microinverter** (Common Microinverter Measuring Points):
+```
+51303=micro_active_power, 51302=micro_total_yield, 51346=micro_yield_today, 51307=micro_power_factor, 51301=micro_running_status
+```
+
+Combiner-box, PCS, CMU/BSC, LC, environment-monitoring and communications catalogs are covered too — browse them via the docs server and add any `point_id=code` pair you need. Point IDs are consistent per device *type* but not guaranteed across every model/firmware, so confirm against your hardware if a point is missing.
 
 ## Dispatch / control entities
 

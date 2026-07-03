@@ -788,4 +788,26 @@ CODE_ALIASES: dict[str, str] = {
     "meter_daily_reverse_active_energy": "Meter Daily Reverse Active Energy",
     "meter_active_power": "Meter Active Power",
     "meter_power_factor": "Meter Power Factor",
+    "meter_apparent_power": "Meter Apparent Power",
+    "meter_frequency": "Meter Frequency",
+    # Energy-storage-inverter recommended codes (docs/SENSORS.md).
+    "battery_soc": "Battery Level (SOC)",
+    "load_power": "Load Power",
+    "feed_in_power": "Feed-in Power",
+    "purchased_power": "Purchased Power",
+    "inverter_operating_status": "Inverter Operating Status",
+    # EMS recommended codes.
+    "ems_storage_power": "EMS Storage Power",
+    "ems_storage_soc": "EMS Storage SOC",
+    "ems_grid_power": "EMS Grid Power",
+    "ems_pv_power": "EMS PV Power",
+    "ems_active_load": "EMS Active Load",
+    "ems_total_charge": "EMS Total Charge",
+    "ems_total_discharge": "EMS Total Discharge",
+    # Microinverter recommended codes.
+    "micro_active_power": "Microinverter Active Power",
+    "micro_total_yield": "Microinverter Total Yield",
+    "micro_yield_today": "Microinverter Yield Today",
+    "micro_power_factor": "Microinverter Power Factor",
+    "micro_running_status": "Microinverter Running Status",
 }
