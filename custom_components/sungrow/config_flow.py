@@ -52,10 +52,15 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize the config flow."""
-        self.init_info = {}
-        self.auth_client = None
+        self.init_info: dict[str, Any] = {}
+        self.auth_client: Any = None
         self._reauth_entry: ConfigEntry | None = None
         self._is_reconfigure = False
+        # OAuth flow state (kept on the instance, which persists across steps and the
+        # callback background task, rather than in the typed ConfigFlowContext).
+        self._code: str | None = None
+        self._callback_timeout = False
+        self._manual_waiter_armed = False
 
     @staticmethod
     @callback
@@ -82,7 +87,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         new region invalidate the stored tokens, submitting always re-runs the OAuth
         authorization and updates the entry in place (no delete & re-add).
         """
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        entry = self._get_reconfigure_entry()
         self._reauth_entry = entry
         self._is_reconfigure = True
 
@@ -113,7 +118,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         # Do not log user_input — it contains the app secret.
         _LOGGER.debug("async_step_user called (user_input provided: %s)", user_input is not None)
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             self.init_info = user_input
@@ -240,12 +245,12 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         If the callback does not arrive within the timeout, the flow falls back
         to the manual code-entry form instead of aborting.
         """
-        if self.context.get("callback_timeout"):
+        if self._callback_timeout:
             # The redirect never arrived — hand off to manual code entry so the
             # user can paste the authorization code or full redirect URL.
             return self.async_show_progress_done(next_step_id="auth_manual")
         if user_input is not None and user_input.get("code"):
-            self.context["code"] = user_input["code"]
+            self._code = user_input["code"]
             self._drop_callback_future()
             return self.async_show_progress_done(next_step_id="finish")
 
@@ -280,7 +285,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except TimeoutError:
                 if fall_back_to_manual:
                     _LOGGER.warning("OAuth callback not received within timeout for flow %s", self.flow_id)
-                    self.context["callback_timeout"] = True
+                    self._callback_timeout = True
                     await self._resume_flow(user_input={})
                 return
             except asyncio.CancelledError:
@@ -338,7 +343,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     code = code_input
 
-                self.context["code"] = code
+                self._code = code
                 self._drop_callback_future()
                 return self.async_show_progress_done(next_step_id="finish")
 
@@ -350,8 +355,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # that lands late (after the auto-wait timed out) still completes the flow
         # automatically instead of stranding a "successful" callback with no effect.
         # A context flag arms it exactly once (not on every form re-render).
-        if not self.context.get("manual_waiter_armed"):
-            self.context["manual_waiter_armed"] = True
+        if not self._manual_waiter_armed:
+            self._manual_waiter_armed = True
             self._arm_callback_wait(fall_back_to_manual=False)
 
         auth_url = self._auth_url()
@@ -382,7 +387,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not self._ensure_auth_client():
             return self.async_abort(reason="library_missing")
 
-        code = self.context.get("code")
+        code = self._code
         if not code:
             _LOGGER.error("Finish step reached without an authorization code")
             return self.async_abort(reason="missing_code")

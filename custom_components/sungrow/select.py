@@ -73,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class SungrowDispatchSelect(CoordinatorEntity, SelectEntity):
+class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEntity):
     """Select entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
@@ -124,18 +124,22 @@ class SungrowDispatchSelect(CoordinatorEntity, SelectEntity):
         await self.control.async_update_parameters(self.device_uuid, {self.param: value})
 
         # Keep the inverter in dispatch mode while actively charging/discharging.
+        entry = self.coordinator.config_entry
+        assert entry is not None
         if self.param == "charge_discharge_command" and option in {"Charge", "Discharge"}:
             await async_start_heartbeat(
                 self.hass,
-                self.coordinator.config_entry,
+                entry,
                 self.coordinator.plant_id,
                 self.device_uuid,
                 interval=60,
             )
         elif self.param == "charge_discharge_command" and option == "Stop":
-            await async_stop_heartbeat(self.hass, self.coordinator.config_entry, self.coordinator.plant_id)
+            await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop the heartbeat when the entity is removed."""
-        await async_stop_heartbeat(self.hass, self.coordinator.config_entry, self.coordinator.plant_id)
+        entry = self.coordinator.config_entry
+        assert entry is not None
+        await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
         await super().async_will_remove_from_hass()

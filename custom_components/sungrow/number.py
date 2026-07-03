@@ -101,7 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
+class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEntity):
     """Number entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
@@ -154,9 +154,11 @@ class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
         # If the user is actively dispatching, ensure a heartbeat is running so the
         # inverter stays in External EMS mode.
         if self.param == "charge_discharge_power":
+            entry = self.coordinator.config_entry
+            assert entry is not None
             await async_start_heartbeat(
                 self.hass,
-                self.coordinator.config_entry,
+                entry,
                 self.coordinator.plant_id,
                 self.device_uuid,
                 interval=60,
@@ -164,5 +166,7 @@ class SungrowDispatchNumber(CoordinatorEntity, NumberEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop the heartbeat when the entity is removed."""
-        await async_stop_heartbeat(self.hass, self.coordinator.config_entry, self.coordinator.plant_id)
+        entry = self.coordinator.config_entry
+        assert entry is not None
+        await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
         await super().async_will_remove_from_hass()

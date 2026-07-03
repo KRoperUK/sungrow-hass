@@ -42,3 +42,10 @@ select = [
     "SIM", # flake8-simplify
 ]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+check_untyped_defs = true
+# Scope to our own package; Home Assistant is imported for types only.
+files = ["custom_components/sungrow"]
