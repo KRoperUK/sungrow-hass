@@ -54,6 +54,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements_test.txt
 
+      - name: Type check with mypy
+        run: mypy
+
       - name: Run tests with coverage
         run: >-
           pytest tests/

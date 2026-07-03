@@ -116,7 +116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     coordinators = entry.runtime_data.coordinators
     devices_by_plant = entry.runtime_data.devices
     # Point the device "Visit" link at the region's iSolarCloud web console.
-    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY), DEFAULT_CONSOLE_URL)
+    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
 
     entities: list[SungrowSensor] = []
     for coordinator in coordinators:

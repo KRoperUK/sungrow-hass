@@ -38,9 +38,10 @@ this working — **do not remove it**, and keep `pysolarcloud` pinned in
 uv venv --python 3.13 .venv
 uv pip install --python .venv -r requirements_test.txt
 
-# Lint, format, test (mirror CI)
+# Lint, type-check, format, test (mirror CI)
 .venv/bin/ruff check custom_components/ tests/
 .venv/bin/ruff format --check custom_components/ tests/
+.venv/bin/mypy
 .venv/bin/python -m pytest tests/
 
 # Live tests (need real creds in .env; skipped otherwise)

@@ -26,16 +26,19 @@ _LOGGER = logging.getLogger(__name__)
 def is_auth_error(err: Exception) -> bool:
     """Return True if the error means the stored credentials are no longer valid.
 
-    A failed token refresh surfaces as a ``KeyError`` from pysolarcloud (the refresh
-    response has no ``access_token``), while explicit auth problems raise
-    ``PySolarCloudException`` with a known error code. Both require the user to
-    re-authorize rather than waiting for a transient outage to clear.
+    A failed token refresh raises ``PySolarCloudException`` (``TokenRefreshError``,
+    error ``token_refresh_failed``) on pysolarcloud>=0.6.0, and explicit auth
+    problems raise ``PySolarCloudException`` with a known error code — both matched
+    via ``AUTH_ERRORS``. All require the user to re-authorize rather than waiting
+    for a transient outage to clear.
     """
+    if isinstance(err, PySolarCloudException):
+        return err.error in AUTH_ERRORS
     if isinstance(err, KeyError):
-        # pysolarcloud raises KeyError("access_token") when a refresh response has
-        # no access token. Match on the key itself rather than the repr string.
+        # Legacy path: pysolarcloud<0.6.0 raised a bare KeyError("access_token")
+        # from a refresh with no access token. Drop once the pin is >=0.6.0.
         return bool(err.args) and err.args[0] == "access_token"
-    return isinstance(err, PySolarCloudException) and err.error in AUTH_ERRORS
+    return False
 
 
 class SungrowPlantCoordinator(DataUpdateCoordinator):
