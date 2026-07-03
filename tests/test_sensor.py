@@ -91,6 +91,26 @@ class TestSungrowSensor:
 
         assert sensor._attr_name == "Battery Charge Power"
 
+    @pytest.mark.parametrize(
+        ("code", "unit", "name", "device_class"),
+        [
+            ("battery_level", "%", "Battery Level", SensorDeviceClass.BATTERY),
+            ("battery_soh", "%", "Battery Health (SOH)", SensorDeviceClass.BATTERY),
+            ("battery_total_charge_energy", "Wh", "Battery Total Charge Energy", SensorDeviceClass.ENERGY),
+            ("meter_forward_active_energy", "Wh", "Meter Forward Active Energy", SensorDeviceClass.ENERGY),
+            ("meter_active_power", "W", "Meter Active Power", SensorDeviceClass.POWER),
+            ("ev_charger_max_power", "kW", "EV Charger Max Power", SensorDeviceClass.POWER),
+            ("ev_charger_status", "", "EV Charger Status", None),
+        ],
+    )
+    def test_documented_measure_point_aliases(self, code, unit, name, device_class):
+        """Documented measure-point codes get a friendly name; class is inferred from the unit."""
+        coordinator = self._make_coordinator()
+        sensor = SungrowSensor(coordinator, code, "123", "Plant", {"code": code, "value": "1", "unit": unit})
+
+        assert sensor._attr_name == name
+        assert sensor._attr_device_class == device_class
+
     def test_sensor_name_numeric_code_fallback(self):
         """Test sensor with a numeric code falls back to init_data name."""
         coordinator = self._make_coordinator()
