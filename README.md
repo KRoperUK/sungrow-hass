@@ -18,6 +18,16 @@ Custom component that integrates Sungrow inverters via the iSolarCloud API into 
 - **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay available across restarts; if credentials expire you're prompted to re-authorize in place (no delete & re-add).
 - **Configurable polling interval** — tune how often data is fetched via the integration options.
 
+## Use cases
+
+Typical things people use this integration for:
+
+- **Monitor your solar system in Home Assistant** — live generation, house consumption, grid import/export and battery state of charge as sensors, with the correct device/state classes so they feed straight into the **Energy dashboard** and long-term statistics.
+- **Time-of-use battery control** — combine the dispatch **number**/**select** entities with automations to charge the battery from the grid when electricity is cheap and discharge it during peak-price periods (see [Example automations](#example-automations)).
+- **Force-charge before high demand** — top the battery up ahead of a known heavy-usage window (e.g. before cooking or an EV charge session) using the forced-charging entities.
+- **EV charger & meter visibility** — enable per-device sensors to surface EV charger power/energy and meter readings alongside the plant data.
+- **Alerting** — notify on low battery SOC, a plant going unavailable, or a fault, using standard Home Assistant automations on the sensors this integration creates.
+
 ## Installation
 
 ### HACS (Recommended)
@@ -88,6 +98,69 @@ the code). Your iSolarCloud account and developer application are unaffected.
 ### Sensor mapping
 
 Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
+
+## How data updates
+
+This is a **cloud-polling** integration — it does not talk to the inverter locally.
+
+- **Polling.** Home Assistant polls the iSolarCloud API on a fixed interval using one data update coordinator **per plant**. Every sensor for a plant refreshes together on each poll.
+- **Interval.** The default is **5 minutes**. Change it under **Configure → Polling interval** (minimum 10 seconds). Lower intervals update sooner but use more of your API quota (the free developer plan allows ~2000 calls/hour); enabling per-device sensors adds a call per device type each poll.
+- **Availability.** Entity state reflects the last successful poll. If a poll fails (network/API outage), entities go **unavailable** and Home Assistant retries on the next interval — no restart needed.
+- **Authentication.** Access tokens are refreshed automatically and the rotated tokens are persisted, so entities stay available across restarts. If your credentials are revoked or expire, the integration triggers a **re-authorization** prompt rather than silently failing.
+- **Dispatch controls are write-only.** The dispatch **number**/**select** entities send commands to the inverter; iSolarCloud does not report their current value back, so they act as controls (their state is not polled). While actively charging/discharging, the integration keeps the inverter in External EMS mode via a background heartbeat.
+
+## Example automations
+
+Entity IDs depend on your device name — check **Settings → Devices & Services → Sungrow** for the exact IDs. The examples below assume a device called `inverter`.
+
+**Charge the battery overnight (cheap tariff), then let it discharge during the peak:**
+
+```yaml
+automation:
+  - alias: "Battery: charge overnight"
+    triggers:
+      - trigger: time
+        at: "00:30:00"
+    actions:
+      - action: select.select_option
+        target:
+          entity_id: select.inverter_charge_discharge_command
+        data:
+          option: "Charge"
+      - action: number.set_value
+        target:
+          entity_id: number.inverter_charge_discharge_power
+        data:
+          value: 3000
+
+  - alias: "Battery: stop forced charge at peak start"
+    triggers:
+      - trigger: time
+        at: "05:30:00"
+    actions:
+      - action: select.select_option
+        target:
+          entity_id: select.inverter_charge_discharge_command
+        data:
+          option: "Stop"
+```
+
+**Notify when the battery gets low:**
+
+```yaml
+automation:
+  - alias: "Battery: low SOC alert"
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.my_plant_battery_state_of_charge
+        below: 15
+    actions:
+      - action: notify.notify
+        data:
+          message: "Home battery is below 15%."
+```
+
+> Selecting **Charge**/**Discharge** (or setting charge/discharge power) automatically starts the EMS heartbeat; selecting **Stop** ends it.
 
 ## Supported devices & regions
 
