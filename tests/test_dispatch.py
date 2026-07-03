@@ -320,3 +320,53 @@ def test_select_dispatch_device_ignores_non_dispatch_devices():
         {"uuid": "inv", "device_type": DeviceType.INVERTER},
     ]
     assert select_dispatch_device(devices)["uuid"] == "inv"
+
+
+# ---------------------------------------------------------------------------
+# Rated power derived from model code (issue #81)
+# ---------------------------------------------------------------------------
+
+
+def test_rated_power_w_parses_model_codes():
+    """Rated power is parsed from Sungrow model codes; non-inverters return None."""
+    from custom_components.sungrow.number import rated_power_w
+
+    assert rated_power_w({"device_model_code": "SH10RT-V112"}) == 10000
+    assert rated_power_w({"device_model_code": "SG3.6RS"}) == 3600
+    assert rated_power_w({"device_model_code": "SG110CX"}) == 110000
+    assert rated_power_w({"device_model_code": "SBR256"}) is None  # battery
+    assert rated_power_w({"device_model_code": "SGSmartMeter"}) is None  # meter
+    assert rated_power_w({}) is None
+
+
+async def test_charge_power_max_from_model_code(hass: HomeAssistant):
+    """The charge/discharge power slider is sized to the device's rated power."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 10000
+    # Percentage-based params are unaffected.
+    soc = next(e for e in added if e.param == "soc_upper_limit")
+    assert soc._attr_native_max_value == 100
+
+
+async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
+    """An unparseable model code falls back to the default clamp."""
+    from custom_components.sungrow.number import DEFAULT_MAX_DISPATCH_POWER
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBR256"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
