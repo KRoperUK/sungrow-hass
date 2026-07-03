@@ -46,6 +46,11 @@ def test_is_auth_error_known_pysolarcloud_error():
     assert is_auth_error(PySolarCloudException({"error": "auth_not_initialised"})) is True
 
 
+def test_is_auth_error_token_refresh_failed():
+    """The typed token_refresh_failed error (pysolarcloud>=0.6 TokenRefreshError) is an auth error."""
+    assert is_auth_error(PySolarCloudException({"error": "token_refresh_failed"})) is True
+
+
 def test_is_auth_error_transient():
     """Transient errors are not auth errors."""
     assert is_auth_error(ConnectionError("boom")) is False
