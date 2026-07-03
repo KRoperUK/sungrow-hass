@@ -95,9 +95,11 @@ rules:
     status: exempt
     comment: No network discovery.
   docs-data-update:
-    status: todo
+    status: done
+    comment: README "How data updates" documents cloud polling, interval and availability.
   docs-examples:
-    status: todo
+    status: done
+    comment: README "Example automations" gives battery dispatch and low-SOC alert examples.
   docs-known-limitations:
     status: done
   docs-supported-devices:
@@ -107,7 +109,8 @@ rules:
   docs-troubleshooting:
     status: done
   docs-use-cases:
-    status: todo
+    status: done
+    comment: README "Use cases" describes monitoring, time-of-use battery control and alerting.
   dynamic-devices:
     status: todo
   entity-category:
