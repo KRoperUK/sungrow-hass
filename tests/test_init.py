@@ -239,6 +239,24 @@ async def test_setup_entry_connection_error_is_retried(hass: HomeAssistant, mock
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_setup_entry_plants_timeout_is_retried(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A hung ``async_get_plants`` call times out and raises ConfigEntryNotReady (retry) (#115)."""
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_plants_service.async_get_plants = _hang
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.sungrow.SETUP_TIMEOUT", 0.01):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
 async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
     """A failed token refresh raises ConfigEntryAuthFailed (reauth)."""
     # pysolarcloud>=0.6.0 raises TokenRefreshError (error "token_refresh_failed")

@@ -1,5 +1,6 @@
 """Tests for the Sungrow data update coordinator."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from custom_components.sungrow.const import (
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
+    DEVICE_REFRESH_INTERVAL,
 )
 from custom_components.sungrow.coordinator import SungrowPlantCoordinator, is_auth_error
 
@@ -179,6 +181,43 @@ async def test_refresh_devices_failure_keeps_previous_list(hass: HomeAssistant):
     await coordinator._async_update_data()
 
     assert coordinator.devices == [{"uuid": "keep"}]
+
+
+async def test_device_list_refresh_is_throttled(hass: HomeAssistant):
+    """The device list is refreshed on the first poll, then only once the interval elapses (#115)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
+    plants.async_get_plant_devices = AsyncMock(return_value=[{"uuid": "dev"}])
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices=[])
+
+    # First poll always refreshes.
+    await coordinator._async_update_data()
+    assert plants.async_get_plant_devices.await_count == 1
+
+    # A second poll within the interval does NOT re-fetch the device list.
+    await coordinator._async_update_data()
+    assert plants.async_get_plant_devices.await_count == 1
+
+    # Once the interval has elapsed, the next poll refreshes again.
+    coordinator._last_device_refresh -= DEVICE_REFRESH_INTERVAL + 1
+    await coordinator._async_update_data()
+    assert plants.async_get_plant_devices.await_count == 2
+
+
+async def test_poll_timeout_raises_update_failed(hass: HomeAssistant):
+    """A hung realtime request times out and surfaces as a transient UpdateFailed (#115)."""
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    plants = MagicMock()
+    plants.async_get_realtime_data = _hang
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    coordinator._poll_timeout = 0.01
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
 
 
 # ---------------------------------------------------------------------------

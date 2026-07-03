@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import logging
 from typing import Any
@@ -12,6 +13,10 @@ from homeassistant.core import HomeAssistant
 from . import SungrowConfigEntry, SungrowData
 
 _LOGGER = logging.getLogger(__name__)
+
+# Bound each best-effort probe request so a hung endpoint can't stall (or pile up
+# calls against the quota during) a diagnostics download.
+PROBE_TIMEOUT = 30
 
 # Stable identifiers redacted from the diagnostics download. Credentials
 # (app_key/app_secret) and tokens are never included in the payload to begin
@@ -52,7 +57,8 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
     raised, so a diagnostics download always succeeds.
     """
     try:
-        all_devices = await service.async_get_plant_devices(plant_id)
+        async with asyncio.timeout(PROBE_TIMEOUT):
+            all_devices = await service.async_get_plant_devices(plant_id)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.debug("Diagnostics: could not list devices for plant %s: %s", plant_id, err)
         return [{"error": str(err)}], {}
@@ -70,7 +76,9 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
             continue
         seen_types.add(type_id)
         try:
-            device_realtime[str(type_id)] = _jsonable(await service.async_get_device_realtime(plant_id, device_type))
+            async with asyncio.timeout(PROBE_TIMEOUT):
+                realtime = await service.async_get_device_realtime(plant_id, device_type)
+            device_realtime[str(type_id)] = _jsonable(realtime)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}

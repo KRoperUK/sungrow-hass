@@ -39,6 +39,11 @@ PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 # before force-cancelling it.
 HEARTBEAT_STOP_TIMEOUT = 10
 
+# How long to wait for a single cloud call during entry setup before giving up
+# and letting HA retry later (ConfigEntryNotReady). Fixed rather than tied to the
+# poll interval because setup runs once and can afford to be patient.
+SETUP_TIMEOUT = 60
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -177,10 +182,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     control_service = Control(auth)
 
     try:
-        plant_list = await plants_service.async_get_plants()
+        async with asyncio.timeout(SETUP_TIMEOUT):
+            plant_list = await plants_service.async_get_plants()
     except Exception as err:
         if is_auth_error(err):
             raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+        # A timeout arrives here as TimeoutError and is treated as transient.
         raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
@@ -194,7 +201,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         # of them. Failures here are non-fatal — the plant still works on plant-level
         # data, just without device discovery.
         try:
-            devices = await plants_service.async_get_plant_devices(plant_id)
+            async with asyncio.timeout(SETUP_TIMEOUT):
+                devices = await plants_service.async_get_plant_devices(plant_id)
         except Exception as err:
             _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
             devices = []

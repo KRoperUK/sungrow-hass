@@ -39,3 +39,9 @@ DEFAULT_CONSOLE_URL = GATEWAY_CONSOLE_URLS["Europe"]
 DEFAULT_SCAN_INTERVAL = 300
 MIN_SCAN_INTERVAL = 10
 MAX_SCAN_INTERVAL = 86400
+
+# How often (seconds) to re-fetch a plant's device list while polling. The device
+# set changes rarely, so re-listing it on every realtime poll needlessly burns
+# calls against the ~2000/hour free-plan cap. Refresh at most this often (plus
+# always on the first poll) so newly added/removed devices are still picked up.
+DEVICE_REFRESH_INTERVAL = 900
