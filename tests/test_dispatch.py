@@ -401,6 +401,33 @@ async def test_number_config_entities_have_category(hass: HomeAssistant):
     assert cats["forced_charging_target_soc_1"] == EntityCategory.CONFIG
 
 
+async def test_power_cap_and_second_window_controls(hass: HomeAssistant):
+    """Max charge/discharge power and the second forced-charge target are exposed."""
+    from homeassistant.components.number import NumberDeviceClass
+    from homeassistant.const import EntityCategory
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(
+        entry,
+        [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM", "device_model_code": "SH10RT-V112"}],
+    )
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    by_param = {e.param: e for e in added}
+
+    assert {"max_charging_power", "max_discharging_power", "forced_charging_target_soc_2"} <= by_param.keys()
+    # Power caps are POWER-class config entities, sized to the 10 kW model rating.
+    for p in ("max_charging_power", "max_discharging_power"):
+        assert by_param[p]._attr_device_class == NumberDeviceClass.POWER
+        assert by_param[p]._attr_entity_category == EntityCategory.CONFIG
+        assert by_param[p]._attr_native_max_value == 10000
+    # The second forced-charge target mirrors the first (0-100%).
+    assert by_param["forced_charging_target_soc_2"]._attr_native_max_value == 100
+    assert by_param["forced_charging_target_soc_2"]._attr_entity_category == EntityCategory.CONFIG
+
+
 async def test_select_forced_charging_is_config(hass: HomeAssistant):
     """The forced-charging select is a config entity; the command select is primary."""
     from homeassistant.const import EntityCategory
