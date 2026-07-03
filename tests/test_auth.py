@@ -72,23 +72,28 @@ async def test_no_updater_is_safe():
 async def test_concurrent_refresh_refreshes_and_persists_once():
     """Concurrent callers sharing one Auth must refresh + persist exactly once (issue #111).
 
-    The shared Auth is used by every coordinator plus the control/heartbeat paths, so
-    two overlapping calls could otherwise each spend the single-use refresh token and
-    trigger a spurious reauth. The lock serializes the body: the first waiter refreshes
-    and persists, later waiters see the now-fresh token and no-op.
+    The shared Auth is used by every coordinator plus the control/heartbeat paths, so two
+    overlapping calls could otherwise each spend the single-use refresh token and trigger a
+    spurious reauth. pysolarcloud >=0.8.0 serializes the refresh internally (modelled here by
+    the parent lock, since #121 removed the integration's own lock), and the wrapper tracks
+    the last-persisted refresh token on the instance: the first caller refreshes and persists
+    while the second sees the freshly stored token and no-ops.
     """
     saved = []
     auth = _make_auth(token_updater=saved.append)
     auth.tokens = {"access_token": "old", "refresh_token": "r1", "expires_at": 0}
     calls = {"refresh": 0}
+    parent_lock = asyncio.Lock()
 
     async def fake_parent(self):
-        # Mimic pysolarcloud: only refresh when the current token is expired.
-        if self.tokens["expires_at"] == 0:
-            calls["refresh"] += 1
-            await asyncio.sleep(0)  # yield so the other caller can interleave
-            self.tokens = {"access_token": "new", "refresh_token": "r2", "expires_at": 9999999999}
-        return self.tokens["access_token"]
+        # Mimic pysolarcloud 0.8.0: serialize refresh (held across the yield) and only
+        # refresh when the current token is expired, re-checking expiry inside the lock.
+        async with parent_lock:
+            if self.tokens["expires_at"] == 0:
+                calls["refresh"] += 1
+                await asyncio.sleep(0)  # yield while holding the lock, as a real refresh would
+                self.tokens = {"access_token": "new", "refresh_token": "r2", "expires_at": 9999999999}
+            return self.tokens["access_token"]
 
     with patch.object(pysolarcloud.Auth, "async_get_access_token", fake_parent):
         tokens = await asyncio.gather(auth.async_get_access_token(), auth.async_get_access_token())
