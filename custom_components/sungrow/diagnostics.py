@@ -6,11 +6,20 @@ import enum
 import logging
 from typing import Any
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import SungrowConfigEntry, SungrowData
 
 _LOGGER = logging.getLogger(__name__)
+
+# Stable identifiers redacted from the diagnostics download. Credentials
+# (app_key/app_secret) and tokens are never included in the payload to begin
+# with; this additionally scrubs the App ID and the per-device hardware
+# identifiers (uuid, ps_key, serial numbers) that would otherwise leak in the
+# device lists. ``ps_id`` (the plant id) is deliberately kept — it is needed to
+# correlate a report with an account for support and is not a secret.
+TO_REDACT = {"app_id", "uuid", "ps_key", "dev_sn", "sn", "device_sn"}
 
 
 def _jsonable(obj: Any) -> Any:
@@ -101,11 +110,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "device_realtime": device_realtime,
         }
 
-    return {
-        "entry_id": entry.entry_id,
-        "gateway": entry.data.get("gateway"),
-        "app_id": entry.data.get("app_id"),
-        "tokens_present": "tokens" in entry.data,
-        "options": dict(entry.options),
-        "plants": plant_data,
-    }
+    return async_redact_data(
+        {
+            "entry_id": entry.entry_id,
+            "gateway": entry.data.get("gateway"),
+            "app_id": entry.data.get("app_id"),
+            "tokens_present": "tokens" in entry.data,
+            "options": dict(entry.options),
+            "plants": plant_data,
+        },
+        TO_REDACT,
+    )
