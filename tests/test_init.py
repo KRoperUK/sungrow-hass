@@ -274,6 +274,59 @@ async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_
     assert entry.state is ConfigEntryState.SETUP_ERROR
 
 
+async def test_setup_partial_plant_failure_sets_up_remaining(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """One plant's transient first-refresh failure must not abort the others (#115)."""
+
+    async def _realtime(plant_ids, **kwargs):
+        if plant_ids == ["12345"]:
+            raise ConnectionError("plant 12345 temporarily down")
+        return MOCK_REALTIME_DATA
+
+    mock_plants_service.async_get_realtime_data = AsyncMock(side_effect=_realtime)
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # Only the healthy plant got a coordinator; the failed one is skipped for now.
+    coordinators = entry.runtime_data.coordinators
+    assert [c.plant_id for c in coordinators] == ["67890"]
+    assert "12345" not in entry.runtime_data.devices
+
+
+async def test_setup_all_plants_failure_raises_not_ready(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """If every plant fails its first refresh, the whole entry retries (#115)."""
+    mock_plants_service.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("all plants down"))
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_setup_plant_auth_failure_still_triggers_reauth(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """An auth failure during a plant's first refresh propagates as reauth, not a skip (#115)."""
+    mock_plants_service.async_get_realtime_data = AsyncMock(
+        side_effect=pysolarcloud.PySolarCloudException({"error": "invalid_token"})
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
 async def test_async_remove_config_entry_device(hass: HomeAssistant):
     """Stale devices can be removed from the UI; present ones are protected."""
     from types import SimpleNamespace

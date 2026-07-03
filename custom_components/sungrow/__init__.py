@@ -206,13 +206,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         except Exception as err:
             _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
             devices = []
-        devices_by_plant[plant_id] = devices
 
         coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name, devices)
-        # Raises ConfigEntryNotReady / ConfigEntryAuthFailed as classified by the coordinator.
-        await coordinator.async_config_entry_first_refresh()
+        try:
+            # Raises ConfigEntryAuthFailed (reauth) / ConfigEntryNotReady (retry) as
+            # classified by the coordinator.
+            await coordinator.async_config_entry_first_refresh()
+        except ConfigEntryAuthFailed:
+            # A dead credential is fatal for every plant (they share one login) —
+            # propagate immediately so HA starts reauth instead of dropping a plant.
+            raise
+        except ConfigEntryNotReady as err:
+            # One plant's transient failure must not abort setup of the others (#115);
+            # it will be retried on the next poll once the entry is loaded.
+            _LOGGER.warning("Plant %s failed its initial data refresh, skipping for now: %s", plant_name, err)
+            continue
+
         coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
+
+    if plant_list and not coordinators:
+        # Every plant failed a transient refresh — retry the whole entry later.
+        raise ConfigEntryNotReady("No plants could be set up; all initial data refreshes failed")
 
     entry.runtime_data = SungrowData(
         coordinators=coordinators,
