@@ -82,7 +82,16 @@
         "name": "SOC Lower Limit"
       },
       "forced_charging_target_soc_1": {
-        "name": "Forced Charge Target SOC"
+        "name": "Forced Charge Target SOC (Window 1)"
+      },
+      "forced_charging_target_soc_2": {
+        "name": "Forced Charge Target SOC (Window 2)"
+      },
+      "max_charging_power": {
+        "name": "Max Charging Power"
+      },
+      "max_discharging_power": {
+        "name": "Max Discharging Power"
       }
     },
     "select": {
