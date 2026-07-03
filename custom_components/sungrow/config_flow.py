@@ -70,7 +70,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication when the stored tokens are no longer valid."""
-        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        self._reauth_entry = self._get_reauth_entry()
         # Reuse the credentials already stored on the entry; only the tokens are stale.
         self.init_info = {k: v for k, v in entry_data.items() if k != "tokens"}
         return await self.async_step_reauth_confirm()
