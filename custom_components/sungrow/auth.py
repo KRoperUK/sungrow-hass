@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any, cast
 
 from pysolarcloud import Auth
 
@@ -27,7 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 AUTH_ERRORS = frozenset({"auth_not_initialised", "invalid_grant", "invalid_token", "token_refresh_failed"})
 
 
-class SungrowAuth(Auth):
+class SungrowAuth(Auth):  # type: ignore[misc]  # pysolarcloud.Auth is untyped (Any); subclassing it is the intended boundary
     """``pysolarcloud.Auth`` that persists rotated tokens via a callback.
 
     ``token_updater`` is invoked with the new ``tokens`` dict whenever the upstream
@@ -37,9 +38,9 @@ class SungrowAuth(Auth):
 
     def __init__(
         self,
-        *args,
-        token_updater: Callable[[dict], None] | None = None,
-        **kwargs,
+        *args: Any,
+        token_updater: Callable[[dict[str, Any]], None] | None = None,
+        **kwargs: Any,
     ) -> None:
         """Initialize the auth client with an optional token-persistence callback."""
         super().__init__(*args, **kwargs)
@@ -53,7 +54,8 @@ class SungrowAuth(Auth):
         call.
         """
         previous = self.tokens
-        token = await super().async_get_access_token()
+        # pysolarcloud is untyped, so the upstream method returns Any.
+        token = cast(str, await super().async_get_access_token())
         if self._token_updater is not None and self.tokens is not previous:
             _LOGGER.debug("Access token refreshed; persisting rotated tokens")
             self._token_updater(self.tokens)

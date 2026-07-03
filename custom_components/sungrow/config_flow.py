@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
 from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
@@ -50,7 +50,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 2
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the config flow."""
         self.init_info: dict[str, Any] = {}
         self.auth_client: Any = None
@@ -68,18 +68,18 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow handler."""
         return SungrowOptionsFlow()
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]):
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication when the stored tokens are no longer valid."""
         self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         # Reuse the credentials already stored on the entry; only the tokens are stale.
         self.init_info = {k: v for k, v in entry_data.items() if k != "tokens"}
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Confirm re-authentication by re-running the authorization step."""
         return await self.async_step_auth(user_input)
 
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Change the gateway / credentials of an existing entry, then re-authorize.
 
         The App ID is the entry's identity (unique_id) so it stays fixed; everything
@@ -114,7 +114,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
         # Do not log user_input — it contains the app secret.
         _LOGGER.debug("async_step_user called (user_input provided: %s)", user_input is not None)
@@ -207,7 +207,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         broke the token exchange, which uses the bare URI, with "invalid
         authentication".
         """
-        return self.init_info[CONF_REDIRECT_URI].rstrip("/")
+        # init_info is a dict[str, Any], so the redirect URI is typed as Any.
+        return cast(str, self.init_info[CONF_REDIRECT_URI]).rstrip("/")
 
     def _auth_url(self) -> str:
         """Build the iSolarCloud authorization URL for the canonical redirect URI.
@@ -218,9 +219,10 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         per-flow ``flow_id`` that could go stale, so it stays valid for the whole
         flow and each visit yields a fresh authorization code from iSolarCloud.
         """
-        return self.auth_client.auth_url(self._redirect_uri())
+        # auth_client is the untyped pysolarcloud Auth, so auth_url returns Any.
+        return cast(str, self.auth_client.auth_url(self._redirect_uri()))
 
-    async def async_step_auth(self, user_input: dict[str, Any] | None = None):
+    async def async_step_auth(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Begin authorization by automatically waiting for the OAuth redirect.
 
         No menu is shown: the callback listener starts immediately so the user
@@ -237,7 +239,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _ensure_callback_view_registered(self.hass)
         return await self.async_step_auth_callback()
 
-    async def async_step_auth_callback(self, user_input: dict[str, Any] | None = None):
+    async def async_step_auth_callback(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Wait for iSolarCloud to redirect back to the callback endpoint.
 
         The callback view extracts the authorization code and calls
@@ -264,7 +266,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"auth_url": auth_url},
         )
 
-    def _arm_callback_wait(self, *, fall_back_to_manual: bool) -> asyncio.Task:
+    def _arm_callback_wait(self, *, fall_back_to_manual: bool) -> asyncio.Task[None]:
         """Register a callback future and spawn a task that resumes the flow.
 
         Used by both the automatic progress step and the manual-entry form, so a
@@ -315,7 +317,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if isinstance(flows, dict):
             flows.pop(self.flow_id, None)
 
-    async def async_step_auth_manual(self, user_input: dict[str, Any] | None = None):
+    async def async_step_auth_manual(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle manual entry of the authorization code or full redirect URL.
 
         Reached as a fallback when the automatic redirect does not complete, or
@@ -367,7 +369,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _finish_error_result(self, error_key: str):
+    def _finish_error_result(self, error_key: str) -> ConfigFlowResult:
         """Return the manual code-entry form with an error so the user can retry.
 
         Both the automatic and manual paths land here on failure; showing the
@@ -381,7 +383,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors={"base": error_key},
         )
 
-    async def async_step_finish(self, user_input: dict[str, Any] | None = None):
+    async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Exchange the authorization code for tokens and create the config entry."""
 
         if not self._ensure_auth_client():
@@ -455,7 +457,7 @@ def _parse_extra_measure_points(raw: str | None) -> dict[str, str]:
 class SungrowOptionsFlow(config_entries.OptionsFlow):
     """Handle Sungrow integration options (e.g. polling interval)."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the integration options."""
         errors: dict[str, str] = {}
         if user_input is not None:
