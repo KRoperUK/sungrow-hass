@@ -1,0 +1,90 @@
+"""Catalog and resolver helpers for iSolarCloud measure points.
+
+Naming and classification for the sensors built in ``sensor.py``. The API's
+reported unit stays authoritative; this module supplies English names and a
+classification fallback for the many documented points that are dimensionless
+(SOC, SOH, power factor, PR, counts) and would otherwise become text sensors.
+
+Data (catalog rows, enum tables, code aliases) lives in ``measure_points_data``.
+"""
+
+from __future__ import annotations
+
+from typing import Any, NamedTuple
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+
+_MEASUREMENT = SensorStateClass.MEASUREMENT
+_TOTAL_INCREASING = SensorStateClass.TOTAL_INCREASING
+
+_ClassPair = tuple[SensorDeviceClass | None, SensorStateClass | None]
+
+
+class PointInfo(NamedTuple):
+    """Resolved metadata for one measure point."""
+
+    name: str
+    device_class: SensorDeviceClass | None
+    state_class: SensorStateClass | None
+    options: tuple[str, ...] | None = None
+
+
+# Unit (lower-cased, stripped) -> (device_class, state_class). Energy is
+# TOTAL_INCREASING so cumulative and daily-reset counters both feed the Energy
+# dashboard (issue #19).
+_UNIT_CLASS_MAP: dict[str, _ClassPair] = {
+    # Power
+    "w": (SensorDeviceClass.POWER, _MEASUREMENT),
+    "kw": (SensorDeviceClass.POWER, _MEASUREMENT),
+    "mw": (SensorDeviceClass.POWER, _MEASUREMENT),
+    "gw": (SensorDeviceClass.POWER, _MEASUREMENT),
+    # Energy
+    "wh": (SensorDeviceClass.ENERGY, _TOTAL_INCREASING),
+    "kwh": (SensorDeviceClass.ENERGY, _TOTAL_INCREASING),
+    "mwh": (SensorDeviceClass.ENERGY, _TOTAL_INCREASING),
+    "gwh": (SensorDeviceClass.ENERGY, _TOTAL_INCREASING),
+    # Voltage
+    "v": (SensorDeviceClass.VOLTAGE, _MEASUREMENT),
+    "mv": (SensorDeviceClass.VOLTAGE, _MEASUREMENT),
+    "kv": (SensorDeviceClass.VOLTAGE, _MEASUREMENT),
+    # Current
+    "a": (SensorDeviceClass.CURRENT, _MEASUREMENT),
+    "ma": (SensorDeviceClass.CURRENT, _MEASUREMENT),
+    # Frequency
+    "hz": (SensorDeviceClass.FREQUENCY, _MEASUREMENT),
+    # Temperature
+    "°c": (SensorDeviceClass.TEMPERATURE, _MEASUREMENT),
+    "℃": (SensorDeviceClass.TEMPERATURE, _MEASUREMENT),
+    "c": (SensorDeviceClass.TEMPERATURE, _MEASUREMENT),
+    "°f": (SensorDeviceClass.TEMPERATURE, _MEASUREMENT),
+    # Reactive / apparent power
+    "var": (SensorDeviceClass.REACTIVE_POWER, _MEASUREMENT),
+    "kvar": (SensorDeviceClass.REACTIVE_POWER, _MEASUREMENT),
+    "va": (SensorDeviceClass.APPARENT_POWER, _MEASUREMENT),
+    "kva": (SensorDeviceClass.APPARENT_POWER, _MEASUREMENT),
+    # Environment / meter extras (comprehensive catalogs).
+    "%rh": (SensorDeviceClass.HUMIDITY, _MEASUREMENT),
+    "m/s": (SensorDeviceClass.WIND_SPEED, _MEASUREMENT),
+    "hpa": (SensorDeviceClass.PRESSURE, _MEASUREMENT),
+    "mm": (SensorDeviceClass.PRECIPITATION, _MEASUREMENT),
+    "w/m²": (SensorDeviceClass.IRRADIANCE, _MEASUREMENT),
+    "w/㎡": (SensorDeviceClass.IRRADIANCE, _MEASUREMENT),
+    "w/m^2": (SensorDeviceClass.IRRADIANCE, _MEASUREMENT),
+    "h": (SensorDeviceClass.DURATION, _MEASUREMENT),
+    # Numeric-but-no-HA-device-class units: classify as plain numeric so they graph.
+    "varh": (None, _TOTAL_INCREASING),
+    "kω": (None, _MEASUREMENT),
+    "ω": (None, _MEASUREMENT),
+    "°": (None, _MEASUREMENT),
+    "wh/m²": (None, _TOTAL_INCREASING),
+    "wh/㎡": (None, _TOTAL_INCREASING),
+    "wh/m^2": (None, _TOTAL_INCREASING),
+    "w/wp": (None, _MEASUREMENT),
+}
+
+
+def _classify_by_unit(unit: str | None) -> _ClassPair | None:
+    """Return the class pair for a known unit, else ``None``."""
+    if not unit:
+        return None
+    return _UNIT_CLASS_MAP.get(unit.strip().lower())
