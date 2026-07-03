@@ -22,7 +22,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Errors raised by pysolarcloud that indicate the stored credentials/tokens are no
 # longer usable and the user must re-authorize (as opposed to a transient outage).
-AUTH_ERRORS = frozenset({"auth_not_initialised", "invalid_grant", "invalid_token"})
+# "token_refresh_failed" is the code on pysolarcloud>=0.6.0's TokenRefreshError
+# (a PySolarCloudException), raised when a refresh returns no access token.
+AUTH_ERRORS = frozenset({"auth_not_initialised", "invalid_grant", "invalid_token", "token_refresh_failed"})
 
 
 class SungrowAuth(Auth):
