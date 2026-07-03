@@ -239,9 +239,12 @@ async def test_setup_entry_connection_error_is_retried(hass: HomeAssistant, mock
 
 
 async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """A failed token refresh (KeyError) raises ConfigEntryAuthFailed (reauth)."""
-    # pysolarcloud raises KeyError when the refresh response has no access_token.
-    mock_plants_service.async_get_plants = AsyncMock(side_effect=KeyError("access_token"))
+    """A failed token refresh raises ConfigEntryAuthFailed (reauth)."""
+    # pysolarcloud>=0.6.0 raises TokenRefreshError (error "token_refresh_failed")
+    # when the refresh response has no access_token.
+    mock_plants_service.async_get_plants = AsyncMock(
+        side_effect=pysolarcloud.PySolarCloudException({"error": "token_refresh_failed"})
+    )
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)

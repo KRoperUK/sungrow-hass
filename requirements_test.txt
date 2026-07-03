@@ -10,4 +10,4 @@ ruff==0.15.16
 mypy==2.1.0
 
 # Component dependencies
-sungrow-isolarcloud==0.5.0
+sungrow-isolarcloud==0.6.0
