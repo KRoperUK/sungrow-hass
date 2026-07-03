@@ -27,17 +27,13 @@ def is_auth_error(err: Exception) -> bool:
     """Return True if the error means the stored credentials are no longer valid.
 
     A failed token refresh raises ``PySolarCloudException`` (``TokenRefreshError``,
-    error ``token_refresh_failed``) on pysolarcloud>=0.6.0, and explicit auth
-    problems raise ``PySolarCloudException`` with a known error code — both matched
-    via ``AUTH_ERRORS``. All require the user to re-authorize rather than waiting
-    for a transient outage to clear.
+    error ``token_refresh_failed``), and explicit auth problems raise
+    ``PySolarCloudException`` with a known error code — both matched via
+    ``AUTH_ERRORS``. All require the user to re-authorize rather than waiting for a
+    transient outage to clear.
     """
     if isinstance(err, PySolarCloudException):
         return err.error in AUTH_ERRORS
-    if isinstance(err, KeyError):
-        # Legacy path: pysolarcloud<0.6.0 raised a bare KeyError("access_token")
-        # from a refresh with no access token. Drop once the pin is >=0.6.0.
-        return bool(err.args) and err.args[0] == "access_token"
     return False
 
 

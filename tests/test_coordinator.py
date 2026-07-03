@@ -30,13 +30,14 @@ def _make_entry(options=None):
 # ---------------------------------------------------------------------------
 
 
-def test_is_auth_error_keyerror():
-    """A KeyError for access_token (failed refresh) is treated as an auth error."""
-    assert is_auth_error(KeyError("access_token")) is True
+def test_is_auth_error_keyerror_is_transient():
+    """A bare KeyError is not an auth error.
 
-
-def test_is_auth_error_unrelated_keyerror():
-    """An unrelated KeyError is not treated as an auth error."""
+    pysolarcloud>=0.6.0 raises the typed TokenRefreshError (error
+    ``token_refresh_failed``) on a failed refresh, so a raw KeyError is no longer
+    an auth signal and is left to retry as a transient failure.
+    """
+    assert is_auth_error(KeyError("access_token")) is False
     assert is_auth_error(KeyError("some_other_key")) is False
 
 
@@ -95,7 +96,7 @@ async def test_update_data_transient_error_raises_update_failed(hass: HomeAssist
 async def test_update_data_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant):
     """A failed token refresh raises ConfigEntryAuthFailed (triggers reauth)."""
     plants = MagicMock()
-    plants.async_get_realtime_data = AsyncMock(side_effect=KeyError("access_token"))
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "token_refresh_failed"}))
 
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
     with pytest.raises(ConfigEntryAuthFailed):
@@ -122,8 +123,8 @@ async def test_update_data_pysolarcloud_transient_error_raises_update_failed(has
         await coordinator._async_update_data()
 
 
-async def test_update_data_unrelated_keyerror_raises_update_failed(hass: HomeAssistant):
-    """A KeyError unrelated to tokens is treated as a transient UpdateFailed."""
+async def test_update_data_keyerror_raises_update_failed(hass: HomeAssistant):
+    """A bare KeyError is treated as a transient UpdateFailed, not an auth error."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(side_effect=KeyError("some_other_key"))
 
