@@ -6,7 +6,7 @@ import logging
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -41,38 +41,51 @@ DISPATCH_SELECTS: dict[str, dict] = {
 }
 
 
+def _build_selects(coordinator, control) -> list[SelectEntity]:
+    """Build the dispatch select entities for a coordinator's target device.
+
+    Returns an empty list when no dispatch-capable device is present. Reads the
+    coordinator's live device list so a dispatchable device that appears after
+    setup gets its controls at runtime (dynamic-devices).
+    """
+    # Prefer the ESS device if present, otherwise fall back to an inverter.
+    target = select_dispatch_device(coordinator.devices)
+    if target is None:
+        return []
+    device_uuid = target.get("uuid")
+    if not device_uuid:
+        return []
+    device_name = target.get("device_name") or coordinator.plant_name
+    return [
+        SungrowDispatchSelect(coordinator, control, device_uuid, device_name, param, meta)
+        for param, meta in DISPATCH_SELECTS.items()
+    ]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow dispatch select entities."""
     data = entry.runtime_data
     control = data.control
-    devices_by_plant = data.devices
     coordinators = data.coordinators
 
-    entities: list[SelectEntity] = []
-    for coordinator in coordinators:
-        plant_id = coordinator.plant_id
-        devices = devices_by_plant.get(plant_id, [])
-        # Prefer the ESS device if present, otherwise fall back to the first device.
-        target = select_dispatch_device(devices)
-        if target is None:
-            continue
-        device_uuid = target.get("uuid")
-        if not device_uuid:
-            continue
-        device_name = target.get("device_name") or coordinator.plant_name
-        for param, meta in DISPATCH_SELECTS.items():
-            entities.append(
-                SungrowDispatchSelect(
-                    coordinator,
-                    control,
-                    device_uuid,
-                    device_name,
-                    param,
-                    meta,
-                )
-            )
+    known_unique_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _add_new_entities() -> None:
+        new_entities: list[SelectEntity] = []
+        for coordinator in coordinators:
+            for entity in _build_selects(coordinator, control):
+                uid = entity.unique_id
+                if uid is None or uid in known_unique_ids:
+                    continue
+                known_unique_ids.add(uid)
+                new_entities.append(entity)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    _add_new_entities()
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEntity):

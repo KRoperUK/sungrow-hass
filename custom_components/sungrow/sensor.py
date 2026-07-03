@@ -4,7 +4,7 @@ import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -111,50 +111,74 @@ def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceC
     return None, None
 
 
+def _build_sensors(coordinator, console_url) -> list[SungrowSensor]:
+    """Build the full set of sensors the coordinator currently warrants.
+
+    Called both at setup and on every coordinator update, so points/devices that
+    appear after setup are surfaced at runtime (dynamic-devices). The caller
+    de-duplicates by unique_id, so returning the complete set each time is fine.
+    """
+    sensors: list[SungrowSensor] = []
+
+    # Plant-level sensors.
+    # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
+    if coordinator.data:
+        for point_code, point_data in coordinator.data.items():
+            sensors.append(
+                SungrowSensor(
+                    coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
+                )
+            )
+
+    # Per-device sensors (opt-in, issue #74): surface points reported per device
+    # (EV chargers, meters, extra batteries). Points already present at the plant
+    # level are skipped so enabling this doesn't just duplicate every plant sensor
+    # under the inverter.
+    if coordinator.enable_device_sensors and coordinator.device_data:
+        plant_codes = set(coordinator.data or {})
+        device_names = {
+            str(d.get("uuid")): (d.get("device_name") or d.get("device_model_name") or coordinator.plant_name)
+            for d in coordinator.devices
+            if d.get("uuid")
+        }
+        for uuid, points in coordinator.device_data.items():
+            device_name = device_names.get(uuid, f"Device {uuid}")
+            for point_code, point_data in points.items():
+                if point_code in plant_codes:
+                    continue
+                sensors.append(
+                    SungrowDeviceSensor(coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data)
+                )
+
+    return sensors
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Sungrow sensors from the coordinators created during entry setup."""
     coordinators = entry.runtime_data.coordinators
-    devices_by_plant = entry.runtime_data.devices
     # Point the device "Visit" link at the region's iSolarCloud web console.
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
 
-    entities: list[SungrowSensor] = []
+    known_unique_ids: set[str] = set()
+
+    @callback
+    def _add_new_entities() -> None:
+        """Add entities for any plant points / devices not seen yet."""
+        new_entities: list[SungrowSensor] = []
+        for coordinator in coordinators:
+            for entity in _build_sensors(coordinator, console_url):
+                uid = entity.unique_id
+                if uid is None or uid in known_unique_ids:
+                    continue
+                known_unique_ids.add(uid)
+                new_entities.append(entity)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add the initial set, then keep watching each coordinator for new devices.
+    _add_new_entities()
     for coordinator in coordinators:
-        # Plant-level sensors.
-        # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
-        if coordinator.data:
-            for point_code, point_data in coordinator.data.items():
-                entities.append(
-                    SungrowSensor(
-                        coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
-                    )
-                )
-        else:
-            _LOGGER.warning("No data received for plant %s", coordinator.plant_name)
-
-        # Per-device sensors (opt-in, issue #74): surface points reported per device
-        # (EV chargers, meters, extra batteries). Points already present at the plant
-        # level are skipped so enabling this doesn't just duplicate every plant sensor
-        # under the inverter.
-        if coordinator.enable_device_sensors and coordinator.device_data:
-            plant_codes = set(coordinator.data or {})
-            device_names = {
-                str(d.get("uuid")): (d.get("device_name") or d.get("device_model_name") or coordinator.plant_name)
-                for d in devices_by_plant.get(coordinator.plant_id, [])
-                if d.get("uuid")
-            }
-            for uuid, points in coordinator.device_data.items():
-                device_name = device_names.get(uuid, f"Device {uuid}")
-                for point_code, point_data in points.items():
-                    if point_code in plant_codes:
-                        continue
-                    entities.append(
-                        SungrowDeviceSensor(
-                            coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data
-                        )
-                    )
-
-    async_add_entities(entities)
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class SungrowSensor(CoordinatorEntity, SensorEntity):

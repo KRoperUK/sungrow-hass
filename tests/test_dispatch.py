@@ -36,8 +36,11 @@ def _setup_entry_data(entry, devices) -> SungrowData:
     control.async_update_parameters = AsyncMock(return_value=[])
     control.async_heartbeat = AsyncMock()
     control.heartbeat_loop = AsyncMock()
+    coordinator = _coordinator_with("12345", "Test Plant")
+    # Dispatch platforms read the live device list from the coordinator.
+    coordinator.devices = devices
     data = SungrowData(
-        coordinators=[_coordinator_with("12345", "Test Plant")],
+        coordinators=[coordinator],
         control=control,
         devices={"12345": devices},
     )
@@ -373,6 +376,38 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
 
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
+
+
+# ---------------------------------------------------------------------------
+# Dynamic devices (dispatch controls appear at runtime)
+# ---------------------------------------------------------------------------
+
+
+async def test_number_dynamic_add_when_device_appears(hass: HomeAssistant):
+    """A dispatchable device appearing after setup gets its number entities."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [])  # no dispatchable device yet
+    coordinator = data.coordinators[0]
+    listeners: list = []
+    coordinator.async_add_listener = lambda cb, *a: listeners.append(cb) or (lambda: None)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert added == []  # nothing dispatchable at setup
+
+    # An ESS appears on a later poll; the coordinator notifies its listeners.
+    coordinator.devices = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    for cb in listeners:
+        cb()
+
+    assert len(added) == len(DISPATCH_NUMBERS)
+    assert all(e.device_uuid == "ess-1" for e in added)
+
+    # Firing again must not duplicate the controls.
+    for cb in listeners:
+        cb()
+    assert len(added) == len(DISPATCH_NUMBERS)
 
 
 # ---------------------------------------------------------------------------
