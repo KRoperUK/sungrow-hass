@@ -53,6 +53,14 @@ def test_infer_device_class(unit, code, device_class, state_class):
     assert infer_device_class(unit, code) == (device_class, state_class)
 
 
+def test_infer_device_class_power_factor_no_unit():
+    """A dimensionless power-factor code classifies via the code (issue #105)."""
+    assert infer_device_class("", "meter_power_factor", "0") == (
+        SensorDeviceClass.POWER_FACTOR,
+        SensorStateClass.MEASUREMENT,
+    )
+
+
 # ---------------------------------------------------------------------------
 # SungrowSensor unit tests
 # ---------------------------------------------------------------------------
@@ -95,7 +103,8 @@ class TestSungrowSensor:
         ("code", "unit", "name", "device_class"),
         [
             ("battery_level", "%", "Battery Level", SensorDeviceClass.BATTERY),
-            ("battery_soh", "%", "Battery Health (SOH)", SensorDeviceClass.BATTERY),
+            # SOH is health, not charge level — no BATTERY device class (issue #105).
+            ("battery_soh", "%", "Battery Health (SOH)", None),
             ("battery_total_charge_energy", "Wh", "Battery Total Charge Energy", SensorDeviceClass.ENERGY),
             ("meter_forward_active_energy", "Wh", "Meter Forward Active Energy", SensorDeviceClass.ENERGY),
             ("meter_active_power", "W", "Meter Active Power", SensorDeviceClass.POWER),
@@ -238,6 +247,25 @@ class TestSungrowSensor:
         # No unit -> no device/state class -> left as a string, not 1.0.
         assert sensor.native_value == "1"
         assert isinstance(sensor.native_value, str)
+
+    def test_native_value_enum_maps_label(self):
+        """An enum point (charger status) returns its human label, not the raw code."""
+        data = {"ev_charger_status": {"id": "33716", "code": "ev_charger_status", "value": 3, "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "ev_charger_status", "123", "Plant", data["ev_charger_status"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM
+        assert "Charging" in (sensor._attr_options or [])
+        assert sensor.native_value == "Charging"
+
+    def test_native_value_unitless_numeric_is_float(self):
+        """A dimensionless power-factor value now coerces to float (was text) (issue #105)."""
+        data = {"meter_power_factor": {"id": "8014", "code": "meter_power_factor", "value": "0.98", "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "meter_power_factor", "123", "Plant", data["meter_power_factor"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.POWER_FACTOR
+        assert sensor.native_value == 0.98
 
     def test_no_raw_extra_state_attributes(self):
         """The raw API point payload is not exposed as state attributes (recorder bloat)."""

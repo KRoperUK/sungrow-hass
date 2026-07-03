@@ -12,124 +12,25 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
 from .coordinator import SungrowPlantCoordinator
+from .measure_points import resolve_classification, resolve_enum_options, resolve_enum_value, resolve_name
 
 # Sensors are read-only and updated in bulk by the coordinator, so no per-entity
 # write parallelism limit is needed.
 PARALLEL_UPDATES = 0
 
-# Friendly names for point codes that are otherwise opaque or overly generic.
-# These are applied in addition to the code-based naming, so existing entities
-# keep their unique_id while users see a clearer label.
-SENSOR_ALIASES: dict[str, str] = {
-    "total_field_energy_storage_active_power": "Battery Power",
-    "total_field_energy_storage_maximum_reactive_power": "Battery Max Reactive Power",
-    "total_field_chargeable_energy": "Battery Chargeable Energy",
-    "total_field_dischargeable_energy": "Battery Dischargeable Energy",
-    "total_field_maximum_rechargeable_power": "Battery Max Charge Power",
-    "total_field_maximum_dischargeable_power": "Battery Max Discharge Power",
-    "daily_field_charge_capacity": "Battery Daily Charge Capacity",
-    "daily_field_discharge_capacity": "Battery Daily Discharge Capacity",
-    "energy_storage_active_power_ems": "EMS Battery Power",
-    "energy_storage_soc_ems": "EMS Battery SOC",
-    "battery_level_soc": "Battery State of Charge",
-}
-
-# Friendly names for the codes users are recommended to assign when requesting the
-# documented iSolarCloud measuring points via the "Extra measure points" option. The
-# point IDs and units come from the official docs (see docs/SENSORS.md for the
-# copy-paste point_id=code pairs). The device/state class is still inferred from the
-# API-reported unit, so these only set the display name.
-EXTRA_CODE_ALIASES: dict[str, str] = {
-    "battery_charge_power": "Battery Charge Power",
-    "battery_discharge_power": "Battery Discharge Power",
-    "ev_charger_power": "EV Charger Power",
-    "ev_charger_energy": "EV Charger Energy",
-    # Battery (common battery measuring points)
-    "battery_level": "Battery Level",
-    "battery_soh": "Battery Health (SOH)",
-    "battery_voltage": "Battery Voltage",
-    "battery_current": "Battery Current",
-    "battery_temperature": "Battery Temperature",
-    "battery_total_charge_energy": "Battery Total Charge Energy",
-    "battery_total_discharge_energy": "Battery Total Discharge Energy",
-    # EV charger (common charger measuring points)
-    "ev_charger_max_power": "EV Charger Max Power",
-    "ev_charger_status": "EV Charger Status",
-    # Energy meter (common energy meter measuring points)
-    "meter_forward_active_energy": "Meter Forward Active Energy",
-    "meter_reverse_active_energy": "Meter Reverse Active Energy",
-    "meter_daily_forward_active_energy": "Meter Daily Forward Active Energy",
-    "meter_daily_reverse_active_energy": "Meter Daily Reverse Active Energy",
-    "meter_active_power": "Meter Active Power",
-    "meter_power_factor": "Meter Power Factor",
-}
-
 _LOGGER = logging.getLogger(__name__)
 
-# Map a (lower-cased) unit of measurement to the appropriate device and state class.
-# Energy uses TOTAL_INCREASING so cumulative counters (and daily counters that reset)
-# are accepted by the Home Assistant Energy dashboard. See issue #19.
-MEASUREMENT = SensorStateClass.MEASUREMENT
-TOTAL_INCREASING = SensorStateClass.TOTAL_INCREASING
 
-_UNIT_CLASS_MAP: dict[str, tuple[SensorDeviceClass, SensorStateClass]] = {
-    # Power
-    "w": (SensorDeviceClass.POWER, MEASUREMENT),
-    "kw": (SensorDeviceClass.POWER, MEASUREMENT),
-    "mw": (SensorDeviceClass.POWER, MEASUREMENT),
-    "gw": (SensorDeviceClass.POWER, MEASUREMENT),
-    # Energy
-    "wh": (SensorDeviceClass.ENERGY, TOTAL_INCREASING),
-    "kwh": (SensorDeviceClass.ENERGY, TOTAL_INCREASING),
-    "mwh": (SensorDeviceClass.ENERGY, TOTAL_INCREASING),
-    "gwh": (SensorDeviceClass.ENERGY, TOTAL_INCREASING),
-    # Voltage
-    "v": (SensorDeviceClass.VOLTAGE, MEASUREMENT),
-    "mv": (SensorDeviceClass.VOLTAGE, MEASUREMENT),
-    "kv": (SensorDeviceClass.VOLTAGE, MEASUREMENT),
-    # Current
-    "a": (SensorDeviceClass.CURRENT, MEASUREMENT),
-    "ma": (SensorDeviceClass.CURRENT, MEASUREMENT),
-    # Frequency
-    "hz": (SensorDeviceClass.FREQUENCY, MEASUREMENT),
-    # Temperature
-    "°c": (SensorDeviceClass.TEMPERATURE, MEASUREMENT),
-    "℃": (SensorDeviceClass.TEMPERATURE, MEASUREMENT),
-    "c": (SensorDeviceClass.TEMPERATURE, MEASUREMENT),
-    "°f": (SensorDeviceClass.TEMPERATURE, MEASUREMENT),
-    # Reactive / apparent power
-    "var": (SensorDeviceClass.REACTIVE_POWER, MEASUREMENT),
-    "kvar": (SensorDeviceClass.REACTIVE_POWER, MEASUREMENT),
-    "va": (SensorDeviceClass.APPARENT_POWER, MEASUREMENT),
-    "kva": (SensorDeviceClass.APPARENT_POWER, MEASUREMENT),
-}
+def infer_device_class(
+    unit: str | None, point_code: str, point_id: str = ""
+) -> tuple[SensorDeviceClass | None, SensorStateClass | None]:
+    """Infer a device and state class for a point (see ``measure_points``).
 
-# Units that need the entity code inspected to disambiguate the device class.
-_PERCENT_BATTERY_HINTS = ("soc", "battery", "capacity", "charge")
-
-
-def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceClass | None, SensorStateClass | None]:
-    """Infer a device class and state class from a unit of measurement.
-
-    Returns ``(None, None)`` when the unit is unknown so the sensor is still created
-    as a plain numeric/text sensor.
+    Thin wrapper delegating to :func:`resolve_classification`; kept as a public
+    name for the sensor platform and its tests. Returns ``(None, None)`` when the
+    point cannot be classified so it is still created as a plain text sensor.
     """
-    if not unit:
-        return None, None
-
-    key = unit.strip().lower()
-
-    if key in _UNIT_CLASS_MAP:
-        return _UNIT_CLASS_MAP[key]
-
-    if key in ("%", "percent"):
-        code = point_code.lower()
-        if any(hint in code for hint in _PERCENT_BATTERY_HINTS):
-            return SensorDeviceClass.BATTERY, MEASUREMENT
-        # Generic percentage (e.g. efficiency) — measurement only.
-        return None, MEASUREMENT
-
-    return None, None
+    return resolve_classification(unit, point_code, point_id)
 
 
 def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SungrowSensor]:
@@ -206,6 +107,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
     """Representation of a plant-level Sungrow sensor."""
 
     has_entity_name = True
+    _point_id: str = ""
 
     def __init__(
         self,
@@ -236,21 +138,18 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         """Set the name, unit and device/state class from a point payload.
 
         Shared by plant-level and per-device sensors so both name and classify points
-        the same way.
+        the same way. The naming/classification logic lives in ``measure_points`` and
+        is grounded in the official iSolarCloud catalogs.
         """
-        # Prefer generating the name from the code to avoid Chinese names from the API
-        # (the API often returns Chinese names even when locale is English). We assume
-        # point_code is a readable string identifier (e.g. 'total_active_power').
-        if point_code.isdigit():
-            sensor_name = init_data.get("name", f"Sensor {point_code}")
-        else:
-            sensor_name = point_code.replace("_", " ").title()
-        # Apply friendly aliases for known opaque / user-configured extra codes.
-        sensor_name = EXTRA_CODE_ALIASES.get(point_code, SENSOR_ALIASES.get(point_code, sensor_name))
+        # The numeric point ID (from the API payload) keys the documented catalog;
+        # fall back to the code when the payload omits it.
+        point_id = str(init_data.get("id") or point_code)
+        self._point_id = point_id
 
-        # With has_entity_name = True, HA prefixes the device name automatically.
-        self._attr_name = sensor_name
-        _LOGGER.debug("Created sensor: %s %s (code: %s)", label, sensor_name, point_code)
+        # Resolve a friendly English name (avoids the Chinese names the API often
+        # returns even for English locales).
+        self._attr_name = resolve_name(point_id, point_code, init_data.get("name"))
+        _LOGGER.debug("Created sensor: %s %s (code: %s)", label, self._attr_name, point_code)
 
         # Hide points that are "Unknown" at first setup to reduce UI clutter
         # (e.g. meters/batteries not present).
@@ -258,13 +157,20 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if initial_value is None or str(initial_value).strip() == "" or str(initial_value).lower() == "unknown":
             self._attr_entity_registry_enabled_default = False
 
-        # Infer device class / state class / unit so the Energy dashboard and history
-        # graphs work out of the box (issue #19).
+        # Infer device class / state class so the Energy dashboard and history graphs
+        # work out of the box (issue #19), including the dimensionless points that
+        # report no unit (SOC, SOH, power factor, PR, counts) (issue #105).
         unit = init_data.get("unit")
-        self._attr_native_unit_of_measurement = unit if unit else None
-        device_class, state_class = infer_device_class(init_data.get("unit"), point_code)
+        device_class, state_class = resolve_classification(unit, point_code, point_id)
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+
+        if device_class == SensorDeviceClass.ENUM:
+            # Enum sensors carry documented options and no unit/state class.
+            self._attr_options = list(resolve_enum_options(point_id) or [])
+            self._attr_native_unit_of_measurement = None
+        else:
+            self._attr_native_unit_of_measurement = unit if unit else None
 
         # Let HA choose the icon for sensors with a known device class; fall back to
         # the solar panel icon only for unclassified sensors.
@@ -287,6 +193,9 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         val: Any = point.get("value")
         if val is None:
             return None
+        # Enum points map their raw numeric code to a documented human label.
+        if self._attr_device_class == SensorDeviceClass.ENUM:
+            return resolve_enum_value(self._point_id, val)
         # Only coerce to a number for sensors classified as numeric (a device or
         # state class). Unclassified text/status points are left as strings so a
         # status like "1" or a boolean isn't silently turned into a float.
