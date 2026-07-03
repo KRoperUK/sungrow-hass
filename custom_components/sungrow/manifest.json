@@ -15,9 +15,9 @@
   "loggers": [
     "pysolarcloud"
   ],
-  "quality_scale": "gold",
+  "quality_scale": "platinum",
   "requirements": [
-    "sungrow-isolarcloud==0.7.0"
+    "sungrow-isolarcloud==0.8.0"
   ],
   "version": "2.0.0"
 }

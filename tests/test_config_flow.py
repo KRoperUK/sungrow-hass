@@ -450,6 +450,86 @@ async def test_callback_view_rejects_unknown_flow(hass: HomeAssistant, mock_auth
 
 
 # ---------------------------------------------------------------------------
+# OAuth callback correlation by state (#116)
+# ---------------------------------------------------------------------------
+
+
+async def test_reauth_registers_state_for_correlation(hass: HomeAssistant, mock_auth):
+    """The authorize URL carries a ``state`` mapped back to this flow (#116)."""
+    entry = _hub_entry(hass)
+    result = await entry.start_reauth_flow(hass)
+
+    assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+    states = hass.data[DOMAIN]["states"]
+    assert states  # a state token was registered
+    state_token = next(iter(states))
+    # It correlates to this exact flow, and the URL the user visits carries it.
+    assert states[state_token] == result["flow_id"]
+    assert f"state={state_token}" in result["description_placeholders"]["auth_url"]
+
+
+async def test_callback_view_resumes_reauth_by_state(hass: HomeAssistant, mock_auth):
+    """A state-correlated callback (no flow_id) resumes the right reauth flow (#116)."""
+    from custom_components.sungrow import SungrowAuthCallbackView
+
+    entry = _hub_entry(hass)
+    result = await entry.start_reauth_flow(hass)
+    assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
+    state_token = next(iter(hass.data[DOMAIN]["states"]))
+
+    request = MagicMock()
+    request.app = {"hass": hass}
+    # flow_id stripped by iSolarCloud, but the OAuth state survives.
+    request.query = {"code": "state_code", "state": state_token}
+    view = SungrowAuthCallbackView()
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        response = await view.get(request)
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+
+    assert response.status == 200
+    mock_auth.async_authorize.assert_called_once_with("state_code", MOCK_USER_INPUT["redirect_uri"])
+
+
+async def test_abort_prunes_pending_future_and_state(hass: HomeAssistant, mock_auth):
+    """Removing a flow prunes its pending future and state so nothing lingers (#116)."""
+    entry = _hub_entry(hass)
+    result = await entry.start_reauth_flow(hass)
+    flow_id = result["flow_id"]
+    assert flow_id in hass.data[DOMAIN]["flows"]
+    state_token = next(iter(hass.data[DOMAIN]["states"]))
+
+    # Aborting the flow triggers async_remove, which prunes the correlators.
+    hass.config_entries.flow.async_abort(flow_id)
+    await hass.async_block_till_done()
+
+    assert flow_id not in hass.data[DOMAIN]["flows"]
+    assert state_token not in hass.data[DOMAIN]["states"]
+
+
+async def test_async_remove_cancels_pending_future(hass: HomeAssistant):
+    """async_remove cancels a still-pending future so no waiter task leaks (#116)."""
+    from custom_components.sungrow.config_flow import SungrowConfigFlow
+
+    flow = SungrowConfigFlow()
+    flow.hass = hass
+    flow.flow_id = "flow_under_test"
+    flow._state = "state_under_test"
+
+    pending: asyncio.Future = asyncio.Future()
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data["flows"] = {"flow_under_test": pending}
+    domain_data["states"] = {"state_under_test": "flow_under_test"}
+
+    flow.async_remove()
+
+    assert pending.cancelled()
+    assert "flow_under_test" not in domain_data["flows"]
+    assert "state_under_test" not in domain_data["states"]
+
+
+# ---------------------------------------------------------------------------
 # Reconfigure flow
 # ---------------------------------------------------------------------------
 

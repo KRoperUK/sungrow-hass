@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, cast
@@ -19,7 +20,12 @@ from .const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEVICE_REFRESH_INTERVAL,
 )
+
+# Upper bound on a single poll's cloud calls, so a hung request can neither stall
+# the coordinator indefinitely nor let successive polls pile up.
+MAX_POLL_TIMEOUT = 60
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +68,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.plants_service = plants_service
         self.plant_id = plant_id
         self.plant_name = plant_name
+        # Cap each poll's requests at the scan interval, never longer than 60 s.
+        self._poll_timeout: float = min(scan_seconds, MAX_POLL_TIMEOUT)
+        # Monotonic timestamp of the last device-list refresh; None until first poll.
+        self._last_device_refresh: float | None = None
         self.devices: list[dict[str, Any]] = list(devices or [])
         self.extra_measure_points: dict[str, str] = dict(config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {}))
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
@@ -77,18 +87,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
             # { "123": { "code1": {...}, "code2": {...} } }
-            all_plants_data = await self.plants_service.async_get_realtime_data(
-                [self.plant_id], extra_measure_points=self.extra_measure_points or None
-            )
+            async with asyncio.timeout(self._poll_timeout):
+                all_plants_data = await self.plants_service.async_get_realtime_data(
+                    [self.plant_id], extra_measure_points=self.extra_measure_points or None
+                )
         except Exception as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+            # A timeout arrives here as TimeoutError and is treated as transient.
             raise UpdateFailed(f"Error communicating with iSolarCloud API: {err}") from err
 
         # Refresh the device list so devices added to the plant after setup are
         # picked up at runtime (dynamic-devices) and removed ones can be pruned
-        # (stale-devices). Best-effort: keep the previous list on failure.
-        await self._async_refresh_devices()
+        # (stale-devices). Throttled and best-effort: keep the previous list on failure.
+        await self._async_maybe_refresh_devices()
 
         if self.enable_device_sensors:
             self.device_data = await self._async_fetch_device_data()
@@ -96,10 +108,24 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # pysolarcloud is untyped, so the realtime payload is Any.
         return cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
 
+    async def _async_maybe_refresh_devices(self) -> None:
+        """Refresh the device list periodically rather than on every poll (saves quota).
+
+        The plant's device set changes rarely, so re-listing it every realtime poll
+        wastes calls against the ~2000/hour free-plan cap. Refresh on the first poll
+        and thereafter only once ``DEVICE_REFRESH_INTERVAL`` has elapsed.
+        """
+        now = self.hass.loop.time()
+        if self._last_device_refresh is not None and (now - self._last_device_refresh) < DEVICE_REFRESH_INTERVAL:
+            return
+        self._last_device_refresh = now
+        await self._async_refresh_devices()
+
     async def _async_refresh_devices(self) -> None:
         """Re-fetch the plant's device list (best effort, non-fatal)."""
         try:
-            devices = await self.plants_service.async_get_plant_devices(self.plant_id)
+            async with asyncio.timeout(self._poll_timeout):
+                devices = await self.plants_service.async_get_plant_devices(self.plant_id)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Could not refresh devices for plant %s: %s", self.plant_id, err)
             return
@@ -127,11 +153,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             seen_types.add(type_id)
             try:
-                result = await self.plants_service.async_get_device_realtime(
-                    self.plant_id,
-                    device_type,
-                    extra_measure_points=self.extra_measure_points or None,
-                )
+                async with asyncio.timeout(self._poll_timeout):
+                    result = await self.plants_service.async_get_device_realtime(
+                        self.plant_id,
+                        device_type,
+                        extra_measure_points=self.extra_measure_points or None,
+                    )
             except Exception as err:  # pylint: disable=broad-except
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
                 continue

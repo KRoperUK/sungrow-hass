@@ -63,7 +63,8 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
 
     assert diag["entry_id"] == "test_entry"
     assert diag["gateway"] == "Europe"
-    assert diag["app_id"] == "my_app"
+    # The App ID is a stable identifier and is redacted.
+    assert diag["app_id"] == "**REDACTED**"
     assert diag["tokens_present"] is True
     assert "access_token" not in diag
     assert diag["options"] == {"scan_interval": 10}
@@ -71,13 +72,15 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
     plant = diag["plants"]["123"]
     assert plant["plant_name"] == "Test Plant"
     assert plant["data"]["total_active_power"]["value"] == "1.23"
-    # The dispatch-discovered subset is unchanged.
-    assert plant["devices"] == [{"uuid": "dev-1", "device_name": "Inverter"}]
+    # The dispatch-discovered subset survives, but the device uuid is redacted.
+    assert plant["devices"] == [{"uuid": "**REDACTED**", "device_name": "Inverter"}]
     # The full device list surfaces the unmapped charger with its raw type id, and
     # serialises the known enum device type to a readable "NAME (value)" string.
-    charger = next(d for d in plant["all_devices"] if d["uuid"] == "chg-1")
+    # (Look up by device_name since the uuid is now redacted.)
+    charger = next(d for d in plant["all_devices"] if d["device_name"] == "AC011E")
     assert charger["device_type"] == 999
-    ess = next(d for d in plant["all_devices"] if d["uuid"] == "dev-1")
+    assert charger["uuid"] == "**REDACTED**"
+    ess = next(d for d in plant["all_devices"] if d["device_name"] == "Inverter")
     assert ess["device_type"] == "ENERGY_STORAGE_SYSTEM (14)"
     # Per-device realtime is captured, keyed by device type id.
     assert plant["device_realtime"]["999"]["chg-1"]["ev_charger_power"]["value"] == "7.2"
@@ -140,6 +143,54 @@ async def test_diagnostics_per_device_realtime_failure_is_captured(hass: HomeAss
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["plants"]["1"]["device_realtime"]["999"] == {"error": "nope"}
+    json.dumps(diag)
+
+
+async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
+    """uuid, ps_key and serial numbers are redacted; ps_id and useful fields survive (#114)."""
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {
+        "gateway": "Europe",
+        "app_id": "my_app",
+        "app_key": "should_never_appear",
+        "tokens": {"access_token": "secret"},
+    }
+    entry.options = {}
+
+    service = MagicMock()
+    service.async_get_plant_devices = AsyncMock(
+        return_value=[
+            {
+                "uuid": "dev-1",
+                "device_name": "Inverter",
+                "ps_key": "PS_KEY_123",
+                "dev_sn": "SN123456",
+                "sn": "SN123456",
+                "device_sn": "SN123456",
+                "ps_id": "123",
+            }
+        ]
+    )
+    service.async_get_device_realtime = AsyncMock(return_value={})
+    coordinator = _make_coordinator("123", "Test Plant", {}, plants_service=service)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    # Secrets never appear and the App ID is redacted.
+    assert diag["app_id"] == "**REDACTED**"
+    assert "app_key" not in diag
+    assert "access_token" not in json.dumps(diag)
+
+    device = diag["plants"]["123"]["all_devices"][0]
+    for key in ("uuid", "ps_key", "dev_sn", "sn", "device_sn"):
+        assert device[key] == "**REDACTED**"
+    # Non-sensitive fields survive: the device name and the plant id (ps_id) are
+    # kept so a support report stays useful.
+    assert device["device_name"] == "Inverter"
+    assert device["ps_id"] == "123"
+    assert "123" in diag["plants"]  # the plant key itself is preserved
     json.dumps(diag)
 
 

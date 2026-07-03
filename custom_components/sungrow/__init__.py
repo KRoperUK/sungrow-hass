@@ -39,6 +39,11 @@ PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 # before force-cancelling it.
 HEARTBEAT_STOP_TIMEOUT = 10
 
+# How long to wait for a single cloud call during entry setup before giving up
+# and letting HA retry later (ConfigEntryNotReady). Fixed rather than tied to the
+# poll interval because setup runs once and can afford to be patient.
+SETUP_TIMEOUT = 60
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -177,10 +182,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     control_service = Control(auth)
 
     try:
-        plant_list = await plants_service.async_get_plants()
+        async with asyncio.timeout(SETUP_TIMEOUT):
+            plant_list = await plants_service.async_get_plants()
     except Exception as err:
         if is_auth_error(err):
             raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+        # A timeout arrives here as TimeoutError and is treated as transient.
         raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
@@ -194,17 +201,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         # of them. Failures here are non-fatal — the plant still works on plant-level
         # data, just without device discovery.
         try:
-            devices = await plants_service.async_get_plant_devices(plant_id)
+            async with asyncio.timeout(SETUP_TIMEOUT):
+                devices = await plants_service.async_get_plant_devices(plant_id)
         except Exception as err:
             _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
             devices = []
-        devices_by_plant[plant_id] = devices
 
         coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name, devices)
-        # Raises ConfigEntryNotReady / ConfigEntryAuthFailed as classified by the coordinator.
-        await coordinator.async_config_entry_first_refresh()
+        try:
+            # Raises ConfigEntryAuthFailed (reauth) / ConfigEntryNotReady (retry) as
+            # classified by the coordinator.
+            await coordinator.async_config_entry_first_refresh()
+        except ConfigEntryAuthFailed:
+            # A dead credential is fatal for every plant (they share one login) —
+            # propagate immediately so HA starts reauth instead of dropping a plant.
+            raise
+        except ConfigEntryNotReady as err:
+            # One plant's transient failure must not abort setup of the others (#115);
+            # it will be retried on the next poll once the entry is loaded.
+            _LOGGER.warning("Plant %s failed its initial data refresh, skipping for now: %s", plant_name, err)
+            continue
+
         coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
+
+    if plant_list and not coordinators:
+        # Every plant failed a transient refresh — retry the whole entry later.
+        raise ConfigEntryNotReady("No plants could be set up; all initial data refreshes failed")
 
     entry.runtime_data = SungrowData(
         coordinators=coordinators,
@@ -222,8 +246,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     for coordinator in coordinators:
         entry.async_on_unload(coordinator.async_add_listener(_prune))
 
-    # Reload the entry when its options (e.g. scan interval) change.
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    # NB: we deliberately do NOT register an update listener here. Options changes
+    # reload the entry via ``SungrowOptionsFlow`` (``OptionsFlowWithReload``); a bare
+    # update listener would also fire on every token rotation (a plain ``entry.data``
+    # write from ``_save_tokens``), needlessly reloading the whole integration (#110).
 
     return True
 
@@ -236,11 +262,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     heartbeats.clear()
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
-    """Reload the config entry when its options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _known_device_ids(entry: SungrowConfigEntry) -> set[tuple[str, str]]:
@@ -344,30 +365,50 @@ class SungrowAuthCallbackView(HomeAssistantView):
     url = "/api/sungrow_hass/callback"
     name = "api:sungrow_hass:callback"
 
+    @staticmethod
+    def _resolve_future(
+        flows: dict[str, asyncio.Future[str]], states: dict[str, str], flow_id: str | None, state: str | None
+    ) -> asyncio.Future[str] | None:
+        """Correlate a callback to its pending flow's future.
+
+        Prefers an explicit ``flow_id``, then the OAuth ``state`` param. If either
+        correlator is present but matches no known flow, returns ``None`` rather than
+        guessing — a stale or foreign correlator must never be misrouted onto a
+        different flow's future (#116). Only when NO correlator is supplied at all
+        (iSolarCloud may strip query params from the redirect) does it fall back to
+        the sole pending flow.
+        """
+        if flow_id and flow_id in flows:
+            return flows.get(flow_id)
+        if state and state in states:
+            return flows.get(states[state])
+        if flow_id or state:
+            # A correlator was supplied but matched nothing: do not misroute it.
+            return None
+        if len(flows) == 1:
+            return next(iter(flows.values()))
+        return None
+
     async def get(self, request: web.Request) -> web.Response:
         """Handle callback from iSolarCloud after user authorization."""
         hass: HomeAssistant = request.app["hass"]
         params = request.query
         code = params.get("code")
         flow_id = params.get("flow_id")
+        state = params.get("state")
 
         if not code:
             _LOGGER.warning("Callback received but missing code. Params: %s", params)
             return web.Response(text="Missing code parameter. Please try again.", status=400)
 
-        _LOGGER.debug("Callback received with code: %s, flow_id: %s", code, flow_id)
+        _LOGGER.debug("Callback received with code: %s, flow_id: %s, state: %s", code, flow_id, state)
 
         # Signal the waiting future so the config flow's background task can
         # resume the flow cleanly.
-        flows = hass.data.get(DOMAIN, {}).get("flows", {})
-        if flow_id:
-            future = flows.get(flow_id)
-        elif len(flows) == 1:
-            # iSolarCloud doesn't preserve extra query params on the redirect URI,
-            # so flow_id may be absent — fall back to the only pending flow.
-            future = next(iter(flows.values()))
-        else:
-            future = None
+        domain_data = hass.data.get(DOMAIN, {})
+        flows = domain_data.get("flows", {})
+        states = domain_data.get("states", {})
+        future = self._resolve_future(flows, states, flow_id, state)
         if future is not None and not future.done():
             future.set_result(code)
             return web.Response(
@@ -375,7 +416,9 @@ class SungrowAuthCallbackView(HomeAssistantView):
                 content_type="text/html",
             )
 
-        _LOGGER.warning("OAuth callback received (flow_id=%s) but no pending future was found", flow_id)
+        _LOGGER.warning(
+            "OAuth callback received (flow_id=%s, state=%s) but no pending future was found", flow_id, state
+        )
         return web.Response(
             text="Authorization request not found or already completed. Please return to Home Assistant and try again.",
             status=400,

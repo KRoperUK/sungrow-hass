@@ -238,6 +238,14 @@ class TestSungrowSensor:
 
         assert sensor.native_value is None
 
+    def test_native_value_none_when_point_value_null(self):
+        """A present point whose value is None returns None (not a crash/coercion)."""
+        data = {"power": {"code": "power", "value": None, "unit": "W", "name": "Power"}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"])
+
+        assert sensor.native_value is None
+
     def test_native_value_unclassified_numeric_stays_string(self):
         """A numeric-looking status point without a class is not coerced to a float."""
         data = {"status": {"code": "status", "value": "1", "unit": "", "name": "Status"}}
@@ -257,6 +265,24 @@ class TestSungrowSensor:
         assert sensor._attr_device_class == SensorDeviceClass.ENUM
         assert "Charging" in (sensor._attr_options or [])
         assert sensor.native_value == "Charging"
+
+    def test_native_value_enum_unmapped_code_is_none(self):
+        """An enum code not in the documented table must not leak outside options (#113)."""
+        data = {"ev_charger_status": {"id": "33716", "code": "ev_charger_status", "value": 999, "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "ev_charger_status", "123", "Plant", data["ev_charger_status"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM
+        assert sensor.native_value is None
+
+    def test_native_value_classified_non_numeric_returns_none(self):
+        """A classified numeric sensor with a non-numeric value returns None, not raw text (#113)."""
+        data = {"power": {"code": "power", "value": "unknown", "unit": "W", "name": "Power"}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.POWER
+        assert sensor.native_value is None
 
     def test_native_value_unitless_numeric_is_float(self):
         """A dimensionless power-factor value now coerces to float (was text) (issue #105)."""

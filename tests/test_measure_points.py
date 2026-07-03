@@ -68,12 +68,42 @@ def test_enum_value_maps_int():
     assert mp.resolve_enum_value("33716", 3.0) == "Charging"
 
 
-def test_enum_value_unmapped_code_falls_back_to_str():
-    assert mp.resolve_enum_value("33716", 999) == "999"
+def test_enum_value_unmapped_code_returns_none():
+    # An unlisted firmware code must NOT leak a value outside _attr_options; HA
+    # would reject a state that isn't in the options list (issue #113).
+    result = mp.resolve_enum_value("33716", 999)
+    assert result is None
+    assert not isinstance(result, str)
+
+
+def test_enum_value_unparseable_returns_none():
+    assert mp.resolve_enum_value("33716", "not-a-number") is None
 
 
 def test_enum_value_none_for_non_enum():
     assert mp.resolve_enum_value("8018", 5) is None
+
+
+@pytest.mark.parametrize("point_id", ["29", "13146"])
+def test_operating_status_enum_classifies_and_maps(point_id):
+    """The operating-status points (29/13146) are ENUM, map a known code, and drop unknowns.
+
+    Both point IDs share the documented operating-status map. A listed code resolves
+    to its human label; an unlisted firmware code must return None rather than leak a
+    value outside _attr_options (HA rejects a state not in the options list — #113).
+    """
+    # Classified as an enum (no state class).
+    assert mp.resolve_classification("", "operating_status", point_id) == (SensorDeviceClass.ENUM, None)
+    # A documented code maps to its label...
+    assert mp.resolve_enum_value(point_id, 0) == "Grid-connected operation"
+    # ...and the label is one of the fixed options for the point.
+    options = mp.resolve_enum_options(point_id)
+    assert options is not None
+    assert "Grid-connected operation" in options
+    # An unmapped code yields None (not an out-of-options value).
+    result = mp.resolve_enum_value(point_id, 40000)
+    assert result is None
+    assert not isinstance(result, str)
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +138,12 @@ def test_classify_percent_generic():
     assert mp.resolve_classification("%", "efficiency", "0") == (None, M)
 
 
+def test_classify_percent_documented_soc_uses_catalog():
+    # A documented %-SOC point arriving with an opaque numeric code must still
+    # get its BATTERY class from the catalog, not the code-only heuristic (#113).
+    assert mp.resolve_classification("%", "24629", "24629") == (SensorDeviceClass.BATTERY, M)
+
+
 def test_classify_dimensionless_power_factor_by_code():
     assert mp.resolve_classification("", "meter_power_factor", "0") == (
         SensorDeviceClass.POWER_FACTOR,
@@ -117,6 +153,12 @@ def test_classify_dimensionless_power_factor_by_code():
 
 def test_classify_dimensionless_soc_by_code():
     assert mp.resolve_classification(None, "total_field_soc", "0") == (SensorDeviceClass.BATTERY, M)
+
+
+def test_classify_dimensionless_soh_by_code_is_not_battery():
+    # An unrecognised, unitless SOH/health code falls through to the code heuristic
+    # and must stay numeric-only (measurement), never a BATTERY charge level.
+    assert mp.resolve_classification("", "inverter_soh", "999999") == (None, M)
 
 
 def test_classify_unknown_is_text():
@@ -164,6 +206,66 @@ def test_enum_maps_reference_real_catalog_points():
 def test_classify_uses_catalog_fallback_for_unitless():
     # No unit passed at runtime, but the catalog knows 8014 is a power factor.
     assert mp.resolve_classification(None, "8014", "8014") == (SensorDeviceClass.POWER_FACTOR, M)
+
+
+# ---------------------------------------------------------------------------
+# Per-point classification overrides (issue #113)
+# ---------------------------------------------------------------------------
+
+ES = SensorDeviceClass.ENERGY_STORAGE
+DURATION = SensorDeviceClass.DURATION
+
+
+@pytest.mark.parametrize(
+    "point_id",
+    [
+        "83235",  # Total field chargeable energy
+        "83236",  # Total field dischargeable energy
+        "24630",  # Energy Storage Remaining Charge
+        "83327",  # Energy Storage Remaining Charge
+        "13140",  # Battery Capacity
+    ],
+)
+def test_stored_energy_points_are_energy_storage_measurement(point_id):
+    # Instantaneous stored-energy Wh gauges go up AND down: ENERGY_STORAGE /
+    # MEASUREMENT so drops aren't read as meter resets (#113).
+    assert mp.POINT_CATALOG[point_id].device_class == ES
+    assert mp.POINT_CATALOG[point_id].state_class == M
+    # The override must beat the unit map at runtime too (live unit is "Wh").
+    assert mp.resolve_classification("Wh", "anything", point_id) == (ES, M)
+
+
+@pytest.mark.parametrize("point_id", ["58606", "13034"])
+def test_cumulative_energy_stays_total_increasing(point_id):
+    # Genuinely cumulative "Total ... charge energy" counters must stay
+    # ENERGY / TOTAL_INCREASING.
+    assert mp.POINT_CATALOG[point_id].device_class == SensorDeviceClass.ENERGY
+    assert mp.POINT_CATALOG[point_id].state_class == TI
+    assert mp.resolve_classification("Wh", "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
+
+
+@pytest.mark.parametrize(
+    "point_id",
+    [
+        "13020",  # Total Operation Time
+        "7356",  # Total Operation Time
+        "3",  # Total On-grid Running Time
+        "13016",  # Total Charging Time
+        "13017",  # Total Discharging Time
+    ],
+)
+def test_total_hours_counters_are_total_increasing(point_id):
+    # Monotonic "Total ... Time" hour counters accumulate: DURATION / TOTAL_INCREASING.
+    assert mp.POINT_CATALOG[point_id].device_class == DURATION
+    assert mp.POINT_CATALOG[point_id].state_class == TI
+    assert mp.resolve_classification("h", "anything", point_id) == (DURATION, TI)
+
+
+@pytest.mark.parametrize("point_id", ["13023", "13024", "83005", "83025"])
+def test_daily_and_reset_hour_timers_stay_measurement(point_id):
+    # Daily / reset / equivalent-hour timers are instantaneous: DURATION / MEASUREMENT.
+    assert mp.POINT_CATALOG[point_id].device_class == DURATION
+    assert mp.POINT_CATALOG[point_id].state_class == M
 
 
 # ---------------------------------------------------------------------------

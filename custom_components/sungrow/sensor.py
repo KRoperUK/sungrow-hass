@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -204,8 +204,11 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         try:
             return float(val)
         except (ValueError, TypeError):
-            # point payload values are untyped (Any) upstream.
-            return cast("str | None", val)
+            # The sensor is classified numeric (a device or state class is set) but
+            # the value can't be coerced (e.g. "unknown"). Return None rather than a
+            # raw string, which HA would reject as an invalid state and which would
+            # pollute long-term statistics (issue #113).
+            return None
 
 
 class SungrowDeviceSensor(SungrowSensor):
