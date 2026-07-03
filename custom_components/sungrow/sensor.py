@@ -34,14 +34,34 @@ SENSOR_ALIASES: dict[str, str] = {
     "battery_level_soc": "Battery State of Charge",
 }
 
-# Per-issue custom codes that users commonly request. If the point_id is configured
-# via the options flow, the code is used as-is; we also supply a friendly alias here
-# so the UI label is meaningful.
+# Friendly names for the codes users are recommended to assign when requesting the
+# documented iSolarCloud measuring points via the "Extra measure points" option. The
+# point IDs and units come from the official docs (see docs/SENSORS.md for the
+# copy-paste point_id=code pairs). The device/state class is still inferred from the
+# API-reported unit, so these only set the display name.
 EXTRA_CODE_ALIASES: dict[str, str] = {
     "battery_charge_power": "Battery Charge Power",
     "battery_discharge_power": "Battery Discharge Power",
     "ev_charger_power": "EV Charger Power",
     "ev_charger_energy": "EV Charger Energy",
+    # Battery (common battery measuring points)
+    "battery_level": "Battery Level",
+    "battery_soh": "Battery Health (SOH)",
+    "battery_voltage": "Battery Voltage",
+    "battery_current": "Battery Current",
+    "battery_temperature": "Battery Temperature",
+    "battery_total_charge_energy": "Battery Total Charge Energy",
+    "battery_total_discharge_energy": "Battery Total Discharge Energy",
+    # EV charger (common charger measuring points)
+    "ev_charger_max_power": "EV Charger Max Power",
+    "ev_charger_status": "EV Charger Status",
+    # Energy meter (common energy meter measuring points)
+    "meter_forward_active_energy": "Meter Forward Active Energy",
+    "meter_reverse_active_energy": "Meter Reverse Active Energy",
+    "meter_daily_forward_active_energy": "Meter Daily Forward Active Energy",
+    "meter_daily_reverse_active_energy": "Meter Daily Reverse Active Energy",
+    "meter_active_power": "Meter Active Power",
+    "meter_power_factor": "Meter Power Factor",
 }
 
 _LOGGER = logging.getLogger(__name__)

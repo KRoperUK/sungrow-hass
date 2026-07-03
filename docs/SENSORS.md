@@ -49,6 +49,27 @@ You can find the actual point IDs for your hardware by:
 - Running a diagnostics dump from the device page in Home Assistant.
 - Using community tools such as [GoSungrow](https://github.com/MickMake/GoSungrow) to list points for your plant.
 
+### Recommended measure points (from the official docs)
+
+The official iSolarCloud measuring-point catalogs — also served by the [mcp-isolarcloud](https://github.com/KRoperUK/mcp-isolarcloud) docs server — list the point IDs, names and units per device type. The integration ships friendly names for the codes below, so pasting the matching `point_id=code` pairs into **Extra measure points** gives nicely-named, correctly-classified sensors (device/state class is inferred from the reported unit, so the energy points feed the Energy dashboard automatically).
+
+**Battery** (Common Battery Measuring Points):
+```
+58604=battery_level, 58605=battery_soh, 58601=battery_voltage, 58602=battery_current, 58603=battery_temperature, 58606=battery_total_charge_energy, 58607=battery_total_discharge_energy
+```
+
+**EV charger** (Common Charger Measuring Points):
+```
+33708=ev_charger_power, 33723=ev_charger_max_power, 33716=ev_charger_status
+```
+
+**Energy meter** (Common Energy Meter Measuring Points):
+```
+8030=meter_forward_active_energy, 8031=meter_reverse_active_energy, 8062=meter_daily_forward_active_energy, 8063=meter_daily_reverse_active_energy, 8018=meter_active_power, 8014=meter_power_factor
+```
+
+EMS, PCS, combiner-box and microinverter catalogs are available via the docs server too. Point IDs are consistent per device *type* but not guaranteed across every model/firmware, so confirm against your hardware if a point is missing.
+
 ## Dispatch / control entities
 
 If your inverter / ESS supports parameter configuration, the integration also creates **Number** and **Select** entities per plant for dispatch control:
@@ -68,7 +89,7 @@ When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integr
 
 ## EV charger support
 
-If your EV charger appears as a separate device in iSolarCloud, its point IDs can be requested via the **Extra measure points** option once identified. The integration does not yet auto-discover EV charger devices because the available codes are not consistent across charger models; community contributions of verified point ID lists are welcome.
+If your EV charger appears as a separate device in iSolarCloud, request its points via the **Extra measure points** option (or enable **per-device sensors**, which polls each discovered device). The documented charger point IDs are listed under [Recommended measure points](#recommended-measure-points-from-the-official-docs) above; verified additions from other charger models are welcome.
 
 ## Still missing a sensor?
 
