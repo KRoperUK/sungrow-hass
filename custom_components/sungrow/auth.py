@@ -13,7 +13,6 @@ refresh path so the latest tokens are always saved.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -65,35 +64,43 @@ class SungrowAuth(Auth):
         """Initialize the auth client with an optional token-persistence callback."""
         super().__init__(*args, **kwargs)
         self._token_updater = token_updater
-        # Created lazily inside the coroutine so it binds to the running event loop.
-        self._refresh_lock: asyncio.Lock | None = None
+        # The last refresh-token value we persisted, used to persist each rotation
+        # exactly once. Captured lazily on first use because the caller assigns
+        # ``tokens`` after construction (see __init__.py), so it isn't known here yet.
+        self._baseline_captured = False
+        self._last_refresh_token: Any = None
 
     async def async_get_access_token(self) -> str:
         """Return a valid access token, persisting any rotated refresh token.
 
         A single ``Auth`` instance is shared across every plant coordinator plus the
         control and heartbeat paths, so overlapping calls could each try to spend the
-        same single-use refresh token and provoke a spurious reauth. Serializing the
-        whole body with a lock means the first waiter refreshes and persists while
-        later waiters find the token already fresh (``super()`` re-checks expiry) and
-        no-op. pysolarcloud >=0.8.0 also serializes refresh internally, so this lock is
-        now defensive redundancy on the historical unavailable-after-restart path; the
-        two locks never deadlock (distinct locks, always acquired outer-then-inner).
+        same single-use refresh token and provoke a spurious reauth. pysolarcloud >=0.8.0
+        serializes refresh internally (its own lock with a double-checked expiry), so the
+        first waiter refreshes while the rest see the freshly stored token and skip — this
+        wrapper no longer needs a lock of its own (removed in #121; the historical
+        unavailable-after-restart bug was #14/#15/#20/#21).
 
-        Rotation is detected by comparing the *refresh-token value* rather than the
-        ``tokens`` dict identity. Identity works only because 0.7.0 reassigns the dict;
-        a future in-place mutation would silently stop persisting and leave an invalid
-        refresh token on the next restart. Comparing the value is robust either way.
+        All this wrapper adds is persistence. Rotation is detected by the refresh-token
+        *value* (robust whether pysolarcloud reassigns the ``tokens`` dict or mutates it
+        in place) and tracked on the instance, so overlapping callers that each observe
+        the same rotation persist it exactly once, and a still-valid token (no rotation)
+        never triggers a redundant write.
         """
-        # Synchronous check-and-set (no await between) so it is race-free.
-        if self._refresh_lock is None:
-            self._refresh_lock = asyncio.Lock()
-        async with self._refresh_lock:
-            previous = self.tokens
-            token = await super().async_get_access_token()
-            current = self.tokens
-            rotated = previous is None or previous.get("refresh_token") != current.get("refresh_token")
-            if self._token_updater is not None and current is not None and rotated:
+        # Capture the loaded refresh token as the baseline; synchronous (no await) so
+        # concurrent callers race-free agree on it before the first refresh.
+        if not self._baseline_captured:
+            self._baseline_captured = True
+            self._last_refresh_token = self.tokens.get("refresh_token") if self.tokens else None
+
+        token = await super().async_get_access_token()
+
+        # Check-and-set with no await in between, so overlapping callers can't both persist.
+        current = self.tokens
+        if self._token_updater is not None and current is not None:
+            refresh_token = current.get("refresh_token")
+            if refresh_token != self._last_refresh_token:
+                self._last_refresh_token = refresh_token
                 _LOGGER.debug("Refresh token rotated; persisting updated tokens")
                 self._token_updater(current)
-            return token
+        return token
