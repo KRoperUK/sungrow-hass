@@ -265,17 +265,18 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if point is None:
             return None
         val: Any = point.get("value")
-        # Convert to float if it looks numeric but is a string.
+        if val is None:
+            return None
+        # Only coerce to a number for sensors classified as numeric (a device or
+        # state class). Unclassified text/status points are left as strings so a
+        # status like "1" or a boolean isn't silently turned into a float.
+        if self._attr_device_class is None and self._attr_state_class is None:
+            return str(val)
         try:
             return float(val)
         except (ValueError, TypeError):
             # point payload values are untyped (Any) upstream.
             return cast("str | None", val)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return attributes."""
-        return self._current_point() or {}
 
 
 class SungrowDeviceSensor(SungrowSensor):
