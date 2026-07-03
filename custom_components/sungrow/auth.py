@@ -25,7 +25,26 @@ _LOGGER = logging.getLogger(__name__)
 # longer usable and the user must re-authorize (as opposed to a transient outage).
 # "token_refresh_failed" is the code on pysolarcloud>=0.6.0's TokenRefreshError
 # (a PySolarCloudException), raised when a refresh returns no access token.
-AUTH_ERRORS = frozenset({"auth_not_initialised", "invalid_grant", "invalid_token", "token_refresh_failed"})
+#
+# The "E*" codes are the documented iSolarCloud OpenAPI result codes for dead or
+# unauthorized credentials (E00003 token invalid/expired, E900 unauthorized, E919
+# de-whitelisted, E912/E914 bad or mismatched app key). These are surfaced once the
+# pinned pysolarcloud raises PySolarCloudException carrying the API result_code (a
+# paired library fix); the quota/throttle codes E998/E999 are deliberately excluded
+# because they are transient and must keep retrying (UpdateFailed), not reauth.
+AUTH_ERRORS = frozenset(
+    {
+        "auth_not_initialised",
+        "invalid_grant",
+        "invalid_token",
+        "token_refresh_failed",
+        "E00003",
+        "E900",
+        "E919",
+        "E912",
+        "E914",
+    }
+)
 
 
 class SungrowAuth(Auth):

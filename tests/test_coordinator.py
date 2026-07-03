@@ -58,6 +58,23 @@ def test_is_auth_error_transient():
     assert is_auth_error(PySolarCloudException({"error": "server_busy"})) is False
 
 
+@pytest.mark.parametrize("code", ["E00003", "E900", "E919", "E912", "E914"])
+def test_is_auth_error_documented_reauth_codes(code):
+    """The documented API auth/permission error codes trigger reauth (issue #109)."""
+    assert is_auth_error(PySolarCloudException({"error": code})) is True
+
+
+@pytest.mark.parametrize("code", ["E998", "E999"])
+def test_is_auth_error_quota_codes_are_transient(code):
+    """API quota/throttle codes are transient and must NOT trigger reauth (issue #109)."""
+    assert is_auth_error(PySolarCloudException({"error": code})) is False
+
+
+def test_is_auth_error_unrelated_code_is_transient():
+    """An unrelated/unknown error code is not an auth error."""
+    assert is_auth_error(PySolarCloudException({"error": "E00007"})) is False
+
+
 # ---------------------------------------------------------------------------
 # _async_update_data
 # ---------------------------------------------------------------------------
