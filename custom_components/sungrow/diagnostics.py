@@ -31,7 +31,7 @@ def _jsonable(obj: Any) -> Any:
     return obj
 
 
-async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list, dict]:
+async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Best-effort capture of every device and its per-device realtime data.
 
     Returns ``(all_devices, device_realtime)``. The plant realtime endpoint only
@@ -49,7 +49,7 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list, dict]
         return [{"error": str(err)}], {}
 
     device_realtime: dict[str, Any] = {}
-    seen_types: set = set()
+    seen_types: set[Any] = set()
     for device in all_devices:
         if not isinstance(device, dict):
             continue
@@ -84,7 +84,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
     for coordinator in coordinators:
         plant_id = coordinator.plant_id
         service = getattr(coordinator, "plants_service", None)
-        all_devices: list = []
+        all_devices: list[dict[str, Any]] = []
         device_realtime: dict[str, Any] = {}
         if service is not None:
             all_devices, device_realtime = await _probe_plant_devices(service, plant_id)

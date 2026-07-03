@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
@@ -24,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 1
 
 # Select parameters exposed as HA Select entities.
-DISPATCH_SELECTS: dict[str, dict] = {
+DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
     "charge_discharge_command": {
         "options_map": {
             "Stop": Control.CHARGE_DISCHARGE_COMMANDS["stop"],
@@ -41,7 +42,7 @@ DISPATCH_SELECTS: dict[str, dict] = {
 }
 
 
-def _build_selects(coordinator, control) -> list[SelectEntity]:
+def _build_selects(coordinator: SungrowPlantCoordinator, control: Control) -> list[SelectEntity]:
     """Build the dispatch select entities for a coordinator's target device.
 
     Returns an empty list when no dispatch-capable device is present. Reads the
@@ -100,7 +101,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEn
         device_uuid: str,
         device_name: str,
         param: str,
-        meta: dict,
+        meta: dict[str, Any],
     ) -> None:
         """Initialize the dispatch select."""
         super().__init__(coordinator)

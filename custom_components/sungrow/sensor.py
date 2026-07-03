@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceEntryType
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
+from .coordinator import SungrowPlantCoordinator
 
 # Sensors are read-only and updated in bulk by the coordinator, so no per-entity
 # write parallelism limit is needed.
@@ -111,7 +112,7 @@ def infer_device_class(unit: str | None, point_code: str) -> tuple[SensorDeviceC
     return None, None
 
 
-def _build_sensors(coordinator, console_url) -> list[SungrowSensor]:
+def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SungrowSensor]:
     """Build the full set of sensors the coordinator currently warrants.
 
     Called both at setup and on every coordinator update, so points/devices that
@@ -186,7 +187,15 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
     has_entity_name = True
 
-    def __init__(self, coordinator, point_code, plant_id, plant_name, init_data, console_url=DEFAULT_CONSOLE_URL):
+    def __init__(
+        self,
+        coordinator: SungrowPlantCoordinator,
+        point_code: str,
+        plant_id: str,
+        plant_name: str,
+        init_data: dict[str, Any],
+        console_url: str = DEFAULT_CONSOLE_URL,
+    ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.point_code = point_code
@@ -203,7 +212,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         )
         self._apply_point_metadata(point_code, init_data, plant_name)
 
-    def _apply_point_metadata(self, point_code, init_data, label):
+    def _apply_point_metadata(self, point_code: str, init_data: dict[str, Any], label: str) -> None:
         """Set the name, unit and device/state class from a point payload.
 
         Shared by plant-level and per-device sensors so both name and classify points
@@ -241,28 +250,30 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # the solar panel icon only for unclassified sensors.
         self._attr_icon = None if device_class else "mdi:solar-power-variant"
 
-    def _current_point(self):
+    def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload for this sensor (plant-level source)."""
         data = self.coordinator.data
         if data and self.point_code in data:
-            return data[self.point_code]
+            point: dict[str, Any] = data[self.point_code]
+            return point
         return None
 
     @property
-    def native_value(self):
+    def native_value(self) -> float | str | None:
         """Return the state of the sensor."""
         point = self._current_point()
         if point is None:
             return None
-        val = point.get("value")
+        val: Any = point.get("value")
         # Convert to float if it looks numeric but is a string.
         try:
             return float(val)
         except (ValueError, TypeError):
-            return val
+            # point payload values are untyped (Any) upstream.
+            return cast("str | None", val)
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return attributes."""
         return self._current_point() or {}
 
@@ -274,7 +285,15 @@ class SungrowDeviceSensor(SungrowSensor):
     device, linked to the plant device via ``via_device`` (issue #74).
     """
 
-    def __init__(self, coordinator, point_code, plant_id, device_uuid, device_name, init_data):
+    def __init__(
+        self,
+        coordinator: SungrowPlantCoordinator,
+        point_code: str,
+        plant_id: str,
+        device_uuid: str,
+        device_name: str,
+        init_data: dict[str, Any],
+    ) -> None:
         """Initialize a device-scoped sensor."""
         # Skip SungrowSensor.__init__ (it builds the plant device); reuse the shared
         # metadata helper but with a device-scoped identity and data source.
@@ -291,7 +310,8 @@ class SungrowDeviceSensor(SungrowSensor):
         )
         self._apply_point_metadata(point_code, init_data, device_name)
 
-    def _current_point(self):
+    def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload from the coordinator's per-device data."""
         device_data = getattr(self.coordinator, "device_data", None) or {}
-        return device_data.get(self.device_uuid, {}).get(self.point_code)
+        point: dict[str, Any] | None = device_data.get(self.device_uuid, {}).get(self.point_code)
+        return point

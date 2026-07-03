@@ -148,7 +148,12 @@ rules:
   reconfiguration-flow:
     status: done
   repair-issues:
-    status: todo
+    status: exempt
+    comment: >-
+      The only user-actionable failure is invalid/expired credentials, which is
+      surfaced through the reauthentication flow (ConfigEntryAuthFailed ->
+      async_step_reauth). No other persistent, user-fixable condition exists that
+      a separate repair issue would address.
   stale-devices:
     status: done
     comment: >-
@@ -163,5 +168,7 @@ rules:
     status: done
     comment: The Home Assistant aiohttp client session is injected into the API client.
   strict-typing:
-    status: todo
-    comment: mypy runs in CI (check_untyped_defs) but not yet in strict mode.
+    status: done
+    comment: >-
+      mypy runs in --strict mode (strict = true in pyproject) and the package
+      ships a py.typed marker.
