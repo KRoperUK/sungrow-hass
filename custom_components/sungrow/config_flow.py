@@ -412,6 +412,10 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data = {**self.init_info, "tokens": tokens}
 
             if self._reauth_entry is not None:
+                # Guard against re-authorizing/reconfiguring onto a different account:
+                # the App ID is the entry's identity, so it must not change.
+                await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
+                self._abort_if_unique_id_mismatch(reason="wrong_account")
                 reason = "reconfigure_successful" if self._is_reconfigure else "reauth_successful"
                 return self.async_update_reload_and_abort(self._reauth_entry, data=data, reason=reason)
 

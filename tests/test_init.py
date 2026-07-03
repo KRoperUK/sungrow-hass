@@ -277,6 +277,32 @@ async def test_async_remove_config_entry_device(hass: HomeAssistant):
     assert await async_remove_config_entry_device(hass, entry, gone) is True
 
 
+async def test_prune_stale_devices(hass: HomeAssistant):
+    """Devices no longer reported by the API are pruned; present ones are kept."""
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.sungrow import _async_prune_stale_devices
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.devices = [{"uuid": "live-dev"}]
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    registry = dr.async_get(hass)
+    plant = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers={(DOMAIN, "12345")})
+    live = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers={(DOMAIN, "live-dev")})
+    stale = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers={(DOMAIN, "old-dev")})
+
+    _async_prune_stale_devices(hass, entry)
+
+    # Plant device and the live device remain; the stale device is removed.
+    assert registry.async_get(plant.id) is not None
+    assert registry.async_get(live.id) is not None
+    assert registry.async_get(stale.id) is None
+
+
 async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
     """Updating options should reload the entry and apply the new scan interval."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")

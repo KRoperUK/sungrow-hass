@@ -6,8 +6,9 @@ import logging
 import re
 from typing import Any
 
-from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
+from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -73,6 +74,8 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_max_value": 100,
         "native_step": 1,
         "mode": NumberMode.SLIDER,
+        # SOC limits set battery policy rather than actuate — configuration entities.
+        "entity_category": EntityCategory.CONFIG,
     },
     "soc_lower_limit": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -81,6 +84,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_max_value": 50,
         "native_step": 1,
         "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
     },
     "forced_charging_target_soc_1": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -89,6 +93,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_max_value": 100,
         "native_step": 1,
         "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
     },
 }
 
@@ -145,7 +150,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
-class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEntity):
+class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreNumber):
     """Number entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
@@ -180,16 +185,18 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEn
         self._attr_native_max_value = meta["native_max_value"]
         self._attr_native_step = meta["native_step"]
         self._attr_mode = meta["mode"]
+        self._attr_entity_category = meta.get("entity_category")
 
-    @property
-    def native_value(self) -> float | None:
-        """Return the current parameter value.
+    async def async_added_to_hass(self) -> None:
+        """Restore the last commanded value across restarts.
 
-        Dispatch parameters are write-only here (not polled back from the API),
-        so there is no meaningful value to report. Availability is inherited from
-        CoordinatorEntity (tracks ``coordinator.last_update_success``).
+        Dispatch parameters are write-only (not polled back from the API), so the
+        last value the user set is restored from state rather than fetched.
         """
-        return None
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._attr_native_value = last.native_value
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the dispatch parameter on the inverter."""
@@ -202,6 +209,8 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], NumberEn
                 translation_key="dispatch_write_failed",
                 translation_placeholders={"param": self.param, "error": str(err)},
             ) from err
+        # Remember the commanded value so the UI reflects it and it survives restarts.
+        self._attr_native_value = value
         # If the user is actively dispatching, ensure a heartbeat is running so the
         # inverter stays in External EMS mode.
         if self.param == "charge_discharge_power":

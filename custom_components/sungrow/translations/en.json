@@ -53,7 +53,8 @@
       "library_missing": "The pysolarcloud library is not installed. Restart Home Assistant so the integration's requirements are installed, then try again.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful",
-      "reconfigure_successful": "Reconfiguration was successful"
+      "reconfigure_successful": "Reconfiguration was successful",
+      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application."
     }
   },
   "options": {

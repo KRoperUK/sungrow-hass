@@ -12,10 +12,10 @@ import voluptuous as vol
 from aiohttp import web
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.http import HomeAssistantView
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
@@ -195,6 +195,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Prune devices that drop out of the API after each refresh (stale-devices).
+    @callback
+    def _prune() -> None:
+        _async_prune_stale_devices(hass, entry)
+
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_prune))
+
     # Reload the entry when its options (e.g. scan interval) change.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -216,23 +224,50 @@ async def async_reload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_remove_config_entry_device(
-    hass: HomeAssistant, config_entry: SungrowConfigEntry, device_entry: DeviceEntry
-) -> bool:
-    """Allow deletion of a device the API no longer reports (stale-devices).
+def _known_device_ids(entry: SungrowConfigEntry) -> set[tuple[str, str]]:
+    """Return the device-registry identifiers currently reported by the API.
 
-    Returns True (permit removal) only when none of the device's identifiers match
-    a currently-known plant or device across the entry's coordinators, so devices
-    that are still present cannot be removed by accident.
+    One per plant (the plant device) plus one per device the coordinators have
+    seen on their latest poll. Used to distinguish live devices from stale ones.
     """
     known: set[tuple[str, str]] = set()
-    for coordinator in config_entry.runtime_data.coordinators:
+    for coordinator in entry.runtime_data.coordinators:
         known.add((DOMAIN, coordinator.plant_id))
         for device in coordinator.devices:
             uuid = device.get("uuid")
             if uuid:
                 known.add((DOMAIN, str(uuid)))
+    return known
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: SungrowConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow deletion of a device the API no longer reports (stale-devices).
+
+    Returns True (permit removal) only when none of the device's identifiers match
+    a currently-known plant or device, so devices that are still present cannot be
+    removed by accident.
+    """
+    known = _known_device_ids(config_entry)
     return not any(identifier in known for identifier in device_entry.identifiers)
+
+
+@callback
+def _async_prune_stale_devices(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
+    """Remove device-registry entries the API no longer reports (stale-devices).
+
+    Runs after each coordinator refresh. A device is removed only when none of its
+    identifiers are in the freshly-fetched device list. Because a failed device
+    fetch keeps the previous list (see the coordinator), a transient API outage
+    can't trigger spurious removals.
+    """
+    known = _known_device_ids(entry)
+    registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        if any(identifier in known for identifier in device.identifiers):
+            continue
+        registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
 
 async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -> None:

@@ -379,6 +379,88 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
 
 
 # ---------------------------------------------------------------------------
+# Entity categories + state restoration
+# ---------------------------------------------------------------------------
+
+
+async def test_number_config_entities_have_category(hass: HomeAssistant):
+    """SOC / forced-charging numbers are config entities; charge power is primary."""
+    from homeassistant.const import EntityCategory
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    cats = {e.param: e._attr_entity_category for e in added}
+
+    assert cats["charge_discharge_power"] is None
+    assert cats["soc_upper_limit"] == EntityCategory.CONFIG
+    assert cats["soc_lower_limit"] == EntityCategory.CONFIG
+    assert cats["forced_charging_target_soc_1"] == EntityCategory.CONFIG
+
+
+async def test_select_forced_charging_is_config(hass: HomeAssistant):
+    """The forced-charging select is a config entity; the command select is primary."""
+    from homeassistant.const import EntityCategory
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    cats = {e.param: e._attr_entity_category for e in added}
+
+    assert cats["charge_discharge_command"] is None
+    assert cats["forced_charging"] == EntityCategory.CONFIG
+
+
+async def test_number_restores_last_value(hass: HomeAssistant):
+    """The last commanded number value is restored across a restart."""
+    from types import SimpleNamespace
+
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    power.hass = hass
+    power.async_get_last_number_data = AsyncMock(return_value=SimpleNamespace(native_value=1234.0))
+
+    with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
+        await power.async_added_to_hass()
+
+    assert power.native_value == 1234.0
+
+
+async def test_select_restores_last_option(hass: HomeAssistant):
+    """The last selected option is restored across a restart."""
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge"))
+
+    with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
+        await command.async_added_to_hass()
+
+    assert command.current_option == "Charge"
+
+
+# ---------------------------------------------------------------------------
 # Dynamic devices (dispatch controls appear at runtime)
 # ---------------------------------------------------------------------------
 

@@ -1,9 +1,9 @@
 # Home Assistant Integration Quality Scale — self-assessment.
 #
 # Note: hassfest only *validates* this file for core integrations; for a custom
-# (HACS) integration it is an honest status record and roadmap. The integration
-# currently meets the Bronze and Silver tiers (and already satisfies several Gold
-# and Platinum rules).
+# (HACS) integration it is an honest status record. Every Bronze, Silver and Gold
+# rule is done or exempt, and all three Platinum rules (async-dependency,
+# inject-websession, strict-typing) are met. The manifest declares "gold".
 rules:
   # --- Bronze ---
   action-setup:
@@ -118,12 +118,11 @@ rules:
       and dispatch platforms add entities for devices/points that appear after
       setup via a coordinator listener.
   entity-category:
-    status: exempt
+    status: done
     comment: >-
-      All entities are primary function: plant/device measurements (sensors) and
-      the active dispatch controls (number/select). None are auxiliary config or
-      diagnostic entities, and the sensor set is dynamic from the API, so no
-      entity warrants a config/diagnostic category.
+      The SOC-limit numbers and the forced-charging select are
+      EntityCategory.CONFIG (they set battery policy); the active charge/discharge
+      controls and all plant/device sensors are primary function.
   entity-device-class:
     status: done
   entity-disabled-by-default:
@@ -157,8 +156,9 @@ rules:
   stale-devices:
     status: done
     comment: >-
-      async_remove_config_entry_device lets the user delete a device once the API
-      no longer reports it; devices still present are protected.
+      Devices that disappear from the API are pruned from the device registry
+      automatically after each refresh (_async_prune_stale_devices);
+      async_remove_config_entry_device remains as the manual fallback.
 
   # --- Platinum ---
   async-dependency:
