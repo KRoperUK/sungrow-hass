@@ -55,6 +55,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.init_info = {}
         self.auth_client = None
         self._reauth_entry: ConfigEntry | None = None
+        self._is_reconfigure = False
 
     @staticmethod
     @callback
@@ -72,6 +73,41 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
         """Confirm re-authentication by re-running the authorization step."""
         return await self.async_step_auth(user_input)
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
+        """Change the gateway / credentials of an existing entry, then re-authorize.
+
+        The App ID is the entry's identity (unique_id) so it stays fixed; everything
+        else — region, keys, redirect URI — is editable. Because new credentials or a
+        new region invalidate the stored tokens, submitting always re-runs the OAuth
+        authorization and updates the entry in place (no delete & re-add).
+        """
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        self._reauth_entry = entry
+        self._is_reconfigure = True
+
+        if user_input is not None:
+            # Preserve the App ID (identity) and drop stale tokens — we re-authorize.
+            self.init_info = {**entry.data, **user_input}
+            self.init_info.pop("tokens", None)
+            # Start a fresh Auth client for the (possibly changed) credentials.
+            self.auth_client = None
+            return await self.async_step_auth()
+
+        current = entry.data
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_APP_KEY, default=current.get(CONF_APP_KEY, "")): str,
+                    vol.Required(CONF_APP_SECRET, default=current.get(CONF_APP_SECRET, "")): str,
+                    vol.Required(CONF_GATEWAY, default=current.get(CONF_GATEWAY, "Europe")): vol.In(
+                        list(GATEWAYS.keys())
+                    ),
+                    vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, "")): str,
+                }
+            ),
+        )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step."""
@@ -369,7 +405,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data = {**self.init_info, "tokens": tokens}
 
             if self._reauth_entry is not None:
-                return self.async_update_reload_and_abort(self._reauth_entry, data=data)
+                reason = "reconfigure_successful" if self._is_reconfigure else "reauth_successful"
+                return self.async_update_reload_and_abort(self._reauth_entry, data=data, reason=reason)
 
             await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
             self._abort_if_unique_id_configured()
