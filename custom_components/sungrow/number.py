@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
@@ -22,12 +23,34 @@ _LOGGER = logging.getLogger(__name__)
 # rapid slider changes don't race on the API.
 PARALLEL_UPDATES = 1
 
-# Conservative default upper bound (watts) for charge/discharge power. iSolarCloud
-# does not expose the per-device inverter rating through the realtime API, so this
-# is a fixed clamp rather than a derived limit. Users with larger inverters can
-# still command higher power via the underlying API; adjust here if a rating source
-# becomes available.
+# Fallback upper bound (watts) for charge/discharge power, used when the device's
+# rated power can't be derived from its model code.
 DEFAULT_MAX_DISPATCH_POWER = 5000
+
+# Sungrow residential inverters encode their kW rating in the model code, e.g.
+# SG3.6RS -> 3.6 kW, SH10RT-V112 -> 10 kW, SG110CX -> 110 kW. Batteries, meters and
+# comms modules (SBR256, SGSmartMeter, WiNet-S) don't match and fall back to the
+# default. This is the only rating signal iSolarCloud exposes via getDeviceListByPsId.
+_MODEL_POWER_RE = re.compile(r"S[GH](\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def rated_power_w(device: dict) -> int | None:
+    """Best-effort rated power in watts parsed from a device's model code.
+
+    Returns ``None`` when no rating can be parsed, so callers fall back to the
+    default clamp.
+    """
+    match = _MODEL_POWER_RE.match(str(device.get("device_model_code") or ""))
+    if not match:
+        return None
+    try:
+        kw = float(match.group(1))
+    except ValueError:
+        return None
+    if kw <= 0 or kw > 1000:  # guard against nonsense parses
+        return None
+    return int(round(kw * 1000))
+
 
 # Number parameters exposed as HA Number entities.
 # Keys are canonical Control parameter names; values describe the HA entity.
@@ -86,7 +109,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if not device_uuid:
             continue
         device_name = target.get("device_name") or coordinator.plant_name
+        # Size the charge/discharge power slider to the device's rated power when it
+        # can be derived from the model code; otherwise use the conservative default.
+        max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
         for param, meta in DISPATCH_NUMBERS.items():
+            if param == "charge_discharge_power" and max_power != meta["native_max_value"]:
+                meta = {**meta, "native_max_value": max_power}
             entities.append(
                 SungrowDispatchNumber(
                     coordinator,
