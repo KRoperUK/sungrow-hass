@@ -258,6 +258,24 @@ class TestSungrowSensor:
         assert "Charging" in (sensor._attr_options or [])
         assert sensor.native_value == "Charging"
 
+    def test_native_value_enum_unmapped_code_is_none(self):
+        """An enum code not in the documented table must not leak outside options (#113)."""
+        data = {"ev_charger_status": {"id": "33716", "code": "ev_charger_status", "value": 999, "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "ev_charger_status", "123", "Plant", data["ev_charger_status"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM
+        assert sensor.native_value is None
+
+    def test_native_value_classified_non_numeric_returns_none(self):
+        """A classified numeric sensor with a non-numeric value returns None, not raw text (#113)."""
+        data = {"power": {"code": "power", "value": "unknown", "unit": "W", "name": "Power"}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power", "123", "Plant", data["power"])
+
+        assert sensor._attr_device_class == SensorDeviceClass.POWER
+        assert sensor.native_value is None
+
     def test_native_value_unitless_numeric_is_float(self):
         """A dimensionless power-factor value now coerces to float (was text) (issue #105)."""
         data = {"meter_power_factor": {"id": "8014", "code": "meter_power_factor", "value": "0.98", "unit": ""}}

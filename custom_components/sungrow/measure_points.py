@@ -104,9 +104,12 @@ def resolve_enum_options(point_id: str) -> tuple[str, ...] | None:
 def resolve_enum_value(point_id: str, value: Any) -> str | None:
     """Map a raw value to its enum label.
 
-    Returns ``None`` when the point is not an enum, the mapped label when the
-    value is a known code, and ``str(value)`` when the point is an enum but the
-    code is not in the table (forward-compatible with new firmware codes).
+    Returns ``None`` when the point is not an enum, and the mapped label when the
+    value is a known code. Returns ``None`` for a code that is not in the table
+    (or that cannot be parsed): ``_attr_options`` is the fixed documented list, so
+    emitting an unlisted label would make HA reject the state ("not in the list of
+    options"). ``None`` maps to ``unknown`` instead, keeping every non-``None``
+    return guaranteed to be in options (issue #113).
     """
     mapping = ENUM_MAPS.get(point_id)
     if not mapping:
@@ -114,8 +117,8 @@ def resolve_enum_value(point_id: str, value: Any) -> str | None:
     try:
         code = int(float(value))
     except (ValueError, TypeError):
-        return str(value)
-    return mapping.get(code, str(value))
+        return None
+    return mapping.get(code)
 
 
 # Percentage / dimensionless codes that mean charge level (battery device class)
@@ -125,8 +128,16 @@ _SOH_HINTS = ("soh", "health")
 _POWER_FACTOR_HINTS = ("power_factor",)
 
 
-def _classify_percent(code: str) -> _ClassPair:
-    """Classify a ``%`` point using its code (charge vs. health vs. generic)."""
+def _classify_percent(code: str, point_id: str = "") -> _ClassPair:
+    """Classify a ``%`` point (charge vs. health vs. generic).
+
+    The documented catalog wins when it knows the point (e.g. a %-SOC point
+    arriving with an opaque numeric code), so a BATTERY class isn't lost to the
+    code-only heuristic (issue #113); the code keywords are the fallback.
+    """
+    info = POINT_CATALOG.get(point_id)
+    if info is not None and (info.device_class is not None or info.state_class is not None):
+        return (info.device_class, info.state_class)
     lowered = code.lower()
     if any(h in lowered for h in _SOH_HINTS):
         return (None, _MEASUREMENT)
@@ -156,12 +167,16 @@ def resolve_classification(unit: str | None, code: str, point_id: str) -> _Class
     if point_id in ENUM_MAPS:
         return (SensorDeviceClass.ENUM, None)
 
+    override = _POINT_OVERRIDES.get(point_id)
+    if override is not None:
+        return override
+
     by_unit = _classify_by_unit(unit)
     if by_unit is not None:
         return by_unit
 
     if unit and unit.strip().lower() in ("%", "percent"):
-        return _classify_percent(code)
+        return _classify_percent(code, point_id)
 
     info = POINT_CATALOG.get(point_id)
     if info is not None and (info.device_class is not None or info.state_class is not None):
@@ -172,6 +187,48 @@ def resolve_classification(unit: str | None, code: str, point_id: str) -> _Class
         return by_code
 
     return (None, None)
+
+
+# --- Per-point classification overrides (issue #113) --------------------------
+# A few points need a device/state class the API unit alone would get wrong.
+# These overrides beat the unit map, so they are consulted before it (both at
+# build time and at runtime).
+
+# Instantaneous stored-energy Wh gauges go up AND down, so TOTAL_INCREASING reads
+# every drop as a meter reset and corrupts statistics. ENERGY_STORAGE + MEASUREMENT
+# models a live "energy remaining" reading instead. Genuinely cumulative counters
+# (e.g. 58606/13034 total charge energy) are NOT listed here and stay
+# ENERGY/TOTAL_INCREASING.
+_STORED_ENERGY_POINT_IDS = frozenset(
+    {
+        "83235",  # Total field chargeable energy
+        "83236",  # Total field dischargeable energy
+        "24630",  # Energy Storage Remaining Charge (EMS)
+        "83327",  # Energy Storage Remaining Charge (plant)
+        "13140",  # Battery Capacity
+    }
+)
+
+# Hour units whose "Total ..." counters accumulate monotonically.
+_HOUR_UNITS = frozenset({"h"})
+
+
+def _build_overrides() -> dict[str, _ClassPair]:
+    """Precompute per-point overrides that must beat the unit-based classifier."""
+    overrides: dict[str, _ClassPair] = {
+        pid: (SensorDeviceClass.ENERGY_STORAGE, _MEASUREMENT) for pid in _STORED_ENERGY_POINT_IDS
+    }
+    # Cumulative "Total ... Time" hour counters -> DURATION/TOTAL_INCREASING so they
+    # accumulate; daily/reset/equivalent-hour timers stay DURATION/MEASUREMENT.
+    for point_id, name, unit in RAW_POINTS:
+        if point_id in overrides:
+            continue
+        if unit.strip().lower() in _HOUR_UNITS and name.lower().startswith("total"):
+            overrides[point_id] = (SensorDeviceClass.DURATION, _TOTAL_INCREASING)
+    return overrides
+
+
+_POINT_OVERRIDES: dict[str, _ClassPair] = _build_overrides()
 
 
 # --- Build-time catalog classification (from documented name + unit) ----------
@@ -195,6 +252,9 @@ def _classify_point(name: str, unit: str, point_id: str) -> _ClassPair:
     """Classify a catalog row from its documented name and unit (build time)."""
     if point_id in ENUM_MAPS:
         return (SensorDeviceClass.ENUM, None)
+    override = _POINT_OVERRIDES.get(point_id)
+    if override is not None:
+        return override
     by_unit = _classify_by_unit(unit)
     if by_unit is not None:
         return by_unit
