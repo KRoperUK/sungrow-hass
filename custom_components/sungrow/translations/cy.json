@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Cysylltu ag iSolarCloud",
+        "description": "Rhowch eich manylion mynediad API iSolarCloud. Gallwch ddod o hyd iddynt yma: [iSolarCloud]({url})\n\nAr ôl i chi gyflwyno, caiff yr hyb ei greu a bydd Home Assistant yn gofyn i chi ei awdurdodi yn eich porwr.",
+        "data": {
+          "gateway": "Rhanbarth y Porth",
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "app_id": "App ID",
+          "redirect_uri": "URI Ailgyfeirio"
+        },
+        "data_description": {
+          "app_key": "AppKey o Blatfform Datblygwyr iSolarCloud.",
+          "app_secret": "AppSecret o Blatfform Datblygwyr iSolarCloud.",
+          "app_id": "App ID o Blatfform Datblygwyr iSolarCloud. I ddod o hyd i hwn, ewch i'ch cymhwysiad a chwiliwch am 'id' o fewn yr URL fel hyn: {app_id_url}."
+        }
+      },
+      "auth_callback": {
+        "title": "Yn aros am awdurdodiad",
+        "description": "Agorwch y ddolen isod i awdurdodi'r cymhwysiad:\n\n{auth_url}\n\nAr ôl i chi fewngofnodi a chymeradwyo'r ap, cewch eich ailgyfeirio yn ôl a bydd y sgrin hon yn diweddaru'n awtomatig.\n\nOs na fydd yr ailgyfeirio'n cwblhau (er enghraifft mae'r dudalen yn dangos gwall), arhoswch am eiliad a byddwch yn gallu gludo'r cod â llaw."
+      },
+      "auth_manual": {
+        "title": "Rhowch y Cod Awdurdodi",
+        "description": "Ni chwblhaodd yr ailgyfeirio awtomatig. Gorffennwch awdurdodi â llaw:\n\n{auth_url}\n\n**Cyfarwyddiadau:**\n1. Ewch i'r ddolen uchod a mewngofnodi (hepgorwch os ydych eisoes wedi gwneud hynny).\n2. Cewch eich ailgyfeirio (efallai y bydd y dudalen yn dangos gwall).\n3. Copïwch y paramedr **code** o'r bar cyfeiriad URL.\n4. Gludwch y cod — neu'r URL ailgyfeirio llawn — isod.",
+        "data": {
+          "code": "Cod Awdurdodi neu URL ailgyfeirio llawn"
+        }
+      },
+      "reconfigure": {
+        "title": "Ailgyflunio iSolarCloud",
+        "description": "Diweddarwch eich rhanbarth neu fanylion mynediad API (mae'r App ID yn aros yr un fath). Gofynnir i chi awdurdodi eto yn eich porwr, gan fod manylion mynediad newydd neu ranbarth newydd yn gofyn am docynnau ffres.",
+        "data": {
+          "app_key": "AppKey",
+          "app_secret": "App Secret",
+          "gateway": "Rhanbarth y Porth",
+          "redirect_uri": "URI Ailgyfeirio"
+        }
+      }
+    },
+    "progress": {
+      "wait_for_callback": "Yn aros am awdurdodiad. Agorwch y ddolen yn eich porwr i gymeradwyo'r cymhwysiad:\n\n{auth_url}\n\nMae'r sgrin hon yn diweddaru'n awtomatig unwaith y cewch eich ailgyfeirio yn ôl."
+    },
+    "error": {
+      "cannot_connect": "Methwyd â chysylltu",
+      "invalid_auth": "Dilysiad annilys",
+      "invalid_extra_measure_points": "Rhaid i bwyntiau mesur ychwanegol fod ar ffurf point_id=code, wedi'u gwahanu gan atalnodau",
+      "unknown": "Gwall annisgwyl"
+    },
+    "abort": {
+      "already_configured": "Mae'r ddyfais eisoes wedi'i ffurfweddu",
+      "library_missing": "Nid yw'r llyfrgell pysolarcloud wedi'i gosod. Ailgychwynnwch Home Assistant fel bod gofynion yr integreiddiad wedi'u gosod, yna rhowch gynnig arall arni.",
+      "missing_code": "Ni dderbyniwyd y cod awdurdodi. Rhowch gynnig arall arni.",
+      "reauth_successful": "Roedd yr ail-ddilysiad yn llwyddiannus",
+      "reconfigure_successful": "Roedd yr ailgyflunio'n llwyddiannus",
+      "wrong_account": "Nid yw'r cyfrif awdurdodedig yn cyfateb i App ID yr integreiddiad hwn. Defnyddiwch y cymhwysiad datblygwr gwreiddiol."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opsiynau Sungrow",
+        "description": "Addaswch pa mor aml y mae Home Assistant yn holi iSolarCloud. Mae gwerthoedd is yn diweddaru'n amlach ond yn defnyddio mwy o'ch cwota API. Mae'r cynllun am ddim yn caniatáu ~2000 galwad yr awr; y lleiafswm yw 10 eiliad.",
+        "data": {
+          "scan_interval": "Cyfwng holi (eiliadau)",
+          "extra_measure_points": "Pwyntiau mesur ychwanegol (point_id=code, wedi'u gwahanu gan atalnodau)",
+          "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "charge_discharge_power": {
+        "name": "Pŵer Gwefru/Dadwefru"
+      },
+      "soc_upper_limit": {
+        "name": "Terfyn Uchaf SOC"
+      },
+      "soc_lower_limit": {
+        "name": "Terfyn Isaf SOC"
+      },
+      "forced_charging_target_soc_1": {
+        "name": "SOC Targed Gwefru Gorfodol (Ffenestr 1)"
+      },
+      "forced_charging_target_soc_2": {
+        "name": "SOC Targed Gwefru Gorfodol (Ffenestr 2)"
+      },
+      "feed_in_limitation_value": {
+        "name": "Terfyn Allforio (Pŵer)"
+      },
+      "feed_in_limitation_ratio": {
+        "name": "Terfyn Allforio (%)"
+      },
+      "active_power_limit_ratio": {
+        "name": "Terfyn Pŵer Actif"
+      }
+    },
+    "select": {
+      "charge_discharge_command": {
+        "name": "Gorchymyn Gwefru/Dadwefru"
+      },
+      "forced_charging": {
+        "name": "Gwefru Gorfodol"
+      },
+      "feed_in_limitation": {
+        "name": "Cyfyngiad Allforio"
+      },
+      "limited_power_switch": {
+        "name": "Cyfyngu Pŵer Actif"
+      },
+      "battery_first": {
+        "name": "Modd Batri yn Gyntaf"
+      }
+    }
+  },
+  "exceptions": {
+    "dispatch_write_failed": {
+      "message": "Methwyd â diweddaru {param} ar y gwrthdröydd: {error}"
+    }
+  }
+}
