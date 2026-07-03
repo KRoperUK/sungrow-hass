@@ -2,15 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import logging
 from typing import Any
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import SungrowConfigEntry, SungrowData
 
 _LOGGER = logging.getLogger(__name__)
+
+# Bound each best-effort probe request so a hung endpoint can't stall (or pile up
+# calls against the quota during) a diagnostics download.
+PROBE_TIMEOUT = 30
+
+# Stable identifiers redacted from the diagnostics download. Credentials
+# (app_key/app_secret) and tokens are never included in the payload to begin
+# with; this additionally scrubs the App ID and the per-device hardware
+# identifiers (uuid, ps_key, serial numbers) that would otherwise leak in the
+# device lists. ``ps_id`` (the plant id) is deliberately kept — it is needed to
+# correlate a report with an account for support and is not a secret.
+TO_REDACT = {"app_id", "uuid", "ps_key", "dev_sn", "sn", "device_sn"}
 
 
 def _jsonable(obj: Any) -> Any:
@@ -43,7 +57,8 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
     raised, so a diagnostics download always succeeds.
     """
     try:
-        all_devices = await service.async_get_plant_devices(plant_id)
+        async with asyncio.timeout(PROBE_TIMEOUT):
+            all_devices = await service.async_get_plant_devices(plant_id)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.debug("Diagnostics: could not list devices for plant %s: %s", plant_id, err)
         return [{"error": str(err)}], {}
@@ -61,7 +76,9 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
             continue
         seen_types.add(type_id)
         try:
-            device_realtime[str(type_id)] = _jsonable(await service.async_get_device_realtime(plant_id, device_type))
+            async with asyncio.timeout(PROBE_TIMEOUT):
+                realtime = await service.async_get_device_realtime(plant_id, device_type)
+            device_realtime[str(type_id)] = _jsonable(realtime)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}
@@ -101,11 +118,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "device_realtime": device_realtime,
         }
 
-    return {
-        "entry_id": entry.entry_id,
-        "gateway": entry.data.get("gateway"),
-        "app_id": entry.data.get("app_id"),
-        "tokens_present": "tokens" in entry.data,
-        "options": dict(entry.options),
-        "plants": plant_data,
-    }
+    return async_redact_data(
+        {
+            "entry_id": entry.entry_id,
+            "gateway": entry.data.get("gateway"),
+            "app_id": entry.data.get("app_id"),
+            "tokens_present": "tokens" in entry.data,
+            "options": dict(entry.options),
+            "plants": plant_data,
+        },
+        TO_REDACT,
+    )

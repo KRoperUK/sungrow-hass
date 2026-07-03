@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import secrets
 from typing import Any, cast
 
 import voluptuous as vol
@@ -59,7 +60,9 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # callback background task, rather than in the typed ConfigFlowContext).
         self._code: str | None = None
         self._callback_timeout = False
-        self._manual_waiter_armed = False
+        # OAuth ``state`` token that correlates the callback redirect back to this
+        # exact flow (registered in hass.data so the callback view can look it up).
+        self._state: str | None = None
 
     @staticmethod
     @callback
@@ -202,24 +205,43 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         We deliberately do NOT append a ``flow_id``: iSolarCloud strips extra query
         params from the redirect, so it never round-tripped anyway (the callback view
-        resolves the pending flow via its single-flow fallback). Appending it only
-        broke the token exchange, which uses the bare URI, with "invalid
+        correlates the pending flow via the OAuth ``state`` param, falling back to the
+        sole pending flow only when no correlator survives). Appending anything here
+        also broke the token exchange, which uses the bare URI, with "invalid
         authentication".
         """
         # init_info is a dict[str, Any], so the redirect URI is typed as Any.
         return cast(str, self.init_info[CONF_REDIRECT_URI]).rstrip("/")
+
+    def _ensure_state(self) -> str:
+        """Return this flow's OAuth ``state`` token, (re)registering it for correlation.
+
+        Generated once per flow and stored in ``hass.data[DOMAIN]["states"]`` keyed to
+        the flow_id, so the callback view can map an incoming ``state`` back to the
+        exact flow instead of guessing the single pending one (#116). Re-registered on
+        every render so a re-armed flow always has a live mapping.
+        """
+        if self._state is None:
+            self._state = secrets.token_urlsafe(16)
+        states = self.hass.data.setdefault(DOMAIN, {}).setdefault("states", {})
+        states[self._state] = self.flow_id
+        return self._state
 
     def _auth_url(self) -> str:
         """Build the iSolarCloud authorization URL for the canonical redirect URI.
 
         Always called at render time (never cached), so every screen that shows the
         link — the progress wait, the manual-entry form, and the error-retry form —
-        displays a freshly generated, current URL. The URL no longer embeds a
-        per-flow ``flow_id`` that could go stale, so it stays valid for the whole
-        flow and each visit yields a fresh authorization code from iSolarCloud.
+        displays a freshly generated, current URL. The URL carries an OAuth ``state``
+        token (not a ``flow_id`` on the redirect, which iSolarCloud strips) so a
+        redirect that preserves ``state`` correlates unambiguously to this flow even
+        when several setups are in flight.
         """
         # auth_client is the untyped pysolarcloud Auth, so auth_url returns Any.
-        return cast(str, self.auth_client.auth_url(self._redirect_uri()))
+        base = cast(str, self.auth_client.auth_url(self._redirect_uri()))
+        state = self._ensure_state()
+        separator = "&" if "?" in base else "?"
+        return f"{base}{separator}state={state}"
 
     async def async_step_auth(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Begin authorization by automatically waiting for the OAuth redirect.
@@ -316,6 +338,26 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if isinstance(flows, dict):
             flows.pop(self.flow_id, None)
 
+    @callback
+    def async_remove(self) -> None:
+        """Prune this flow's pending OAuth future and state when the flow is removed.
+
+        HA calls this on flow completion or abort. Dropping the future (cancelling it
+        if still pending) and its ``state`` mapping stops stale correlators from
+        lingering for up to ``CALLBACK_WAIT_TIMEOUT`` — which is what let a later,
+        legitimate redirect land on an abandoned flow or trip ``len(flows) != 1`` and
+        400 a valid setup (#116).
+        """
+        domain_data = self.hass.data.get(DOMAIN, {})
+        flows = domain_data.get("flows")
+        if isinstance(flows, dict):
+            future = flows.pop(self.flow_id, None)
+            if isinstance(future, asyncio.Future) and not future.done():
+                future.cancel()
+        states = domain_data.get("states")
+        if isinstance(states, dict) and self._state is not None:
+            states.pop(self._state, None)
+
     async def async_step_auth_manual(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle manual entry of the authorization code or full redirect URL.
 
@@ -355,9 +397,13 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Keep a callback waiter armed while the manual form is shown, so a redirect
         # that lands late (after the auto-wait timed out) still completes the flow
         # automatically instead of stranding a "successful" callback with no effect.
-        # A context flag arms it exactly once (not on every form re-render).
-        if not self._manual_waiter_armed:
-            self._manual_waiter_armed = True
+        # Re-arm only when no live waiter exists: a consumed/expired future is
+        # replaced (so a subsequent redirect isn't stranded — the old one-shot flag
+        # never re-armed), while a still-pending one is left alone to avoid spawning
+        # duplicate waiter tasks on every form re-render.
+        flows = self.hass.data.get(DOMAIN, {}).get("flows", {})
+        existing = flows.get(self.flow_id)
+        if not isinstance(existing, asyncio.Future) or existing.done():
             self._arm_callback_wait(fall_back_to_manual=False)
 
         auth_url = self._auth_url()
@@ -457,8 +503,15 @@ def _parse_extra_measure_points(raw: str | None) -> dict[str, str]:
     return out
 
 
-class SungrowOptionsFlow(config_entries.OptionsFlow):
-    """Handle Sungrow integration options (e.g. polling interval)."""
+class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Handle Sungrow integration options (e.g. polling interval).
+
+    Subclasses ``OptionsFlowWithReload`` so an options change reloads the entry
+    automatically. This replaces the old manual ``add_update_listener`` — which
+    also fired on every token rotation (a plain ``entry.data`` write) and reloaded
+    the whole integration on each refresh (#110). Because ``OptionsFlowWithReload``
+    forbids config-entry update listeners, none are registered in ``__init__``.
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the integration options."""

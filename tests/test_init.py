@@ -239,12 +239,83 @@ async def test_setup_entry_connection_error_is_retried(hass: HomeAssistant, mock
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_setup_entry_plants_timeout_is_retried(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A hung ``async_get_plants`` call times out and raises ConfigEntryNotReady (retry) (#115)."""
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_plants_service.async_get_plants = _hang
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.sungrow.SETUP_TIMEOUT", 0.01):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
 async def test_setup_entry_auth_error_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
     """A failed token refresh raises ConfigEntryAuthFailed (reauth)."""
     # pysolarcloud>=0.6.0 raises TokenRefreshError (error "token_refresh_failed")
     # when the refresh response has no access_token.
     mock_plants_service.async_get_plants = AsyncMock(
         side_effect=pysolarcloud.PySolarCloudException({"error": "token_refresh_failed"})
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_setup_partial_plant_failure_sets_up_remaining(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """One plant's transient first-refresh failure must not abort the others (#115)."""
+
+    async def _realtime(plant_ids, **kwargs):
+        if plant_ids == ["12345"]:
+            raise ConnectionError("plant 12345 temporarily down")
+        return MOCK_REALTIME_DATA
+
+    mock_plants_service.async_get_realtime_data = AsyncMock(side_effect=_realtime)
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # Only the healthy plant got a coordinator; the failed one is skipped for now.
+    coordinators = entry.runtime_data.coordinators
+    assert [c.plant_id for c in coordinators] == ["67890"]
+    assert "12345" not in entry.runtime_data.devices
+
+
+async def test_setup_all_plants_failure_raises_not_ready(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """If every plant fails its first refresh, the whole entry retries (#115)."""
+    mock_plants_service.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("all plants down"))
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_setup_plant_auth_failure_still_triggers_reauth(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """An auth failure during a plant's first refresh propagates as reauth, not a skip (#115)."""
+    mock_plants_service.async_get_realtime_data = AsyncMock(
+        side_effect=pysolarcloud.PySolarCloudException({"error": "invalid_token"})
     )
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
@@ -304,18 +375,52 @@ async def test_prune_stale_devices(hass: HomeAssistant):
 
 
 async def test_options_change_reloads_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """Updating options should reload the entry and apply the new scan interval."""
+    """Changing an option via the options flow reloads the entry (#110).
+
+    ``OptionsFlowWithReload`` schedules the reload when the flow stores new
+    options, so the fresh scan interval takes effect on a brand-new coordinator.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 15})
+    runtime_before = entry.runtime_data
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(result["flow_id"], user_input={CONF_SCAN_INTERVAL: 15})
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
+    # A reload replaced runtime_data and applied the new interval.
+    assert entry.runtime_data is not runtime_before
     coordinators = entry.runtime_data.coordinators
     assert coordinators[0].update_interval.total_seconds() == 15
+
+
+async def test_token_write_does_not_reload_entry(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A token rotation (an ``entry.data`` write) must NOT reload the integration (#110).
+
+    ``_save_tokens`` writes rotated tokens back to ``entry.data`` on every refresh.
+    Only an options change should reload; a token-only write must leave the running
+    integration untouched (no extra API calls, no brief unavailability, no cancelled
+    EMS heartbeat), which we assert by the ``runtime_data`` object surviving intact.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    runtime_before = entry.runtime_data
+
+    rotated = {"access_token": "rotated", "refresh_token": "rotated_r", "token_type": "bearer"}
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "tokens": rotated})
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # No reload happened: the same runtime_data object, and the tokens were persisted.
+    assert entry.runtime_data is runtime_before
+    assert entry.data["tokens"] == rotated
 
 
 # ---------------------------------------------------------------------------
@@ -412,3 +517,60 @@ class TestSungrowAuthCallbackView:
         assert response.status == 200
         assert future.done()
         assert future.result() == "the_code"
+
+    async def test_callback_resolves_by_state(self, hass: HomeAssistant):
+        """A callback correlated by OAuth ``state`` resolves the right flow (#116)."""
+        future: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_xyz": future}
+        domain_data["states"] = {"state_token": "flow_xyz"}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=c&state=state_token")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 200
+        assert future.result() == "c"
+
+    async def test_callback_state_routes_to_correct_concurrent_flow(self, hass: HomeAssistant):
+        """With two pending flows, a valid state routes the code to the right one (#116).
+
+        The old single-flow fallback would 400 (``len(flows) != 1``); state
+        correlation must resolve the matching flow and leave the other untouched.
+        """
+        future_a: asyncio.Future[str] = asyncio.Future()
+        future_b: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_a": future_a, "flow_b": future_b}
+        domain_data["states"] = {"s_b": "flow_b"}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=code_b&state=s_b")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 200
+        assert future_b.result() == "code_b"
+        assert not future_a.done()
+
+    async def test_callback_unknown_correlator_does_not_misroute(self, hass: HomeAssistant):
+        """An unknown state with several pending flows resolves nothing (#116).
+
+        A stale/foreign correlator must never be dropped onto some other flow's
+        future — the view returns 400 and leaves every pending future untouched.
+        """
+        future_a: asyncio.Future[str] = asyncio.Future()
+        future_b: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_a": future_a, "flow_b": future_b}
+        domain_data["states"] = {}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=c&state=nope")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 400
+        assert not future_a.done()
+        assert not future_b.done()
