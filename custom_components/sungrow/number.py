@@ -95,7 +95,40 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
     },
+    # Battery power caps: the maximum power the ESS will charge/discharge at. Watts,
+    # same value format as charge_discharge_power, sized to the device's rating.
+    "max_charging_power": {
+        "device_class": NumberDeviceClass.POWER,
+        "native_unit_of_measurement": "W",
+        "native_min_value": 0,
+        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
+        "native_step": 100,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    "max_discharging_power": {
+        "device_class": NumberDeviceClass.POWER,
+        "native_unit_of_measurement": "W",
+        "native_min_value": 0,
+        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
+        "native_step": 100,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Target SOC for the second forced-charging window (mirrors ..._soc_1).
+    "forced_charging_target_soc_2": {
+        "device_class": NumberDeviceClass.BATTERY,
+        "native_unit_of_measurement": "%",
+        "native_min_value": 0,
+        "native_max_value": 100,
+        "native_step": 1,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
+
+# Power parameters whose slider maximum is sized to the device's rated power.
+_RATED_POWER_PARAMS = frozenset({"charge_discharge_power", "max_charging_power", "max_discharging_power"})
 
 
 def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> list[NumberEntity]:
@@ -113,12 +146,12 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
     if not device_uuid:
         return []
     device_name = target.get("device_name") or coordinator.plant_name
-    # Size the charge/discharge power slider to the device's rated power when it
-    # can be derived from the model code; otherwise use the conservative default.
+    # Size the power sliders to the device's rated power when it can be derived
+    # from the model code; otherwise use the conservative default.
     max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
     entities: list[NumberEntity] = []
     for param, meta in DISPATCH_NUMBERS.items():
-        if param == "charge_discharge_power" and max_power != meta["native_max_value"]:
+        if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, device_uuid, device_name, param, meta))
     return entities

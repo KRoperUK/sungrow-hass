@@ -12,6 +12,15 @@
       },
       "forced_charging_target_soc_1": {
         "default": "mdi:battery-charging-100"
+      },
+      "forced_charging_target_soc_2": {
+        "default": "mdi:battery-charging-100"
+      },
+      "max_charging_power": {
+        "default": "mdi:battery-arrow-up"
+      },
+      "max_discharging_power": {
+        "default": "mdi:battery-arrow-down"
       }
     },
     "select": {
