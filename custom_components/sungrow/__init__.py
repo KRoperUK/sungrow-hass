@@ -81,6 +81,23 @@ def select_dispatch_device(devices: list[dict[str, Any]]) -> dict[str, Any] | No
     return inverters[0] if inverters else None
 
 
+async def _async_dispatch_supported(control: Control, devices: list[dict[str, Any]]) -> bool:
+    """Return whether the plant's dispatch device accepts parameter writes.
+
+    Fail-open: returns True unless the API explicitly reports the device does not
+    support updates, so a transient check failure — or a dispatch device that only
+    appears after setup — never hides working controls.
+    """
+    target = select_dispatch_device(devices)
+    if target is None or not target.get("uuid"):
+        return True
+    try:
+        return bool(await control.async_check_update_support(str(target["uuid"])))
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Could not check dispatch support for %s: %s", target.get("uuid"), err)
+        return True
+
+
 class IterableSchema(vol.Schema):
     """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
 
@@ -185,6 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name, devices)
         # Raises ConfigEntryNotReady / ConfigEntryAuthFailed as classified by the coordinator.
         await coordinator.async_config_entry_first_refresh()
+        coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
         coordinators.append(coordinator)
 
     entry.runtime_data = SungrowData(
