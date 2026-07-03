@@ -70,6 +70,14 @@ After setup, go to **Settings → Devices & Services → Sungrow → Configure**
 - **Extra measure points** — add custom `point_id=code` pairs to request additional data points from iSolarCloud
 - **Create per-device sensors** — off by default. When enabled, each discovered device (EV charger, meter, extra battery) is polled for its own realtime points and exposed as sensors under its own device card, grouped beneath the plant. Combine with **Extra measure points** to surface device-specific point IDs (e.g. an EV charger). Adds extra API calls, so leave it off if you only need plant-level data.
 
+### Changing region or credentials
+
+Picked the wrong gateway region, or rotated your API secret? Use **Settings →
+Devices & Services → Sungrow → ⋮ → Reconfigure** to update the region, App Key,
+App Secret, or redirect URI without deleting and re-adding the integration (your
+entity history is kept). You'll be asked to authorize again in the browser, since
+new credentials or a new region need fresh tokens. The App ID stays fixed.
+
 ### Sensor mapping
 
 Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
