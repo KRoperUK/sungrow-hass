@@ -57,7 +57,15 @@ def rated_power_w(device: dict[str, Any]) -> int | None:
 
 
 # Number parameters exposed as HA Number entities.
-# Keys are canonical Control parameter names; values describe the HA entity.
+#
+# Keys are canonical Control parameter names. "write_scale" converts the entity's
+# displayed value to the raw value the API expects (Appendix 10 of the iSolarCloud
+# OpenAPI docs — the authoritative source):
+#   - power params are sent in WATTS (scale 1): charge_discharge_power 0-5000W+,
+#     feed_in_limitation_value 0-rated;
+#   - SOC upper/lower limits and the ratios are sent as TENTHS of a percent
+#     (scale 10): e.g. 90% -> 900, matching the doc's "700 to 1000 = 70% to 100%";
+#   - forced-charge target SOC is a direct percent (scale 1, "0 to 100").
 DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
     "charge_discharge_power": {
         "device_class": NumberDeviceClass.POWER,
@@ -66,6 +74,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
         "native_step": 100,
         "mode": NumberMode.SLIDER,
+        "write_scale": 1,
     },
     "soc_upper_limit": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -76,6 +85,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.SLIDER,
         # SOC limits set battery policy rather than actuate — configuration entities.
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 10,
     },
     "soc_lower_limit": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -85,6 +95,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 10,
     },
     "forced_charging_target_soc_1": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -94,26 +105,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
-    },
-    # Battery power caps: the maximum power the ESS will charge/discharge at. Watts,
-    # same value format as charge_discharge_power, sized to the device's rating.
-    "max_charging_power": {
-        "device_class": NumberDeviceClass.POWER,
-        "native_unit_of_measurement": "W",
-        "native_min_value": 0,
-        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
-        "native_step": 100,
-        "mode": NumberMode.SLIDER,
-        "entity_category": EntityCategory.CONFIG,
-    },
-    "max_discharging_power": {
-        "device_class": NumberDeviceClass.POWER,
-        "native_unit_of_measurement": "W",
-        "native_min_value": 0,
-        "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
-        "native_step": 100,
-        "mode": NumberMode.SLIDER,
-        "entity_category": EntityCategory.CONFIG,
+        "write_scale": 1,
     },
     # Target SOC for the second forced-charging window (mirrors ..._soc_1).
     "forced_charging_target_soc_2": {
@@ -124,9 +116,10 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 1,
     },
-    # Export (feed-in) limit as an absolute power. Only takes effect when the
-    # feed_in_limitation select is enabled. Watts UI, sent as kW, sized to rating.
+    # Export (feed-in) limit as an absolute power in watts. Only takes effect when
+    # the feed_in_limitation select is enabled. Sized to the device's rating.
     "feed_in_limitation_value": {
         "device_class": NumberDeviceClass.POWER,
         "native_unit_of_measurement": "W",
@@ -135,8 +128,9 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 100,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 1,
     },
-    # Export limit as a percentage of rated power (0-100%).
+    # Export limit as a percentage of rated power (API range 0-1000 = 0-100%).
     "feed_in_limitation_ratio": {
         "native_unit_of_measurement": "%",
         "native_min_value": 0,
@@ -144,8 +138,9 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 10,
     },
-    # Active power output cap as a percentage of rated power (0-100%).
+    # Active power output cap as a percentage of rated power (API range 0-1000).
     "active_power_limit_ratio": {
         "native_unit_of_measurement": "%",
         "native_min_value": 0,
@@ -153,14 +148,12 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "write_scale": 10,
     },
 }
 
-# Power parameters: sent to the API in kW (converted from the entities' W), and
-# their slider maximum is sized to the device's rated power.
-_RATED_POWER_PARAMS = frozenset(
-    {"charge_discharge_power", "max_charging_power", "max_discharging_power", "feed_in_limitation_value"}
-)
+# Watt-valued power parameters whose slider maximum is sized to the device's rating.
+_RATED_POWER_PARAMS = frozenset({"charge_discharge_power", "feed_in_limitation_value"})
 
 
 def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> list[NumberEntity]:
@@ -254,6 +247,8 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         self._attr_native_step = meta["native_step"]
         self._attr_mode = meta["mode"]
         self._attr_entity_category = meta.get("entity_category")
+        # Factor converting the displayed value to the raw API value (see DISPATCH_NUMBERS).
+        self._write_scale = meta.get("write_scale", 1)
 
     async def async_added_to_hass(self) -> None:
         """Restore the last commanded value across restarts.
@@ -269,10 +264,9 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
     async def async_set_native_value(self, value: float) -> None:
         """Update the dispatch parameter on the inverter."""
         _LOGGER.debug("Setting %s to %s for %s", self.param, value, self.device_uuid)
-        # The API expects power parameters in kW (the entities present them in W for a
-        # familiar UI), and the client sends the value verbatim — so convert W->kW on
-        # the way out. Percentage/other params are sent as integers.
-        wire_value = str(round(value / 1000, 2)) if self.param in _RATED_POWER_PARAMS else str(int(value))
+        # The client sends the value verbatim, so encode it as the API expects: power
+        # in watts (scale 1), SOC limits and ratios as tenths of a percent (scale 10).
+        wire_value = str(int(round(value * self._write_scale)))
         try:
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
         except PySolarCloudException as err:
