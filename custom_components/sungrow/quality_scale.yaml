@@ -114,19 +114,33 @@ rules:
   dynamic-devices:
     status: todo
   entity-category:
-    status: todo
+    status: exempt
+    comment: >-
+      All entities are primary function: plant/device measurements (sensors) and
+      the active dispatch controls (number/select). None are auxiliary config or
+      diagnostic entities, and the sensor set is dynamic from the API, so no
+      entity warrants a config/diagnostic category.
   entity-device-class:
     status: done
   entity-disabled-by-default:
     status: done
     comment: Sensors with an unknown/empty initial value are disabled by default.
   entity-translations:
-    status: todo
-    comment: Dispatch number/select entities are translated; sensors use API/code-derived names.
+    status: done
+    comment: >-
+      Dispatch number/select entities use translation keys (entity.number/select
+      in strings.json). Sensors are created dynamically from API point codes, so
+      their names are derived from the code and cannot use fixed translation keys.
   exception-translations:
-    status: todo
+    status: done
+    comment: >-
+      Dispatch write failures raise HomeAssistantError with the translation key
+      exceptions.dispatch_write_failed.
   icon-translations:
-    status: todo
+    status: done
+    comment: >-
+      Dispatch number/select entities provide icons via icons.json. Sensor icons
+      come from their device class (or a solar fallback for unclassified points).
   reconfiguration-flow:
     status: done
   repair-issues:

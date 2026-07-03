@@ -1,0 +1,26 @@
+{
+  "entity": {
+    "number": {
+      "charge_discharge_power": {
+        "default": "mdi:battery-charging"
+      },
+      "soc_upper_limit": {
+        "default": "mdi:battery-high"
+      },
+      "soc_lower_limit": {
+        "default": "mdi:battery-low"
+      },
+      "forced_charging_target_soc_1": {
+        "default": "mdi:battery-charging-100"
+      }
+    },
+    "select": {
+      "charge_discharge_command": {
+        "default": "mdi:battery-sync"
+      },
+      "forced_charging": {
+        "default": "mdi:battery-lock"
+      }
+    }
+  }
+}

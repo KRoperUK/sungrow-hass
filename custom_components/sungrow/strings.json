@@ -92,5 +92,10 @@
         "name": "Forced Charging"
       }
     }
+  },
+  "exceptions": {
+    "dispatch_write_failed": {
+      "message": "Failed to update {param} on the inverter: {error}"
+    }
   }
 }
