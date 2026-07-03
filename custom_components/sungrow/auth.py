@@ -29,9 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 #
 # The "E*" codes are the documented iSolarCloud OpenAPI result codes for dead or
 # unauthorized credentials (E00003 token invalid/expired, E900 unauthorized, E919
-# de-whitelisted, E912/E914 bad or mismatched app key). These are surfaced once the
-# pinned pysolarcloud raises PySolarCloudException carrying the API result_code (a
-# paired library fix); the quota/throttle codes E998/E999 are deliberately excluded
+# de-whitelisted, E912/E914 bad or mismatched app key). pysolarcloud >=0.8.0 raises
+# PySolarCloudException carrying the API result_code on ``.error``, so these now
+# reliably drive reauth; the quota/throttle codes E998/E999 are deliberately excluded
 # because they are transient and must keep retrying (UpdateFailed), not reauth.
 AUTH_ERRORS = frozenset(
     {
@@ -76,8 +76,9 @@ class SungrowAuth(Auth):
         same single-use refresh token and provoke a spurious reauth. Serializing the
         whole body with a lock means the first waiter refreshes and persists while
         later waiters find the token already fresh (``super()`` re-checks expiry) and
-        no-op. The pinned pysolarcloud 0.7.0 has no lock of its own, so this shim is
-        what protects us; it stays harmless if a future version adds one.
+        no-op. pysolarcloud >=0.8.0 also serializes refresh internally, so this lock is
+        now defensive redundancy on the historical unavailable-after-restart path; the
+        two locks never deadlock (distinct locks, always acquired outer-then-inner).
 
         Rotation is detected by comparing the *refresh-token value* rather than the
         ``tokens`` dict identity. Identity works only because 0.7.0 reassigns the dict;
