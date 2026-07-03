@@ -1,3 +1,28 @@
+## [2.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v2.0.0...v2.1.0) (2026-07-03)
+
+
+### Features
+
+* add a reconfigure flow (change region/credentials without delete) ([#87](https://github.com/KRoperUK/sungrow-hass/issues/87)) ([d7b21f0](https://github.com/KRoperUK/sungrow-hass/commit/d7b21f00040b9f9616576cd13e3258db2cde4730)), closes [#80](https://github.com/KRoperUK/sungrow-hass/issues/80)
+* add battery power-cap and second forced-charge target controls ([#100](https://github.com/KRoperUK/sungrow-hass/issues/100)) ([31db2cf](https://github.com/KRoperUK/sungrow-hass/commit/31db2cfc14a1fe3cc03c790a0ebc04e3dd0f1d69))
+* derive dispatch power max from the device model code ([#90](https://github.com/KRoperUK/sungrow-hass/issues/90)) ([d56d260](https://github.com/KRoperUK/sungrow-hass/commit/d56d260fab75749440505419213946a06ab8c3d1)), closes [#81](https://github.com/KRoperUK/sungrow-hass/issues/81)
+* document and alias common measuring points from the official docs ([#106](https://github.com/KRoperUK/sungrow-hass/issues/106)) ([ee33dc6](https://github.com/KRoperUK/sungrow-hass/commit/ee33dc60762efa66f66e27db70acdcd3bc550427))
+* entity polish for Gold (icon + exception translations) ([#93](https://github.com/KRoperUK/sungrow-hass/issues/93)) ([2b51fc1](https://github.com/KRoperUK/sungrow-hass/commit/2b51fc1a8b7c5ee13b72d0dc3e123a1593ca7fcc))
+* harden to Gold — address HA docs audit findings ([#97](https://github.com/KRoperUK/sungrow-hass/issues/97)) ([7a9bc10](https://github.com/KRoperUK/sungrow-hass/commit/7a9bc10740af918f7f89797e88a406bd2dc58795))
+* opt-in per-device sensors (EV chargers, meters, extra batteries) ([#84](https://github.com/KRoperUK/sungrow-hass/issues/84)) ([9de8a6e](https://github.com/KRoperUK/sungrow-hass/commit/9de8a6e9204977548ebe667a647578a7ea92d8e2)), closes [#74](https://github.com/KRoperUK/sungrow-hass/issues/74) [#67](https://github.com/KRoperUK/sungrow-hass/issues/67)
+* runtime device management for Gold (dynamic + stale devices) ([#95](https://github.com/KRoperUK/sungrow-hass/issues/95)) ([48a521a](https://github.com/KRoperUK/sungrow-hass/commit/48a521a94e42e77033c0efc36833e8711f9ebc74))
+* strict typing (Platinum) + ship py.typed ([#96](https://github.com/KRoperUK/sungrow-hass/issues/96)) ([9a40471](https://github.com/KRoperUK/sungrow-hass/commit/9a40471159bd4b31599bdec221145fbf6c036e0f))
+* verified dispatch controls + fix kW unit bug ([#101](https://github.com/KRoperUK/sungrow-hass/issues/101)) ([#102](https://github.com/KRoperUK/sungrow-hass/issues/102)) ([7319b98](https://github.com/KRoperUK/sungrow-hass/commit/7319b98217f0f9d0c58e1305cc0c14ab06d42529))
+
+
+### Bug Fixes
+
+* audit cleanups — sensor coercion, attributes, reauth helper ([#99](https://github.com/KRoperUK/sungrow-hass/issues/99)) ([02d1bc1](https://github.com/KRoperUK/sungrow-hass/commit/02d1bc1aa74e2896ba2f3317ad8180ceb5c12e5a)), closes [#98](https://github.com/KRoperUK/sungrow-hass/issues/98)
+* complete the flow from a late OAuth callback on the manual step ([#86](https://github.com/KRoperUK/sungrow-hass/issues/86)) ([bb16479](https://github.com/KRoperUK/sungrow-hass/commit/bb16479c7b96c42fe6a15877199d6806765413a1)), closes [#75](https://github.com/KRoperUK/sungrow-hass/issues/75)
+* correct dispatch parameter encodings per the official API docs ([#103](https://github.com/KRoperUK/sungrow-hass/issues/103)) ([cdb8d53](https://github.com/KRoperUK/sungrow-hass/commit/cdb8d53a6cacff318652baf99b98e19a14104ee2)), closes [#102](https://github.com/KRoperUK/sungrow-hass/issues/102)
+* match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
+* require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
+
 ## [2.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v1.0.0...v2.0.0) (2026-07-02)
 
 
@@ -47,11 +72,4 @@ Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
 
 * persist refreshed tokens and harden setup ([#23](https://github.com/KRoperUK/sungrow-hass/issues/23)) ([2d579fd](https://github.com/KRoperUK/sungrow-hass/commit/2d579fd3af9ca2ba3836fe3ccaa2963683d69d7b)), closes [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21)
 * resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
-* resolved hassfest warnings ([74dc412](https://github.com/KRoperUK/sungrow-hass/commit/74dc4123499d2dc1d3cebec0e4597e84488bb81c))
-* resolved hassfest warnings ([44fe5dd](https://github.com/KRoperUK/sungrow-hass/commit/44fe5dd5ee630ed191f25ee63a3c56a648137800))
-* resolved hassfest warnings ([990fce2](https://github.com/KRoperUK/sungrow-hass/commit/990fce2292a68b95790e12745d3ee3b0b29da69b))
-* resolved hassfest warnings ([492d444](https://github.com/KRoperUK/sungrow-hass/commit/492d444aee493ec3485c22d623be6cc3a63827a2))
-* resolved hassfest warnings ([fe118f3](https://github.com/KRoperUK/sungrow-hass/commit/fe118f39de2c4413bad1176558eec599a3f1d7bb))
-* resolved hassfest warnings ([9b62243](https://github.com/KRoperUK/sungrow-hass/commit/9b622435faf635d17245d4aeac1d8d7fcc1006de))
-* resolved hassfest warnings ([704e48c](https://github.com/KRoperUK/sungrow-hass/commit/704e48c9e59fe5b8c76cb164e870ac8179f2807b))
 
