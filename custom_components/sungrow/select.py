@@ -7,9 +7,11 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
 from . import async_start_heartbeat, async_stop_heartbeat, select_dispatch_device
@@ -121,7 +123,14 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], SelectEn
         """Update the dispatch parameter on the inverter."""
         value = self.options_map[option]
         _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, value, self.device_uuid)
-        await self.control.async_update_parameters(self.device_uuid, {self.param: value})
+        try:
+            await self.control.async_update_parameters(self.device_uuid, {self.param: value})
+        except PySolarCloudException as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="dispatch_write_failed",
+                translation_placeholders={"param": self.param, "error": str(err)},
+            ) from err
 
         # Keep the inverter in dispatch mode while actively charging/discharging.
         entry = self.coordinator.config_entry

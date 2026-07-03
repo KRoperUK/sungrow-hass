@@ -2,9 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.components.number import NumberDeviceClass
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -370,3 +373,73 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
 
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
+
+
+# ---------------------------------------------------------------------------
+# Exception translations (dispatch write failures)
+# ---------------------------------------------------------------------------
+
+
+async def test_number_set_value_api_error_raises_translated_error(hass: HomeAssistant):
+    """A failed dispatch write surfaces as a translated HomeAssistantError."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=PySolarCloudException({"error": "server_busy"}))
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+
+    with (
+        patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()),
+        pytest.raises(HomeAssistantError) as exc,
+    ):
+        await power.async_set_native_value(2500)
+
+    assert exc.value.translation_key == "dispatch_write_failed"
+    assert exc.value.translation_domain == DOMAIN
+    assert exc.value.translation_placeholders["param"] == "charge_discharge_power"
+
+
+async def test_select_option_api_error_raises_translated_error(hass: HomeAssistant):
+    """A failed dispatch command surfaces as a translated HomeAssistantError."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=PySolarCloudException({"error": "server_busy"}))
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
+        pytest.raises(HomeAssistantError) as exc,
+    ):
+        await command.async_select_option("Charge")
+
+    assert exc.value.translation_key == "dispatch_write_failed"
+    assert exc.value.translation_domain == DOMAIN
+    assert exc.value.translation_placeholders["param"] == "charge_discharge_command"
+
+
+# ---------------------------------------------------------------------------
+# Icon translations
+# ---------------------------------------------------------------------------
+
+
+def test_icons_json_covers_all_dispatch_entities():
+    """Every dispatch number/select translation key has an icon in icons.json."""
+    import json
+    from pathlib import Path
+
+    icons_path = Path(__file__).parent.parent / "custom_components" / "sungrow" / "icons.json"
+    icons = json.loads(icons_path.read_text())["entity"]
+
+    for param in DISPATCH_NUMBERS:
+        assert icons["number"][param]["default"].startswith("mdi:"), f"missing icon for number.{param}"
+    for param in DISPATCH_SELECTS:
+        assert icons["select"][param]["default"].startswith("mdi:"), f"missing icon for select.{param}"
