@@ -446,3 +446,60 @@ class TestSungrowAuthCallbackView:
         assert response.status == 200
         assert future.done()
         assert future.result() == "the_code"
+
+    async def test_callback_resolves_by_state(self, hass: HomeAssistant):
+        """A callback correlated by OAuth ``state`` resolves the right flow (#116)."""
+        future: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_xyz": future}
+        domain_data["states"] = {"state_token": "flow_xyz"}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=c&state=state_token")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 200
+        assert future.result() == "c"
+
+    async def test_callback_state_routes_to_correct_concurrent_flow(self, hass: HomeAssistant):
+        """With two pending flows, a valid state routes the code to the right one (#116).
+
+        The old single-flow fallback would 400 (``len(flows) != 1``); state
+        correlation must resolve the matching flow and leave the other untouched.
+        """
+        future_a: asyncio.Future[str] = asyncio.Future()
+        future_b: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_a": future_a, "flow_b": future_b}
+        domain_data["states"] = {"s_b": "flow_b"}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=code_b&state=s_b")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 200
+        assert future_b.result() == "code_b"
+        assert not future_a.done()
+
+    async def test_callback_unknown_correlator_does_not_misroute(self, hass: HomeAssistant):
+        """An unknown state with several pending flows resolves nothing (#116).
+
+        A stale/foreign correlator must never be dropped onto some other flow's
+        future — the view returns 400 and leaves every pending future untouched.
+        """
+        future_a: asyncio.Future[str] = asyncio.Future()
+        future_b: asyncio.Future[str] = asyncio.Future()
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data["flows"] = {"flow_a": future_a, "flow_b": future_b}
+        domain_data["states"] = {}
+
+        mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=c&state=nope")
+        mock_request.app["hass"] = hass
+
+        response = await self.view.get(mock_request)
+
+        assert response.status == 400
+        assert not future_a.done()
+        assert not future_b.done()
