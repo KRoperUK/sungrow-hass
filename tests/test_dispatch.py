@@ -163,8 +163,10 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
         await power.async_set_native_value(2500)
 
-    # The API expects kW; the 2500 W slider value is sent as 2.5 kW.
-    entry_data.control.async_update_parameters.assert_awaited_once_with("dev-uuid-1", {"charge_discharge_power": "2.5"})
+    # Power is sent verbatim in watts.
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
+        "dev-uuid-1", {"charge_discharge_power": "2500"}
+    )
 
 
 async def test_number_starts_heartbeat_for_power_changes(hass: HomeAssistant):
@@ -382,8 +384,8 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_power_params_written_in_kw(hass: HomeAssistant):
-    """Power params convert W->kW on write; percentage params are sent as integers."""
+async def test_param_write_encodings(hass: HomeAssistant):
+    """Values are encoded per Appendix 10: power in watts, SOC/ratios as tenths of a %."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
@@ -392,12 +394,21 @@ async def test_power_params_written_in_kw(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     by_param = {e.param: e for e in added}
 
+    # Power is sent verbatim in watts (not kW).
     with patch("custom_components.sungrow.number.async_start_heartbeat", new=AsyncMock()):
-        await by_param["max_charging_power"].async_set_native_value(3700)
-    data.control.async_update_parameters.assert_awaited_with("ess-1", {"max_charging_power": "3.7"})
+        await by_param["charge_discharge_power"].async_set_native_value(2500)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_power": "2500"})
+
+    # SOC limits and ratios are sent as tenths of a percent (x10).
+    await by_param["soc_upper_limit"].async_set_native_value(90)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"soc_upper_limit": "900"})
 
     await by_param["feed_in_limitation_ratio"].async_set_native_value(80)
-    data.control.async_update_parameters.assert_awaited_with("ess-1", {"feed_in_limitation_ratio": "80"})
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"feed_in_limitation_ratio": "800"})
+
+    # Forced-charge target SOC is a direct percent (x1).
+    await by_param["forced_charging_target_soc_1"].async_set_native_value(75)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"forced_charging_target_soc_1": "75"})
 
 
 async def test_new_selects_write_verified_codes(hass: HomeAssistant):
@@ -482,9 +493,8 @@ async def test_number_config_entities_have_category(hass: HomeAssistant):
     assert cats["forced_charging_target_soc_1"] == EntityCategory.CONFIG
 
 
-async def test_power_cap_and_second_window_controls(hass: HomeAssistant):
-    """Max charge/discharge power and the second forced-charge target are exposed."""
-    from homeassistant.components.number import NumberDeviceClass
+async def test_second_forced_charge_window_control(hass: HomeAssistant):
+    """The second forced-charge target SOC is exposed as a config entity (0-100%)."""
     from homeassistant.const import EntityCategory
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
@@ -498,15 +508,12 @@ async def test_power_cap_and_second_window_controls(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     by_param = {e.param: e for e in added}
 
-    assert {"max_charging_power", "max_discharging_power", "forced_charging_target_soc_2"} <= by_param.keys()
-    # Power caps are POWER-class config entities, sized to the 10 kW model rating.
-    for p in ("max_charging_power", "max_discharging_power"):
-        assert by_param[p]._attr_device_class == NumberDeviceClass.POWER
-        assert by_param[p]._attr_entity_category == EntityCategory.CONFIG
-        assert by_param[p]._attr_native_max_value == 10000
-    # The second forced-charge target mirrors the first (0-100%).
+    assert "forced_charging_target_soc_2" in by_param
     assert by_param["forced_charging_target_soc_2"]._attr_native_max_value == 100
     assert by_param["forced_charging_target_soc_2"]._attr_entity_category == EntityCategory.CONFIG
+    # The dropped max-charge/discharge-power controls are no longer created.
+    assert "max_charging_power" not in by_param
+    assert "max_discharging_power" not in by_param
 
 
 async def test_select_forced_charging_is_config(hass: HomeAssistant):
