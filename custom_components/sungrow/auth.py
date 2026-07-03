@@ -13,6 +13,7 @@ refresh path so the latest tokens are always saved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -64,17 +65,34 @@ class SungrowAuth(Auth):
         """Initialize the auth client with an optional token-persistence callback."""
         super().__init__(*args, **kwargs)
         self._token_updater = token_updater
+        # Created lazily inside the coroutine so it binds to the running event loop.
+        self._refresh_lock: asyncio.Lock | None = None
 
     async def async_get_access_token(self) -> str:
-        """Return a valid access token, persisting any refreshed tokens.
+        """Return a valid access token, persisting any rotated refresh token.
 
-        pysolarcloud assigns a *new* ``tokens`` dict when it refreshes, so an
-        identity comparison reliably detects a rotation without persisting on every
-        call.
+        A single ``Auth`` instance is shared across every plant coordinator plus the
+        control and heartbeat paths, so overlapping calls could each try to spend the
+        same single-use refresh token and provoke a spurious reauth. Serializing the
+        whole body with a lock means the first waiter refreshes and persists while
+        later waiters find the token already fresh (``super()`` re-checks expiry) and
+        no-op. The pinned pysolarcloud 0.7.0 has no lock of its own, so this shim is
+        what protects us; it stays harmless if a future version adds one.
+
+        Rotation is detected by comparing the *refresh-token value* rather than the
+        ``tokens`` dict identity. Identity works only because 0.7.0 reassigns the dict;
+        a future in-place mutation would silently stop persisting and leave an invalid
+        refresh token on the next restart. Comparing the value is robust either way.
         """
-        previous = self.tokens
-        token = await super().async_get_access_token()
-        if self._token_updater is not None and self.tokens is not previous:
-            _LOGGER.debug("Access token refreshed; persisting rotated tokens")
-            self._token_updater(self.tokens)
-        return token
+        # Synchronous check-and-set (no await between) so it is race-free.
+        if self._refresh_lock is None:
+            self._refresh_lock = asyncio.Lock()
+        async with self._refresh_lock:
+            previous = self.tokens
+            token = await super().async_get_access_token()
+            current = self.tokens
+            rotated = previous is None or previous.get("refresh_token") != current.get("refresh_token")
+            if self._token_updater is not None and current is not None and rotated:
+                _LOGGER.debug("Refresh token rotated; persisting updated tokens")
+                self._token_updater(current)
+            return token
