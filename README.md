@@ -78,6 +78,13 @@ App Secret, or redirect URI without deleting and re-adding the integration (your
 entity history is kept). You'll be asked to authorize again in the browser, since
 new credentials or a new region need fresh tokens. The App ID stays fixed.
 
+### Removing the integration
+
+Go to **Settings → Devices & Services → Sungrow iSolarCloud → ⋮ → Delete**. This
+removes the config entry and all of its entities and devices; no files are left
+behind (uninstall the repository from HACS separately if you also want to remove
+the code). Your iSolarCloud account and developer application are unaffected.
+
 ### Sensor mapping
 
 Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
