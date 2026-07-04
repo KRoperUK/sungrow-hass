@@ -1,3 +1,11 @@
+## [3.0.1](https://github.com/KRoperUK/sungrow-hass/compare/v3.0.0...v3.0.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* anonymise device uuid keys in diagnostics per-device realtime ([#128](https://github.com/KRoperUK/sungrow-hass/issues/128)) ([744555b](https://github.com/KRoperUK/sungrow-hass/commit/744555b66cfefbdea7938aaaa424325d87849618)), closes [#122](https://github.com/KRoperUK/sungrow-hass/issues/122)
+* don't create sensors for points with no usable reading ([#132](https://github.com/KRoperUK/sungrow-hass/issues/132)) ([bd0ef0e](https://github.com/KRoperUK/sungrow-hass/commit/bd0ef0e13315da2bccddff5386c39025ec5a6d08))
+
 ## [3.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v2.0.0...v3.0.0) (2026-07-03)
 
 
@@ -82,5 +90,4 @@ Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
 ### Bug Fixes
 
 * persist refreshed tokens and harden setup ([#23](https://github.com/KRoperUK/sungrow-hass/issues/23)) ([2d579fd](https://github.com/KRoperUK/sungrow-hass/commit/2d579fd3af9ca2ba3836fe3ccaa2963683d69d7b)), closes [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#14](https://github.com/KRoperUK/sungrow-hass/issues/14) [#15](https://github.com/KRoperUK/sungrow-hass/issues/15) [#19](https://github.com/KRoperUK/sungrow-hass/issues/19) [#20](https://github.com/KRoperUK/sungrow-hass/issues/20) [#21](https://github.com/KRoperUK/sungrow-hass/issues/21)
-* resolved hassfest warnings ([3b65b4c](https://github.com/KRoperUK/sungrow-hass/commit/3b65b4cb486f5be3bbf66ea34b70b3786013e7a0))
 
