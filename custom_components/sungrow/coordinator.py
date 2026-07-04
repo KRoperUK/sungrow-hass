@@ -44,6 +44,30 @@ def is_auth_error(err: Exception) -> bool:
     return False
 
 
+# Actionable hints for otherwise-opaque iSolarCloud result codes. Both are Developer-
+# Portal whitelist rejections (Appendix 2) that keep retrying (see AUTH_ERRORS), so the
+# raw code would just repeat in the log with no explanation of how to fix it.
+API_ERROR_HINTS = {
+    "E918": (
+        "iSolarCloud rejected the request: this client's IP address is not in your API "
+        "application's IP whitelist (E918). In the iSolarCloud Developer Portal, add this "
+        "machine's public IP to the whitelist or disable it, then it recovers automatically."
+    ),
+    "E919": (
+        "iSolarCloud rejected the request: your account is not in your API application's user "
+        "whitelist (E919). In the iSolarCloud Developer Portal, add your account to the whitelist "
+        "or disable it, then it recovers automatically."
+    ),
+}
+
+
+def describe_api_error(err: Exception) -> str | None:
+    """Return an actionable message for a known iSolarCloud error code, else None."""
+    if isinstance(err, PySolarCloudException) and err.error is not None:
+        return API_ERROR_HINTS.get(err.error)
+    return None
+
+
 class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage fetching data from a single plant."""
 
@@ -95,7 +119,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
             # A timeout arrives here as TimeoutError and is treated as transient.
-            raise UpdateFailed(f"Error communicating with iSolarCloud API: {err}") from err
+            raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
 
         # Refresh the device list so devices added to the plant after setup are
         # picked up at runtime (dynamic-devices) and removed ones can be pruned
