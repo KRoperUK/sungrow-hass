@@ -15,8 +15,11 @@ concurrency:
 
 jobs:
     dev-build:
-        # Only on green CI, and never for the release-please merge commit (which would
-        # publish a pointless rc for a version that was just released).
+        # Only on green CI, and NOT for release-please: neither its bookkeeping PR branch
+        # (release-please--branches--main) nor the "chore(main): release X.Y.Z" commit that
+        # lands on main when that PR merges — either would mint a pointless dev build for a
+        # version that is being/just released. The commit check matches ": release " so it
+        # catches release-please's component form ("chore(main): release") too.
         #
         # SECURITY: this workflow_run job is privileged (contents: write) and checks out
         # the CI'd commit. Restrict it to commits from THIS repo (main + same-repo PR
@@ -27,7 +30,8 @@ jobs:
             github.event_name == 'workflow_dispatch' ||
             (github.event.workflow_run.conclusion == 'success' &&
              github.event.workflow_run.head_repository.full_name == github.repository &&
-             !contains(github.event.workflow_run.head_commit.message, 'chore: release'))
+             !startsWith(github.event.workflow_run.head_branch, 'release-please--') &&
+             !contains(github.event.workflow_run.head_commit.message, ': release '))
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
