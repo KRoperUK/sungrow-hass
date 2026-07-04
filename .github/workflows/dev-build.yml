@@ -1,0 +1,79 @@
+name: Dev Build
+
+on:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+    workflow_dispatch: {}
+
+permissions:
+    contents: write
+
+concurrency:
+    group: dev-build-${{ github.event.workflow_run.head_sha || github.sha }}
+    cancel-in-progress: false
+
+jobs:
+    dev-build:
+        # Only on green CI, and never for the release-please merge commit (which would
+        # publish a pointless rc for a version that was just released).
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            (github.event.workflow_run.conclusion == 'success' &&
+             !contains(github.event.workflow_run.head_commit.message, 'chore: release'))
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+              with:
+                  ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+                  fetch-depth: 0
+
+            - name: Compute next version
+              id: nextver
+              uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
+              with:
+                  github-token: ${{ github.token }}
+                  version-file: custom_components/sungrow/manifest.json
+                  version-path: version
+                  tag-prefix: v
+                  preset: conventionalcommits
+                  skip-on-empty: true
+                  skip-version-file: true
+                  skip-commit: true
+                  skip-tag: true
+                  skip-git-pull: true
+                  git-push: false
+                  output-file: false
+
+            - name: Compute dev tag
+              id: tag
+              env:
+                  SKIPPED: ${{ steps.nextver.outputs.skipped }}
+                  NEXT_VERSION: ${{ steps.nextver.outputs.version }}
+                  HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+                  WORKFLOW_EVENT: ${{ github.event.workflow_run.event || 'push' }}
+                  RUN_ID: ${{ github.run_id }}
+              run: |
+                  # No releasable commits -> no bump; fall back to the current manifest version.
+                  if [ "$SKIPPED" = "true" ] || [ -z "$NEXT_VERSION" ]; then
+                    VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+                  else
+                    VERSION="$NEXT_VERSION"
+                  fi
+                  export VERSION HEAD_BRANCH WORKFLOW_EVENT RUN_ID
+                  TAG=$(bash scripts/compute-dev-tag.sh)
+                  echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+            - name: Create pre-release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ steps.tag.outputs.tag }}
+                  COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+                  HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+              run: |
+                  gh release create "$TAG" \
+                    --prerelease \
+                    --title "$TAG" \
+                    --notes "Development build from \`${HEAD_BRANCH}\` at commit \`${COMMIT_SHA}\`."
