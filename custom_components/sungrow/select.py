@@ -78,6 +78,10 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: Control) -> li
     device_uuid = target.get("uuid")
     if not device_uuid:
         return []
+    # The API returns the uuid as an int; device-registry identifiers must be strings
+    # to match `_known_device_ids` (which keys on `str(uuid)`). Without this the device
+    # is pruned on the first refresh after setup — the "pops in then disappears" bug.
+    device_uuid = str(device_uuid)
     device_name = target.get("device_name") or coordinator.plant_name
     return [
         SungrowDispatchSelect(coordinator, control, device_uuid, device_name, param, meta)

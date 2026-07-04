@@ -113,6 +113,63 @@ async def test_number_setup_falls_back_to_inverter(hass: HomeAssistant):
     assert len(added) == len(DISPATCH_NUMBERS)
 
 
+@pytest.mark.parametrize(("uuid_in", "uuid_str"), [(1000001, "1000001"), ("already-str", "already-str")])
+async def test_dispatch_device_identifier_is_string(hass: HomeAssistant, uuid_in, uuid_str):
+    """Device identifiers are strings even when the API returns an int uuid.
+
+    Regression for the "inverter device pops in then disappears on reload" bug: the
+    API returns device uuids as ints, but `_known_device_ids` keys on `str(uuid)`, so
+    an int identifier never matches and `_async_prune_stale_devices` deletes the
+    just-created device on the next refresh.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": uuid_in, "device_type": DeviceType.INVERTER, "device_name": "Inverter1"}]
+    _setup_entry_data(entry, devices)
+
+    added_numbers: list = []
+    await number_setup_entry(hass, entry, lambda entities: added_numbers.extend(entities))
+    added_selects: list = []
+    await select_setup_entry(hass, entry, lambda entities: added_selects.extend(entities))
+
+    assert added_numbers and added_selects
+    for entity in [*added_numbers, *added_selects]:
+        assert entity.device_uuid == uuid_str
+        assert entity._attr_device_info["identifiers"] == {(DOMAIN, uuid_str)}
+        assert entity._attr_device_info["via_device"] == (DOMAIN, "12345")
+
+
+async def test_dispatch_device_survives_prune_with_int_uuid(hass: HomeAssistant):
+    """A dispatch device built from an int uuid is not pruned on the next refresh.
+
+    End-to-end guard: registers the device with the exact identifiers the entity
+    produces, then runs the prune that fires after every coordinator refresh. Before
+    the fix the int-vs-str mismatch removed it (pop-in-then-disappear).
+    """
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.sungrow import _async_prune_stale_devices
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="app")
+    entry.add_to_hass(hass)
+    devices = [{"uuid": 1000001, "device_type": DeviceType.INVERTER, "device_name": "Inverter1"}]
+    _setup_entry_data(entry, devices)
+
+    added: list = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert added
+    identifiers = added[0]._attr_device_info["identifiers"]
+
+    registry = dr.async_get(hass)
+    plant = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers={(DOMAIN, "12345")})
+    inverter = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers=identifiers)
+
+    _async_prune_stale_devices(hass, entry)
+
+    assert registry.async_get(plant.id) is not None
+    assert registry.async_get(inverter.id) is not None  # removed before the fix
+
+
 async def test_number_setup_no_devices(hass: HomeAssistant):
     """No dispatch numbers are created when no dispatchable devices are found."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
