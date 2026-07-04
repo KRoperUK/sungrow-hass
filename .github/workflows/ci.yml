@@ -14,7 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect whether the change touches the integration itself. Non-impacting changes
+  # (docs, README, other workflows, etc.) skip the heavy jobs below — which, because a
+  # job skipped via `if` reports "success", still satisfies the required checks so the
+  # PR stays mergeable, but wastes no compute and mints no dev build.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      component: ${{ steps.filter.outputs.component }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: filter
+        with:
+          filters: |
+            component:
+              - 'custom_components/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'requirements_test.txt'
+              - 'hacs.json'
+              - '.github/workflows/ci.yml'
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.component == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,6 +64,8 @@ jobs:
         run: ruff format --check custom_components/ tests/
 
   test:
+    needs: changes
+    if: needs.changes.outputs.component == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -89,6 +118,8 @@ jobs:
           files: junit.xml
 
   hacs_validate:
+    needs: changes
+    if: needs.changes.outputs.component == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -102,11 +133,16 @@ jobs:
       - name: Hassfest validation
         uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c # master
 
+  # Branch dev builds — a same-repo PR that changed the component, once CI is green.
+  # Fork PRs get a read-only token (release would fail) and this job holds
+  # contents: write, so keep it to same-repo. Never for the release-please PR branch.
   dev-release:
-    # Only run for same-repo PRs: fork PRs get a read-only token (the release
-    # would fail) and this job holds contents: write, so keep it off forks.
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [lint, test, hacs_validate]
+    needs: [changes, lint, test, hacs_validate]
+    if: >-
+      needs.changes.outputs.component == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -114,16 +150,11 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Check out the immutable head SHA, not the branch name: a CI run can
-          # race with the PR merging, which deletes the branch, after which
-          # github.head_ref no longer resolves ("could not be found").
-          # fetch-depth: 0 gives full history + tags so the changelog action can
-          # run with skip-git-pull (it doesn't need to be on a branch).
+          # Immutable head SHA (the branch can be deleted by a racing merge), with
+          # full history + tags for the changelog action.
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      # Compute the next (unreleased) version from conventional commits so the PR
-      # dev build is a pre-release of the upcoming version.
       - name: Compute next version
         id: nextver
         uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
@@ -138,42 +169,104 @@ jobs:
           skip-commit: true
           skip-tag: true
           skip-git-pull: true
-          # Compute-only: never commit/tag/push. Without this the action still
-          # tries to `git push` at the end and fails in a detached HEAD.
           git-push: false
           output-file: false
 
-      - name: Build dev tag
+      - name: Compute dev tag
         id: tag
-        # Pass the branch name via env, never inline ${{ github.head_ref }} into
-        # the script — an attacker-controlled branch name would be shell-injected.
         env:
-          BRANCH_RAW: ${{ github.head_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SKIPPED: ${{ steps.nextver.outputs.skipped }}
           NEXT_VERSION: ${{ steps.nextver.outputs.version }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          # No releasable commits -> no bump; fall back to the manifest version.
-          if [ "$SKIPPED" = "true" ]; then
+          if [ "$SKIPPED" = "true" ] || [ -z "$NEXT_VERSION" ]; then
             VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
           else
             VERSION="$NEXT_VERSION"
           fi
-          SHA="${HEAD_SHA::7}"
-          BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
-          TAG="dev-${BRANCH}-v${VERSION}-${SHA}"
+          WORKFLOW_EVENT=pull_request
+          export VERSION HEAD_BRANCH RUN_ID WORKFLOW_EVENT
+          TAG=$(bash scripts/compute-dev-tag.sh)
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Create pre-release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
           BRANCH_RAW: ${{ github.head_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          COMMIT_SHA: ${{ github.sha }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           gh release create "$TAG" \
             --prerelease \
             --title "$TAG" \
             --notes "Development build from branch \`${BRANCH_RAW}\` (PR #${PR_NUMBER}) at commit \`${COMMIT_SHA}\`." \
+            || echo "Release already exists for this tag, skipping."
+
+  # Main release-candidate dev builds — a push to main that changed the component,
+  # once CI is green. Never for the "chore(main): release X.Y.Z" commit (matched via
+  # ": release ") which release-please lands when its PR merges.
+  dev-release-main:
+    needs: [changes, lint, test, hacs_validate]
+    if: >-
+      needs.changes.outputs.component == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !contains(github.event.head_commit.message, ': release ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: nextver
+        uses: TriPSs/conventional-changelog-action@952b14bbc4be87e8458a6ac5926fc655608b1b19 # v6
+        with:
+          github-token: ${{ github.token }}
+          version-file: custom_components/sungrow/manifest.json
+          version-path: version
+          tag-prefix: v
+          preset: conventionalcommits
+          skip-on-empty: true
+          skip-version-file: true
+          skip-commit: true
+          skip-tag: true
+          skip-git-pull: true
+          git-push: false
+          output-file: false
+
+      - name: Compute dev tag
+        id: tag
+        env:
+          SKIPPED: ${{ steps.nextver.outputs.skipped }}
+          NEXT_VERSION: ${{ steps.nextver.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ "$SKIPPED" = "true" ] || [ -z "$NEXT_VERSION" ]; then
+            VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
+          else
+            VERSION="$NEXT_VERSION"
+          fi
+          HEAD_BRANCH=main
+          WORKFLOW_EVENT=push
+          export VERSION RUN_ID HEAD_BRANCH WORKFLOW_EVENT
+          TAG=$(bash scripts/compute-dev-tag.sh)
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          gh release create "$TAG" \
+            --prerelease \
+            --title "$TAG" \
+            --notes "Release-candidate build from \`main\` at commit \`${COMMIT_SHA}\`." \
             || echo "Release already exists for this tag, skipping."
