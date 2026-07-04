@@ -39,6 +39,12 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
     Called both at setup and on every coordinator update, so points/devices that
     appear after setup are surfaced at runtime (dynamic-devices). The caller
     de-duplicates by unique_id, so returning the complete set each time is fine.
+
+    Points with no usable reading are skipped: the cloud returns the *full* measure-
+    point catalogue regardless of installed hardware, so a PV-only plant still gets
+    every battery/EMS/EV point back — as ``null`` or a ``"--"`` placeholder — which
+    would otherwise litter the UI with permanently "Unknown" entities. Because this
+    builder re-runs every poll, a point that later reports real data is added then.
     """
     sensors: list[SungrowSensor] = []
 
@@ -46,11 +52,12 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
     # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
     if coordinator.data:
         for point_code, point_data in coordinator.data.items():
-            sensors.append(
-                SungrowSensor(
-                    coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
-                )
+            sensor = SungrowSensor(
+                coordinator, point_code, coordinator.plant_id, coordinator.plant_name, point_data, console_url
             )
+            if sensor.native_value is None:
+                continue
+            sensors.append(sensor)
 
     # Per-device sensors (opt-in, issue #74): surface points reported per device
     # (EV chargers, meters, extra batteries). Points already present at the plant
@@ -68,9 +75,12 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
             for point_code, point_data in points.items():
                 if point_code in plant_codes:
                     continue
-                sensors.append(
-                    SungrowDeviceSensor(coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data)
+                sensor = SungrowDeviceSensor(
+                    coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data
                 )
+                if sensor.native_value is None:
+                    continue
+                sensors.append(sensor)
 
     return sensors
 
