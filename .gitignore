@@ -27,3 +27,9 @@ htmlcov/
 
 # Local Environment Variables
 .env
+
+# Docs site build output
+/site/
+
+# Local-only AI planning artifacts (specs/plans) — kept off the repo and the docs site
+docs/superpowers/
