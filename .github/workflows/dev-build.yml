@@ -17,9 +17,16 @@ jobs:
     dev-build:
         # Only on green CI, and never for the release-please merge commit (which would
         # publish a pointless rc for a version that was just released).
+        #
+        # SECURITY: this workflow_run job is privileged (contents: write) and checks out
+        # the CI'd commit. Restrict it to commits from THIS repo (main + same-repo PR
+        # branches) — never a fork — so an untrusted fork PR can't get its code executed
+        # with the write token (CodeQL actions/untrusted-checkout). Fork PRs simply get no
+        # dev build; the maintainer can build them by pushing the branch to this repo.
         if: >-
             github.event_name == 'workflow_dispatch' ||
             (github.event.workflow_run.conclusion == 'success' &&
+             github.event.workflow_run.head_repository.full_name == github.repository &&
              !contains(github.event.workflow_run.head_commit.message, 'chore: release'))
         runs-on: ubuntu-latest
         timeout-minutes: 10
@@ -27,7 +34,8 @@ jobs:
             - name: Checkout
               uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
               with:
-                  ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+                  # Immutable SHA of the commit that passed CI (not the movable branch ref).
+                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
                   fetch-depth: 0
 
             - name: Compute next version
