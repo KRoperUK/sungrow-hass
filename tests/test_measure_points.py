@@ -268,6 +268,19 @@ def test_daily_and_reset_hour_timers_stay_measurement(point_id):
     assert mp.POINT_CATALOG[point_id].state_class == M
 
 
+@pytest.mark.parametrize("point_id", ["83019", "83419"])
+def test_capacity_ratio_points_are_numeric_measurement(point_id):
+    # "X / Installed Y" ratios arrive as a bare 0–1 fraction with no unit. Classify
+    # them numeric (None, MEASUREMENT) so they coerce to a float and graph instead of
+    # becoming a text sensor; the sensor platform presents them as a percentage.
+    assert point_id in mp.PERCENT_FRACTION_POINT_IDS
+    assert mp.POINT_CATALOG[point_id].device_class is None
+    assert mp.POINT_CATALOG[point_id].state_class == M
+    # The override wins whether or not the API sends a (blank) unit at runtime.
+    assert mp.resolve_classification("", "power_fraction", point_id) == (None, M)
+    assert mp.resolve_classification(None, "power_fraction", point_id) == (None, M)
+
+
 # ---------------------------------------------------------------------------
 # resolve_name
 # ---------------------------------------------------------------------------
