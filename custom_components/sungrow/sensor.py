@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -12,7 +13,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
 from .coordinator import SungrowPlantCoordinator
-from .measure_points import resolve_classification, resolve_enum_options, resolve_enum_value, resolve_name
+from .measure_points import (
+    PERCENT_FRACTION_POINT_IDS,
+    resolve_classification,
+    resolve_enum_options,
+    resolve_enum_value,
+    resolve_name,
+)
 
 # Sensors are read-only and updated in bulk by the coordinator, so no per-entity
 # write parallelism limit is needed.
@@ -118,6 +125,9 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
     has_entity_name = True
     _point_id: str = ""
+    # Set for unit-less capacity-factor ratios (PERCENT_FRACTION_POINT_IDS): the raw
+    # 0–1 fraction is presented as a percentage, so native_value scales it ×100.
+    _scale_to_percent: bool = False
 
     def __init__(
         self,
@@ -175,10 +185,16 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = device_class
         self._attr_state_class = state_class
 
+        # Unit-less capacity-factor ratios (e.g. Plant Power / Installed Power) arrive
+        # as a bare 0–1 fraction; present them as a percentage (see native_value).
+        self._scale_to_percent = point_id in PERCENT_FRACTION_POINT_IDS
+
         if device_class == SensorDeviceClass.ENUM:
             # Enum sensors carry documented options and no unit/state class.
             self._attr_options = list(resolve_enum_options(point_id) or [])
             self._attr_native_unit_of_measurement = None
+        elif self._scale_to_percent:
+            self._attr_native_unit_of_measurement = PERCENTAGE
         else:
             self._attr_native_unit_of_measurement = unit if unit else None
 
@@ -212,13 +228,15 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if self._attr_device_class is None and self._attr_state_class is None:
             return str(val)
         try:
-            return float(val)
+            num = float(val)
         except (ValueError, TypeError):
             # The sensor is classified numeric (a device or state class is set) but
             # the value can't be coerced (e.g. "unknown"). Return None rather than a
             # raw string, which HA would reject as an invalid state and which would
             # pollute long-term statistics (issue #113).
             return None
+        # Capacity-factor ratios are reported as a 0–1 fraction but shown as "%".
+        return num * 100 if self._scale_to_percent else num
 
 
 class SungrowDeviceSensor(SungrowSensor):
