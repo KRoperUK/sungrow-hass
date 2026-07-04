@@ -31,7 +31,7 @@ from .const import (
     DOMAIN,
     GATEWAYS,
 )
-from .coordinator import SungrowPlantCoordinator, is_auth_error
+from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
 PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 
@@ -188,7 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         if is_auth_error(err):
             raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
         # A timeout arrives here as TimeoutError and is treated as transient.
-        raise ConfigEntryNotReady(f"Unable to fetch plants from iSolarCloud: {err}") from err
+        raise ConfigEntryNotReady(describe_api_error(err) or f"Unable to fetch plants from iSolarCloud: {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
