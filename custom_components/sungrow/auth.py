@@ -23,30 +23,25 @@ _LOGGER = logging.getLogger(__name__)
 
 # Errors raised by pysolarcloud that indicate the stored credentials/tokens are no
 # longer usable and the user must re-authorize (as opposed to a transient outage).
-# "token_refresh_failed" is the code on pysolarcloud>=0.6.0's TokenRefreshError
-# (a PySolarCloudException), raised when a refresh returns no access token.
+# These are the errors pysolarcloud does NOT surface as a typed ``AuthError``:
+# "token_refresh_failed" (its ``TokenRefreshError``, raised when a refresh returns no
+# access token) and the OAuth token-exchange failures ("invalid_grant"/"invalid_token")
+# and "auth_not_initialised". ``is_auth_error`` matches these by string.
 #
-# The "E*" codes are the documented iSolarCloud OpenAPI result codes for dead or
-# unauthorized credentials (E00003 token invalid/expired, E900 unauthorized,
-# E912/E914 bad or mismatched app key). pysolarcloud >=0.8.0 raises
-# PySolarCloudException carrying the API result_code on ``.error``, so these now
-# reliably drive reauth.
+# The documented dead-credential *result codes* (E00003, E900, E912, E914) are NOT listed
+# here: pysolarcloud >=0.9.0 raises them as a typed ``AuthError`` (KRoperUK/pysolarcloud#23),
+# which ``is_auth_error`` catches via ``isinstance`` — so the integration no longer
+# duplicates the library's code list and picks up any new auth codes automatically.
 #
-# Deliberately NOT here (kept transient/retry, not reauth): the quota/throttle codes
-# E998/E999, and the whitelist rejections E918 (IP not whitelisted) / E919 (user not
-# whitelisted). A whitelist rejection is a Developer-Portal configuration issue that
-# re-authorizing cannot fix, so it must keep retrying until the whitelist is corrected;
-# ``describe_api_error`` (coordinator.py) turns those codes into an actionable log hint.
+# The whitelist rejections E918 / E919 are handled separately (``WHITELIST_ERRORS`` in
+# coordinator.py): a whitelist rejection is a Developer-Portal config issue that reauth
+# cannot fix, so it must keep retrying — even though 0.9.0 types E919 as ``AuthError``.
 AUTH_ERRORS = frozenset(
     {
         "auth_not_initialised",
         "invalid_grant",
         "invalid_token",
         "token_refresh_failed",
-        "E00003",
-        "E900",
-        "E912",
-        "E914",
     }
 )
 

@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pysolarcloud import PySolarCloudException
+from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import Plants
 
 from .auth import AUTH_ERRORS
@@ -30,23 +30,38 @@ MAX_POLL_TIMEOUT = 60
 _LOGGER = logging.getLogger(__name__)
 
 
+# Developer-Portal whitelist rejections (Appendix 2). These must keep RETRYING rather
+# than trigger reauth — re-authorizing can't add an IP/user to the app's whitelist — even
+# though pysolarcloud >=0.9.0 types E919 as an ``AuthError``. Guarded ahead of the
+# ``isinstance`` check in ``is_auth_error`` so that typing never overrides this.
+WHITELIST_ERRORS = frozenset({"E918", "E919"})
+
+
 def is_auth_error(err: Exception) -> bool:
     """Return True if the error means the stored credentials are no longer valid.
 
-    A failed token refresh raises ``PySolarCloudException`` (``TokenRefreshError``,
-    error ``token_refresh_failed``), and explicit auth problems raise
-    ``PySolarCloudException`` with a known error code — both matched via
-    ``AUTH_ERRORS``. All require the user to re-authorize rather than waiting for a
-    transient outage to clear.
+    pysolarcloud >=0.9.0 raises a typed ``AuthError`` for the documented dead-credential
+    result codes (E00003/E900/E912/E914 — E919 too, but that is a whitelist code handled
+    below), so those are matched via ``isinstance`` and need no per-code list here. The
+    non-typed failures — a failed token refresh (``TokenRefreshError``), the OAuth
+    ``invalid_grant``/``invalid_token`` errors, and ``auth_not_initialised`` — are matched
+    by string via ``AUTH_ERRORS``. All require the user to re-authorize.
+
+    Whitelist rejections (E918/E919) are explicitly excluded: they are Developer-Portal
+    config issues that reauth cannot fix, so they stay transient (retry) despite E919's
+    ``AuthError`` typing.
     """
-    if isinstance(err, PySolarCloudException):
-        return err.error in AUTH_ERRORS
-    return False
+    if not isinstance(err, PySolarCloudException):
+        return False
+    if err.error in WHITELIST_ERRORS:
+        return False
+    return isinstance(err, AuthError) or err.error in AUTH_ERRORS
 
 
-# Actionable hints for otherwise-opaque iSolarCloud result codes. Both are Developer-
-# Portal whitelist rejections (Appendix 2) that keep retrying (see AUTH_ERRORS), so the
-# raw code would just repeat in the log with no explanation of how to fix it.
+# Actionable hints for otherwise-opaque iSolarCloud result codes (Appendix 2). These all
+# keep retrying rather than reauth, so without a hint the raw code would just repeat in the
+# log with no explanation of the cause or fix. Covers the whitelist rejections (E918/E919)
+# and the API quota limits (E998/E999, pysolarcloud's ``RateLimitError``).
 API_ERROR_HINTS = {
     "E918": (
         "iSolarCloud rejected the request: this client's IP address is not in your API "
@@ -57,6 +72,15 @@ API_ERROR_HINTS = {
         "iSolarCloud rejected the request: your account is not in your API application's user "
         "whitelist (E919). In the iSolarCloud Developer Portal, add your account to the whitelist "
         "or disable it, then it recovers automatically."
+    ),
+    "E998": (
+        "iSolarCloud rejected the request: the monthly API call limit has been reached (E998). "
+        "The integration will keep retrying; it recovers when the quota resets."
+    ),
+    "E999": (
+        "iSolarCloud rejected the request: the hourly API call limit has been reached (E999). "
+        "The integration will keep retrying; increase the polling interval in the integration "
+        "options to make fewer calls."
     ),
 }
 
