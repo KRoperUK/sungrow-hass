@@ -293,6 +293,30 @@ class TestSungrowSensor:
         assert sensor._attr_device_class == SensorDeviceClass.POWER_FACTOR
         assert sensor.native_value == 0.98
 
+    def test_capacity_ratio_presented_as_percent(self):
+        """A 0–1 capacity-factor ratio (83019) is shown as a percentage, value ×100.
+
+        iSolarCloud reports 'Plant Power / Installed Power' as a bare fraction with no
+        unit (e.g. 0.3936). The sensor presents it as '%' scaled to 39.36 so it reads
+        as "39.36 %" and graphs, instead of an opaque decimal text sensor.
+        """
+        data = {"power_fraction": {"id": "83019", "code": "power_fraction", "value": "0.3936", "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power_fraction", "123", "Plant", data["power_fraction"])
+
+        assert sensor._attr_native_unit_of_measurement == "%"
+        assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+        assert sensor._attr_device_class is None
+        assert sensor.native_value == pytest.approx(39.36)
+
+    def test_capacity_ratio_zero_stays_zero_percent(self):
+        """A zero ratio (night) reads as 0 %, not None or text."""
+        data = {"power_fraction": {"id": "83019", "code": "power_fraction", "value": "0", "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(coordinator, "power_fraction", "123", "Plant", data["power_fraction"])
+
+        assert sensor.native_value == 0.0
+
     def test_no_raw_extra_state_attributes(self):
         """The raw API point payload is not exposed as state attributes (recorder bloat)."""
         point_data = {"code": "power", "value": "5.0", "unit": "kW", "name": "Power"}

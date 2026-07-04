@@ -212,6 +212,18 @@ _STORED_ENERGY_POINT_IDS = frozenset(
 # Hour units whose "Total ..." counters accumulate monotonically.
 _HOUR_UNITS = frozenset({"h"})
 
+# "X / Installed Y" capacity-factor ratios. iSolarCloud reports these as a bare
+# 0–1 fraction with no unit (e.g. 0.3936), which reads as an opaque decimal even
+# though it is semantically a percentage of installed capacity. Classified numeric
+# (MEASUREMENT) here so they graph instead of becoming a text sensor; the sensor
+# platform additionally presents them as "%" with the value scaled ×100 (39.36 %).
+PERCENT_FRACTION_POINT_IDS = frozenset(
+    {
+        "83019",  # Plant Power / Installed Power
+        "83419",  # Daily Highest Inverter Power / Installed Capacity
+    }
+)
+
 
 def _build_overrides() -> dict[str, _ClassPair]:
     """Precompute per-point overrides that must beat the unit-based classifier."""
@@ -225,6 +237,10 @@ def _build_overrides() -> dict[str, _ClassPair]:
             continue
         if unit.strip().lower() in _HOUR_UNITS and name.lower().startswith("total"):
             overrides[point_id] = (SensorDeviceClass.DURATION, _TOTAL_INCREASING)
+    # Unit-less capacity-factor ratios -> numeric (None, MEASUREMENT) so they are
+    # coerced to a float and graph; the "%" unit + ×100 scaling is applied in sensor.py.
+    for point_id in PERCENT_FRACTION_POINT_IDS:
+        overrides.setdefault(point_id, (None, _MEASUREMENT))
     return overrides
 
 
