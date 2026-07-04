@@ -355,6 +355,35 @@ async def test_sensor_setup_skips_plant_with_no_data(hass: HomeAssistant):
     assert added == []
 
 
+async def test_sensor_setup_skips_points_with_no_usable_reading(hass: HomeAssistant):
+    """Points that render as Unknown (null / blank / "--" placeholder) are not created.
+
+    The cloud returns the full measure-point catalogue regardless of installed
+    hardware, so a PV-only plant gets battery/EMS points back as null or a "--"
+    placeholder. Those would render permanently "Unknown", so they are skipped.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with(
+        "12345",
+        "Plant A",
+        {
+            "total_active_power": {"value": "5.0", "unit": "kW", "name": "Total Active Power"},  # real -> kept
+            "daily_yield": {"value": "0", "unit": "kWh", "name": "Daily Yield"},  # a real zero -> kept
+            "battery_power": {"value": "--", "unit": "W", "name": "Battery Power"},  # placeholder -> skipped
+            "battery_level_soc": {"value": None, "unit": "%", "name": "SOC"},  # null -> skipped
+            "ems_battery_power": {"value": "unknown", "unit": "kW", "name": "EMS"},  # unknown -> skipped
+        },
+    )
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert {e.point_code for e in added} == {"total_active_power", "daily_yield"}
+
+
 # ---------------------------------------------------------------------------
 # Per-device sensors (issue #74)
 # ---------------------------------------------------------------------------
@@ -424,6 +453,34 @@ async def test_sensor_dynamic_add_on_new_point(hass: HomeAssistant):
     for cb in listeners:
         cb()
     assert len(added) == 2
+
+
+async def test_sensor_dynamic_add_when_placeholder_becomes_real(hass: HomeAssistant):
+    """A point skipped as Unknown at setup is added once it starts reporting real data."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with(
+        "12345",
+        "Plant A",
+        {
+            "total_active_power": {"value": "5.0", "unit": "kW"},
+            "battery_power": {"value": "--", "unit": "W", "name": "Battery Power"},  # skipped at setup
+        },
+    )
+    listeners: list = []
+    coordinator.async_add_listener = lambda cb, *a: listeners.append(cb) or (lambda: None)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert {e.point_code for e in added} == {"total_active_power"}
+
+    # The battery starts reporting a real value on a later poll.
+    coordinator.data = {**coordinator.data, "battery_power": {"value": "1500", "unit": "W", "name": "Battery Power"}}
+    for cb in listeners:
+        cb()
+    assert {e.point_code for e in added} == {"total_active_power", "battery_power"}
 
 
 async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):
