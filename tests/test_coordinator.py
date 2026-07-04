@@ -7,7 +7,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pysolarcloud import PySolarCloudException
+from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType
 
 from custom_components.sungrow.const import (
@@ -62,14 +62,20 @@ def test_is_auth_error_transient():
 
 @pytest.mark.parametrize("code", ["E00003", "E900", "E912", "E914"])
 def test_is_auth_error_documented_reauth_codes(code):
-    """The documented API auth/permission error codes trigger reauth (issue #109)."""
-    assert is_auth_error(PySolarCloudException({"error": code})) is True
+    """Documented dead-credential codes are typed AuthError (0.9.0) and trigger reauth (#109/#131).
+
+    Built via ``from_response`` — the real raise path — so the exception is an actual
+    ``AuthError`` caught by ``isinstance``, not just a code-list match.
+    """
+    err = PySolarCloudException.from_response({"result_code": code})
+    assert isinstance(err, AuthError)
+    assert is_auth_error(err) is True
 
 
 @pytest.mark.parametrize("code", ["E998", "E999"])
 def test_is_auth_error_quota_codes_are_transient(code):
-    """API quota/throttle codes are transient and must NOT trigger reauth (issue #109)."""
-    assert is_auth_error(PySolarCloudException({"error": code})) is False
+    """API quota/throttle codes (RateLimitError in 0.9.0) are transient, never reauth (#109)."""
+    assert is_auth_error(PySolarCloudException.from_response({"result_code": code})) is False
 
 
 @pytest.mark.parametrize("code", ["E918", "E919"])
@@ -79,10 +85,20 @@ def test_is_auth_error_whitelist_codes_are_transient(code):
     assert is_auth_error(PySolarCloudException({"error": code})) is False
 
 
-def test_describe_api_error_whitelist_hints():
-    """Whitelist codes get an actionable hint; other errors get none."""
+def test_is_auth_error_e919_stays_transient_despite_autherror_typing():
+    """pysolarcloud 0.9.0 types E919 as AuthError, but it's a whitelist rejection — reauth
+    can't add a user to the whitelist, so it must stay transient (#131 must not regress #133)."""
+    err = PySolarCloudException.from_response({"result_code": "E919"})
+    assert isinstance(err, AuthError)  # the typing that would otherwise force reauth
+    assert is_auth_error(err) is False  # ...guarded so it keeps retrying
+
+
+def test_describe_api_error_hints():
+    """Whitelist and quota codes get an actionable hint; other errors get none."""
     assert "IP whitelist" in (describe_api_error(PySolarCloudException({"error": "E918"})) or "")
     assert "user whitelist" in (describe_api_error(PySolarCloudException({"error": "E919"})) or "")
+    assert "monthly" in (describe_api_error(PySolarCloudException({"error": "E998"})) or "")
+    assert "hourly" in (describe_api_error(PySolarCloudException({"error": "E999"})) or "")
     assert describe_api_error(PySolarCloudException({"error": "E900"})) is None
     assert describe_api_error(ConnectionError("boom")) is None
 
