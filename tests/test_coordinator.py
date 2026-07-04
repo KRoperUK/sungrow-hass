@@ -16,7 +16,7 @@ from custom_components.sungrow.const import (
     CONF_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
 )
-from custom_components.sungrow.coordinator import SungrowPlantCoordinator, is_auth_error
+from custom_components.sungrow.coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
 from .conftest import MOCK_REALTIME_DATA
 
@@ -60,7 +60,7 @@ def test_is_auth_error_transient():
     assert is_auth_error(PySolarCloudException({"error": "server_busy"})) is False
 
 
-@pytest.mark.parametrize("code", ["E00003", "E900", "E919", "E912", "E914"])
+@pytest.mark.parametrize("code", ["E00003", "E900", "E912", "E914"])
 def test_is_auth_error_documented_reauth_codes(code):
     """The documented API auth/permission error codes trigger reauth (issue #109)."""
     assert is_auth_error(PySolarCloudException({"error": code})) is True
@@ -70,6 +70,21 @@ def test_is_auth_error_documented_reauth_codes(code):
 def test_is_auth_error_quota_codes_are_transient(code):
     """API quota/throttle codes are transient and must NOT trigger reauth (issue #109)."""
     assert is_auth_error(PySolarCloudException({"error": code})) is False
+
+
+@pytest.mark.parametrize("code", ["E918", "E919"])
+def test_is_auth_error_whitelist_codes_are_transient(code):
+    """Whitelist rejections (IP/user) are Developer-Portal config issues re-auth can't fix,
+    so they must keep retrying rather than trigger reauth."""
+    assert is_auth_error(PySolarCloudException({"error": code})) is False
+
+
+def test_describe_api_error_whitelist_hints():
+    """Whitelist codes get an actionable hint; other errors get none."""
+    assert "IP whitelist" in (describe_api_error(PySolarCloudException({"error": "E918"})) or "")
+    assert "user whitelist" in (describe_api_error(PySolarCloudException({"error": "E919"})) or "")
+    assert describe_api_error(PySolarCloudException({"error": "E900"})) is None
+    assert describe_api_error(ConnectionError("boom")) is None
 
 
 def test_is_auth_error_unrelated_code_is_transient():
@@ -119,6 +134,16 @@ async def test_update_data_auth_error_raises_config_entry_auth_failed(hass: Home
 
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
     with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_update_data_whitelist_error_surfaces_hint(hass: HomeAssistant):
+    """An IP-whitelist rejection retries (UpdateFailed) with an actionable message, not reauth."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "E918"}))
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(UpdateFailed, match="IP whitelist"):
         await coordinator._async_update_data()
 
 

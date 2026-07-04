@@ -27,11 +27,16 @@ _LOGGER = logging.getLogger(__name__)
 # (a PySolarCloudException), raised when a refresh returns no access token.
 #
 # The "E*" codes are the documented iSolarCloud OpenAPI result codes for dead or
-# unauthorized credentials (E00003 token invalid/expired, E900 unauthorized, E919
-# de-whitelisted, E912/E914 bad or mismatched app key). pysolarcloud >=0.8.0 raises
+# unauthorized credentials (E00003 token invalid/expired, E900 unauthorized,
+# E912/E914 bad or mismatched app key). pysolarcloud >=0.8.0 raises
 # PySolarCloudException carrying the API result_code on ``.error``, so these now
-# reliably drive reauth; the quota/throttle codes E998/E999 are deliberately excluded
-# because they are transient and must keep retrying (UpdateFailed), not reauth.
+# reliably drive reauth.
+#
+# Deliberately NOT here (kept transient/retry, not reauth): the quota/throttle codes
+# E998/E999, and the whitelist rejections E918 (IP not whitelisted) / E919 (user not
+# whitelisted). A whitelist rejection is a Developer-Portal configuration issue that
+# re-authorizing cannot fix, so it must keep retrying until the whitelist is corrected;
+# ``describe_api_error`` (coordinator.py) turns those codes into an actionable log hint.
 AUTH_ERRORS = frozenset(
     {
         "auth_not_initialised",
@@ -40,7 +45,6 @@ AUTH_ERRORS = frozenset(
         "token_refresh_failed",
         "E00003",
         "E900",
-        "E919",
         "E912",
         "E914",
     }
