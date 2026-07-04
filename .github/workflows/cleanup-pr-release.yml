@@ -22,10 +22,11 @@ jobs:
           BRANCH_RAW: ${{ github.head_ref }}
         run: |
           BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
-          TAG_PREFIX="dev-${BRANCH}-v"
-          echo "Deleting pre-releases with tag prefix: ${TAG_PREFIX}"
+          # Branch dev tags are dev-v<ver>-<branch>-<run_id>, so the branch is in the
+          # middle — match by regex anchored on the known, sanitised branch name.
+          echo "Deleting dev builds for branch: ${BRANCH}"
           gh release list --limit 1000 --json tagName,isPrerelease \
-            --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${TAG_PREFIX}\"))) | .tagName" \
+            --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+-${BRANCH}-[0-9]+$\"))) | .tagName" \
           | while read -r tag; do
               echo "Deleting release and tag: ${tag}"
               gh release delete "$tag" --yes --cleanup-tag

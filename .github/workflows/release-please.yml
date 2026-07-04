@@ -1,0 +1,42 @@
+name: Release Please
+
+on:
+    push:
+        branches: [main]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: release-please
+    cancel-in-progress: false
+
+jobs:
+    release-please:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Run release-please
+              id: release
+              uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+              with:
+                  token: ${{ github.token }}
+                  config-file: release-please-config.json
+                  manifest-file: .release-please-manifest.json
+
+            # A published release supersedes every dev build. Prune them all so only
+            # the real release remains (rc builds + any leftover branch builds).
+            - name: Prune all dev pre-releases on a real release
+              if: ${{ steps.release.outputs.release_created == 'true' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+              run: |
+                  echo "Release created; deleting all dev-* pre-releases."
+                  gh release list --limit 1000 --json tagName,isPrerelease \
+                    --jq '.[] | select(.isPrerelease and (.tagName | startswith("dev-"))) | .tagName' \
+                  | while read -r tag; do
+                      echo "Deleting ${tag}"
+                      gh release delete "$tag" --yes --cleanup-tag
+                    done
