@@ -71,6 +71,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "device_fault": {
+        "name": "Fault"
+      }
+    },
     "number": {
       "charge_discharge_power": {
         "name": "Charge/Discharge Power"
