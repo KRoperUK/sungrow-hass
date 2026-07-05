@@ -28,6 +28,13 @@ from .const import (
 # the coordinator indefinitely nor let successive polls pile up.
 MAX_POLL_TIMEOUT = 60
 
+# How long (seconds) to keep serving the last-good data — staying "available" — when
+# polls fail transiently, before marking entities unavailable. Rides out the
+# intermittent cloud/device hiccups that would otherwise flap every entity several
+# times a minute (#152). iSolarCloud only updates every ~5 min, so a few minutes of
+# staleness is harmless.
+AVAILABILITY_GRACE_SECONDS = 900
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -121,6 +128,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._poll_timeout: float = min(scan_seconds, MAX_POLL_TIMEOUT)
         # Monotonic timestamp of the last device-list refresh; None until first poll.
         self._last_device_refresh: float | None = None
+        # Monotonic timestamp of the last successful realtime poll; drives the
+        # availability grace window (#152). None until the first success.
+        self._last_successful_update: float | None = None
         self.devices: list[dict[str, Any]] = list(devices or [])
         self.extra_measure_points: dict[str, str] = dict(config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {}))
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
@@ -150,8 +160,17 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+            # Transient failure (a timeout arrives here as TimeoutError). Rather than flap
+            # every entity to "unavailable" on a brief cloud hiccup, keep serving the
+            # last-good data while a recent success is still within the grace window (#152);
+            # only give up once the data would be genuinely stale.
+            if self.data is not None and self._within_availability_grace():
+                _LOGGER.debug("Transient poll failure for %s; keeping last-good data: %s", self.plant_name, err)
+                return self.data
             # A timeout arrives here as TimeoutError and is treated as transient.
             raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
+
+        self._last_successful_update = self.hass.loop.time()
 
         # Refresh the device list so devices added to the plant after setup are
         # picked up at runtime (dynamic-devices) and removed ones can be pruned
@@ -163,6 +182,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         return cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
+
+    def _within_availability_grace(self) -> bool:
+        """True while the last successful poll is recent enough to keep serving stale data."""
+        if self._last_successful_update is None:
+            return False
+        return (self.hass.loop.time() - self._last_successful_update) < AVAILABILITY_GRACE_SECONDS
 
     async def _async_maybe_refresh_devices(self) -> None:
         """Refresh the device list periodically rather than on every poll (saves quota).
