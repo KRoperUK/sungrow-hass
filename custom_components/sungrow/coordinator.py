@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pysolarcloud import AuthError, PySolarCloudException
-from pysolarcloud.plants import Plants
+from pysolarcloud.plants import DeviceType, Plants
 
 from .auth import AUTH_ERRORS
 from .const import (
@@ -21,6 +21,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
+    INVERTER_DIAGNOSTIC_POINTS,
 )
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
@@ -217,13 +218,18 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for d in self.devices
                 if getattr(d.get("device_type"), "value", d.get("device_type")) == type_id and d.get("ps_key")
             ]
+            # Inverter/ESS devices also report the diagnostic points (operating status,
+            # MPPT, DC power, ...); request them on top of any user-configured extras (#149).
+            extra = dict(self.extra_measure_points)
+            if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
+                extra.update(INVERTER_DIAGNOSTIC_POINTS)
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(
                         self.plant_id,
                         device_type,
                         ps_key_list=ps_keys or None,
-                        extra_measure_points=self.extra_measure_points or None,
+                        extra_measure_points=extra or None,
                     )
             except Exception as err:  # pylint: disable=broad-except
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)

@@ -386,6 +386,40 @@ async def test_device_data_forwards_ps_key_list(hass: HomeAssistant):
     assert plants.async_get_device_realtime.await_args.kwargs["ps_key_list"] == ["12345_1_1_1", "12345_1_1_2"]
 
 
+async def test_device_data_requests_inverter_diagnostic_points(hass: HomeAssistant):
+    """Inverter/ESS device realtime is asked for the diagnostic points (#149)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "inv-1", "device_type": DeviceType.INVERTER, "ps_key": "12345_1_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["29"] == "operating_status"
+    assert extra["14"] == "total_dc_power"
+    assert "5" in extra  # MPPT1 voltage
+
+
+async def test_device_data_diagnostic_points_only_for_inverter(hass: HomeAssistant):
+    """A non-inverter device is not asked for inverter diagnostic points (#149)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "chg-1", "device_type": 999, "ps_key": "12345_999_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra is None or "29" not in extra
+
+
 async def test_device_data_dedupes_device_types(hass: HomeAssistant):
     """Two devices of the same type trigger a single per-type fetch."""
     plants = MagicMock()
