@@ -244,6 +244,7 @@ jobs:
       - name: Compute dev tag
         id: tag
         env:
+          GH_TOKEN: ${{ github.token }}
           SKIPPED: ${{ steps.nextver.outputs.skipped }}
           NEXT_VERSION: ${{ steps.nextver.outputs.version }}
           RUN_ID: ${{ github.run_id }}
@@ -253,13 +254,29 @@ jobs:
           else
             VERSION="$NEXT_VERSION"
           fi
+          # If this version is already fully released, remove any leftover RC
+          # pre-releases for it and skip creating a new RC build.
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            VERSION_REGEX=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+            echo "Full release v${VERSION} exists; deleting matching RC pre-releases."
+            gh release list --limit 1000 --json tagName,isPrerelease \
+              --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v${VERSION_REGEX}-rc[0-9]+$\"))) | .tagName" \
+            | while read -r tag; do
+                echo "Deleting stale RC pre-release: ${tag}"
+                gh release delete "$tag" --yes --cleanup-tag
+              done
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           HEAD_BRANCH=main
           WORKFLOW_EVENT=push
           export VERSION RUN_ID HEAD_BRANCH WORKFLOW_EVENT
           TAG=$(bash scripts/compute-dev-tag.sh)
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Create pre-release
+        if: ${{ steps.tag.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
