@@ -16,6 +16,7 @@ from pysolarcloud.plants import DeviceType, Plants
 
 from .auth import AUTH_ERRORS
 from .const import (
+    BATTERY_DEVICE_POINTS,
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
@@ -245,9 +246,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ]
             # Inverter/ESS devices also report the diagnostic points (operating status,
             # MPPT, DC power, ...); request them on top of any user-configured extras (#149).
+            # Battery/ESS devices likewise report battery points (SOC, temp, SOH, ...) (#154).
             extra = dict(self.extra_measure_points)
             if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
                 extra.update(INVERTER_DIAGNOSTIC_POINTS)
+            if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
+                extra.update(BATTERY_DEVICE_POINTS)
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(
