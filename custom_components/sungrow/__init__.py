@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.http import HomeAssistantView
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
@@ -136,6 +137,25 @@ async def _async_has_battery(plants_service: Plants, plant_id: str, devices: lis
                 break
     # No usable capacity figure — fall back to device presence.
     return _has_battery_device(devices)
+
+
+def build_device_info(device: dict[str, Any], plant_id: str, *, fallback_name: str | None = None) -> DeviceInfo:
+    """Build a device-registry entry for a physical device, nested under its plant.
+
+    Enriches the HA device card with the model, serial number and manufacturer the
+    cloud reports (``device_model_code`` / ``device_sn`` / ``factory_name`` from
+    ``getDeviceListByPsId``) instead of a bare name, and links it to the plant device
+    via ``via_device``. The uuid is stringified so the identifier matches
+    ``_known_device_ids`` (which keys on ``str(uuid)``) and the device isn't pruned.
+    """
+    return DeviceInfo(
+        identifiers={(DOMAIN, str(device["uuid"]))},
+        name=device.get("device_name") or device.get("device_model_name") or fallback_name,
+        manufacturer=device.get("factory_name") or "Sungrow",
+        model=device.get("device_model_code") or device.get("device_model_name"),
+        serial_number=device.get("device_sn"),
+        via_device=(DOMAIN, plant_id),
+    )
 
 
 class IterableSchema(vol.Schema):

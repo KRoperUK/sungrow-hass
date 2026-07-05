@@ -11,7 +11,13 @@ from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sungrow import SungrowData, _async_has_battery, _has_battery_device, select_dispatch_device
+from custom_components.sungrow import (
+    SungrowData,
+    _async_has_battery,
+    _has_battery_device,
+    build_device_info,
+    select_dispatch_device,
+)
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.number import DISPATCH_NUMBERS
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
@@ -286,6 +292,65 @@ async def test_async_has_battery_falls_back_to_devices_on_error():
     svc.async_get_plant_details = AsyncMock(side_effect=PySolarCloudException("boom"))
     assert await _async_has_battery(svc, "1", [{"uuid": "e", "device_type": "ENERGY_STORAGE_SYSTEM"}]) is True
     assert await _async_has_battery(svc, "1", [{"uuid": "i", "device_type": "INVERTER"}]) is False
+
+
+# --- Device-registry metadata (#149) --------------------------------------
+
+
+def test_build_device_info_enriches_model_and_serial():
+    """build_device_info surfaces the cloud's model/serial/manufacturer and str-ifies the uuid."""
+    info = build_device_info(
+        {
+            "uuid": 4841885,
+            "device_name": "7-Tadmore-Close-Inverter",
+            "device_model_code": "SG3.6RS",
+            "device_sn": "A2281821940",
+            "factory_name": "SUNGROW",
+        },
+        "5718745",
+        fallback_name="Plant",
+    )
+    assert info["identifiers"] == {(DOMAIN, "4841885")}
+    assert info["name"] == "7-Tadmore-Close-Inverter"
+    assert info["model"] == "SG3.6RS"
+    assert info["serial_number"] == "A2281821940"
+    assert info["manufacturer"] == "SUNGROW"
+    assert info["via_device"] == (DOMAIN, "5718745")
+
+
+def test_build_device_info_falls_back_when_fields_absent():
+    """Missing name falls back to the plant name; manufacturer defaults to Sungrow."""
+    info = build_device_info({"uuid": "x"}, "p", fallback_name="Plant Name")
+    assert info["name"] == "Plant Name"
+    assert info["manufacturer"] == "Sungrow"
+    assert info.get("model") is None
+    assert info.get("serial_number") is None
+
+
+async def test_dispatch_device_info_carries_model_and_serial(hass: HomeAssistant):
+    """Dispatch entities expose the device's model/serial on the device card (#149)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_type": "ENERGY_STORAGE_SYSTEM",
+            "device_name": "Inverter1",
+            "device_model_code": "SH10RT",
+            "device_sn": "SN123",
+            "factory_name": "SUNGROW",
+        }
+    ]
+    _setup_entry_data(entry, devices)
+
+    added: list = []
+    await number_setup_entry(hass, entry, lambda e: added.extend(e))
+
+    assert added
+    info = added[0]._attr_device_info
+    assert info["model"] == "SH10RT"
+    assert info["serial_number"] == "SN123"
+    assert info["manufacturer"] == "SUNGROW"
 
 
 async def test_number_setup_no_devices(hass: HomeAssistant):
