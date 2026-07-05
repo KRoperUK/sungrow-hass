@@ -1,0 +1,117 @@
+"""Binary sensors for the Sungrow iSolarCloud integration.
+
+A per-device ``problem`` binary sensor derived from each device's fault status
+(``dev_fault_status`` from the device list): the "is something wrong?" signal that
+was missing when a plant silently produced nothing (#151).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from . import build_device_info
+from .coordinator import SungrowPlantCoordinator
+
+# Read-only, updated in bulk by the coordinator.
+PARALLEL_UPDATES = 0
+
+_LOGGER = logging.getLogger(__name__)
+
+# Fault-status forms that mean "problem" / "no problem". pysolarcloud converts the
+# raw code to a ``DeviceFaultStaus`` enum (FAULT=1, ALARM=2, NORMAL=4), but the raw
+# API and test mocks may present an int or a string, so match every representation.
+_OK_STATES = {"4", "NORMAL"}
+_PROBLEM_STATES = {"1", "2", "FAULT", "ALARM"}
+
+
+def fault_is_on(status: Any) -> bool | None:
+    """Map a device's ``dev_fault_status`` to a PROBLEM on/off, or None if unknown.
+
+    NORMAL -> off, FAULT/ALARM -> on, anything unrecognised -> None (unknown) rather
+    than a misleading "no problem".
+    """
+    if status is None:
+        return None
+    text = str(getattr(status, "name", status))
+    if text in _OK_STATES:
+        return False
+    if text in _PROBLEM_STATES:
+        return True
+    return None
+
+
+def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySensorEntity]:
+    """Build a fault binary sensor for every device the coordinator currently reports."""
+    return [SungrowDeviceFaultBinarySensor(coordinator, device) for device in coordinator.devices if device.get("uuid")]
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+    """Set up Sungrow binary sensors from the coordinators created during entry setup."""
+    coordinators = entry.runtime_data.coordinators
+
+    known_unique_ids: set[str] = set()
+
+    @callback
+    def _add_new_entities() -> None:
+        new_entities: list[BinarySensorEntity] = []
+        for coordinator in coordinators:
+            for entity in _build_binary_sensors(coordinator):
+                uid = entity.unique_id
+                if uid is None or uid in known_unique_ids:
+                    continue
+                known_unique_ids.add(uid)
+                new_entities.append(entity)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    _add_new_entities()
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
+
+
+class SungrowDeviceFaultBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):
+    """A ``problem`` binary sensor reflecting a device's fault/alarm status."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "device_fault"
+
+    def __init__(self, coordinator: SungrowPlantCoordinator, device: dict[str, Any]) -> None:
+        """Initialize the fault binary sensor for a device."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_fault"
+        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+
+    def _device(self) -> dict[str, Any] | None:
+        """Return this sensor's device from the coordinator's live list, if still present."""
+        return next((d for d in self.coordinator.devices if str(d.get("uuid")) == self.device_uuid), None)
+
+    @property
+    def available(self) -> bool:
+        """Unavailable if the poll failed or the device dropped out of the plant."""
+        return super().available and self._device() is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """True when the device reports a fault or alarm."""
+        device = self._device()
+        if device is None:
+            return None
+        return fault_is_on(device.get("dev_fault_status"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the raw fault status for troubleshooting."""
+        device = self._device() or {}
+        status = device.get("dev_fault_status")
+        return {"fault_status": str(getattr(status, "name", status)) if status is not None else None}
