@@ -11,6 +11,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import build_device_info
 from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
 from .coordinator import SungrowPlantCoordinator
 from .measure_points import (
@@ -72,19 +73,13 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
     # under the inverter.
     if coordinator.enable_device_sensors and coordinator.device_data:
         plant_codes = set(coordinator.data or {})
-        device_names = {
-            str(d.get("uuid")): (d.get("device_name") or d.get("device_model_name") or coordinator.plant_name)
-            for d in coordinator.devices
-            if d.get("uuid")
-        }
+        devices_by_uuid = {str(d["uuid"]): d for d in coordinator.devices if d.get("uuid")}
         for uuid, points in coordinator.device_data.items():
-            device_name = device_names.get(uuid, f"Device {uuid}")
+            device = devices_by_uuid.get(uuid, {"uuid": uuid})
             for point_code, point_data in points.items():
                 if point_code in plant_codes:
                     continue
-                sensor = SungrowDeviceSensor(
-                    coordinator, point_code, coordinator.plant_id, uuid, device_name, point_data
-                )
+                sensor = SungrowDeviceSensor(coordinator, point_code, device, point_data)
                 if sensor.native_value is None:
                     continue
                 sensors.append(sensor)
@@ -250,9 +245,7 @@ class SungrowDeviceSensor(SungrowSensor):
         self,
         coordinator: SungrowPlantCoordinator,
         point_code: str,
-        plant_id: str,
-        device_uuid: str,
-        device_name: str,
+        device: dict[str, Any],
         init_data: dict[str, Any],
     ) -> None:
         """Initialize a device-scoped sensor."""
@@ -260,15 +253,12 @@ class SungrowDeviceSensor(SungrowSensor):
         # metadata helper but with a device-scoped identity and data source.
         CoordinatorEntity.__init__(self, coordinator)
         self.point_code = point_code
-        self.plant_id = plant_id
-        self.device_uuid = device_uuid
-        self._attr_unique_id = f"{plant_id}_{device_uuid}_{point_code}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uuid)},
-            name=device_name,
-            manufacturer="Sungrow",
-            via_device=(DOMAIN, plant_id),
-        )
+        self.plant_id = coordinator.plant_id
+        self.device_uuid = str(device["uuid"])
+        device_name = device.get("device_name") or device.get("device_model_name") or coordinator.plant_name
+        self._attr_unique_id = f"{self.plant_id}_{self.device_uuid}_{point_code}"
+        # Enrich the device card with the model/serial the cloud reports.
+        self._attr_device_info = build_device_info(device, self.plant_id, fallback_name=coordinator.plant_name)
         self._apply_point_metadata(point_code, init_data, device_name)
 
     def _current_point(self) -> dict[str, Any] | None:
