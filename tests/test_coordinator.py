@@ -143,6 +143,51 @@ async def test_update_data_transient_error_raises_update_failed(hass: HomeAssist
         await coordinator._async_update_data()
 
 
+async def test_transient_failure_keeps_last_good_within_grace(hass: HomeAssistant):
+    """A brief poll failure keeps the last-good data instead of flapping unavailable (#152)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success is True
+    good = coordinator.data
+
+    # The next poll fails transiently, within the grace window.
+    plants.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("blip"))
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is True  # stayed available
+    assert coordinator.data == good  # served the last-good data
+
+
+async def test_transient_failure_raises_after_grace(hass: HomeAssistant):
+    """Once the last success is older than the grace window, entities go unavailable (#152)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success is True
+
+    # Pretend the last success was long ago, then fail.
+    coordinator._last_successful_update = hass.loop.time() - 100000
+    plants.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("down"))
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is False
+
+
+async def test_auth_error_not_debounced_within_grace(hass: HomeAssistant):
+    """An auth error still triggers reauth immediately, even inside the grace window (#152)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    await coordinator.async_refresh()  # success -> within grace, has last-good data
+
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "invalid_token"}))
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
 async def test_update_data_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant):
     """A failed token refresh raises ConfigEntryAuthFailed (triggers reauth)."""
     plants = MagicMock()
