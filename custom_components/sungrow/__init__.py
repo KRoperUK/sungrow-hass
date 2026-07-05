@@ -103,6 +103,41 @@ async def _async_dispatch_supported(control: Control, devices: list[dict[str, An
         return True
 
 
+def _has_battery_device(devices: list[dict[str, Any]]) -> bool:
+    """Return True if the plant reports an energy-storage or battery device."""
+    return any(
+        _matches_device_type(d, DeviceType.ENERGY_STORAGE_SYSTEM) or _matches_device_type(d, DeviceType.BATTERY)
+        for d in devices
+    )
+
+
+async def _async_has_battery(plants_service: Plants, plant_id: str, devices: list[dict[str, Any]]) -> bool:
+    """Return whether a plant has a battery, to gate battery-only dispatch controls (#148).
+
+    The plant's configured battery capacity (``design_capacity_battery`` from the
+    plant-detail endpoint) is authoritative: a value of 0 means a PV-only system, so
+    the battery-only controls are hidden even if a hybrid inverter also reports an
+    ESS device with no pack attached. Only when plant details can't be fetched (or
+    omit the field) does this fall back to ESS/battery device presence, so a
+    transient failure never hides a real battery user's controls.
+    """
+    try:
+        async with asyncio.timeout(SETUP_TIMEOUT):
+            details = await plants_service.async_get_plant_details(plant_id)
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Could not fetch plant details for %s; using device list for battery check: %s", plant_id, err)
+        return _has_battery_device(devices)
+    for entry in details or []:
+        capacity = entry.get("design_capacity_battery")
+        if capacity is not None:
+            try:
+                return float(capacity) > 0
+            except (TypeError, ValueError):
+                break
+    # No usable capacity figure — fall back to device presence.
+    return _has_battery_device(devices)
+
+
 class IterableSchema(vol.Schema):
     """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
 
@@ -223,6 +258,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             continue
 
         coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        coordinator.has_battery = await _async_has_battery(plants_service, plant_id, devices)
         devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
 

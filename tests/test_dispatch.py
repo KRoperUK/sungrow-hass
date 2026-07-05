@@ -11,7 +11,7 @@ from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sungrow import SungrowData, select_dispatch_device
+from custom_components.sungrow import SungrowData, _async_has_battery, _has_battery_device, select_dispatch_device
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.number import DISPATCH_NUMBERS
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
@@ -27,6 +27,9 @@ def _coordinator_with(plant_id, plant_name):
     coordinator.plant_name = plant_name
     coordinator.config_entry = MagicMock()
     coordinator.last_update_success = True
+    # Default to a battery plant so the full dispatch set is built; the no-battery
+    # gating tests (#148) override this to False.
+    coordinator.has_battery = True
     return coordinator
 
 
@@ -168,6 +171,121 @@ async def test_dispatch_device_survives_prune_with_int_uuid(hass: HomeAssistant)
 
     assert registry.async_get(plant.id) is not None
     assert registry.async_get(inverter.id) is not None  # removed before the fix
+
+
+# --- Battery-presence gating (#148) ---------------------------------------
+
+# Dispatch params that only make sense with a battery and must be hidden on
+# PV-only plants (setting them puts the inverter into External-EMS "Dispatched
+# running" mode and silently curtails PV to ~0).
+BATTERY_ONLY_NUMBERS = {
+    "charge_discharge_power",
+    "soc_upper_limit",
+    "soc_lower_limit",
+    "forced_charging_target_soc_1",
+    "forced_charging_target_soc_2",
+}
+GRID_SIDE_NUMBERS = {
+    "feed_in_limitation_value",
+    "feed_in_limitation_ratio",
+    "active_power_limit_ratio",
+}
+BATTERY_ONLY_SELECTS = {"charge_discharge_command", "forced_charging", "battery_first"}
+GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch"}
+
+
+def test_battery_only_sets_partition_dispatch_dicts():
+    """The battery-only / grid-side split covers exactly the dispatch params.
+
+    Guards against a new dispatch param being added without deciding whether it is
+    battery-only (and therefore must be gated for #148).
+    """
+    assert set(DISPATCH_NUMBERS) == BATTERY_ONLY_NUMBERS | GRID_SIDE_NUMBERS
+    assert BATTERY_ONLY_NUMBERS.isdisjoint(GRID_SIDE_NUMBERS)
+    assert set(DISPATCH_SELECTS) == BATTERY_ONLY_SELECTS | GRID_SIDE_SELECTS
+    assert BATTERY_ONLY_SELECTS.isdisjoint(GRID_SIDE_SELECTS)
+
+
+async def test_number_hides_battery_controls_without_battery(hass: HomeAssistant):
+    """On a battery-less plant, only grid-side numbers are created (#148)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "inv-1", "device_type": "INVERTER"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].has_battery = False
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert {e.param for e in added} == GRID_SIDE_NUMBERS
+
+
+async def test_select_hides_battery_controls_without_battery(hass: HomeAssistant):
+    """On a battery-less plant, only grid-side selects are created (#148)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "inv-1", "device_type": "INVERTER"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].has_battery = False
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert {e.param for e in added} == GRID_SIDE_SELECTS
+
+
+async def test_dispatch_full_set_with_battery(hass: HomeAssistant):
+    """A battery plant still gets the full set of dispatch controls (#148)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].has_battery = True
+
+    numbers, selects = [], []
+    await number_setup_entry(hass, entry, lambda e: numbers.extend(e))
+    await select_setup_entry(hass, entry, lambda e: selects.extend(e))
+
+    assert {e.param for e in numbers} == set(DISPATCH_NUMBERS)
+    assert {e.param for e in selects} == set(DISPATCH_SELECTS)
+
+
+def test_has_battery_device_detects_ess_and_battery():
+    """_has_battery_device matches ESS/battery devices across enum/int/string forms."""
+    assert _has_battery_device([{"uuid": "e", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    assert _has_battery_device([{"uuid": "b", "device_type": DeviceType.BATTERY}])
+    assert _has_battery_device([{"uuid": "b", "device_type": 43}])
+    assert not _has_battery_device([{"uuid": "i", "device_type": "INVERTER"}])
+    assert not _has_battery_device([])
+
+
+async def test_async_has_battery_uses_design_capacity():
+    """design_capacity_battery is authoritative: 0 -> no battery, >0 -> battery."""
+    svc = MagicMock()
+    svc.async_get_plant_details = AsyncMock(return_value=[{"design_capacity_battery": 0.0}])
+    assert await _async_has_battery(svc, "1", [{"uuid": "i", "device_type": "INVERTER"}]) is False
+
+    svc.async_get_plant_details = AsyncMock(return_value=[{"design_capacity_battery": 9.6}])
+    assert await _async_has_battery(svc, "1", []) is True
+
+
+async def test_async_has_battery_capacity_zero_overrides_ess_device():
+    """A configured capacity of 0 hides controls even if an ESS device is present.
+
+    Hybrid inverters can report an ESS device with no battery pack attached, so the
+    plant's configured capacity is trusted over device-type presence.
+    """
+    svc = MagicMock()
+    svc.async_get_plant_details = AsyncMock(return_value=[{"design_capacity_battery": 0}])
+    assert await _async_has_battery(svc, "1", [{"uuid": "e", "device_type": "ENERGY_STORAGE_SYSTEM"}]) is False
+
+
+async def test_async_has_battery_falls_back_to_devices_on_error():
+    """If plant details can't be fetched, fall back to ESS/battery device presence."""
+    svc = MagicMock()
+    svc.async_get_plant_details = AsyncMock(side_effect=PySolarCloudException("boom"))
+    assert await _async_has_battery(svc, "1", [{"uuid": "e", "device_type": "ENERGY_STORAGE_SYSTEM"}]) is True
+    assert await _async_has_battery(svc, "1", [{"uuid": "i", "device_type": "INVERTER"}]) is False
 
 
 async def test_number_setup_no_devices(hass: HomeAssistant):

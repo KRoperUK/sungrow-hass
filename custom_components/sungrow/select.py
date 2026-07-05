@@ -34,6 +34,8 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
             "Charge": Control.CHARGE_DISCHARGE_COMMANDS["charge"],
             "Discharge": Control.CHARGE_DISCHARGE_COMMANDS["discharge"],
         },
+        # Battery actuation: meaningless (and harmful — see #148) without a battery.
+        "battery_only": True,
     },
     "forced_charging": {
         "options_map": {
@@ -42,6 +44,7 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
         },
         # Enabling/disabling forced charging is a policy setting, not actuation.
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
     # Sungrow enable/disable enum (device-verified): Enable=170, Disable=85.
     "feed_in_limitation": {
@@ -57,6 +60,7 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
     "battery_first": {
         "options_map": {"Disable": "85", "Enable": "170"},
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
 }
 
@@ -83,9 +87,11 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: Control) -> li
     # is pruned on the first refresh after setup — the "pops in then disappears" bug.
     device_uuid = str(device_uuid)
     device_name = target.get("device_name") or coordinator.plant_name
+    # Hide battery-only controls on PV-only plants — see #148.
     return [
         SungrowDispatchSelect(coordinator, control, device_uuid, device_name, param, meta)
         for param, meta in DISPATCH_SELECTS.items()
+        if coordinator.has_battery or not meta.get("battery_only")
     ]
 
 
