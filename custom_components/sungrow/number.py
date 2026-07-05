@@ -70,6 +70,8 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
         "native_step": 100,
         "mode": NumberMode.SLIDER,
+        # Battery actuation: meaningless (and harmful — see #148) without a battery.
+        "battery_only": True,
     },
     "soc_upper_limit": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -80,6 +82,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.SLIDER,
         # SOC limits set battery policy rather than actuate — configuration entities.
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
     "soc_lower_limit": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -89,6 +92,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
     "forced_charging_target_soc_1": {
         "device_class": NumberDeviceClass.BATTERY,
@@ -98,6 +102,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
     # Target SOC for the second forced-charging window (mirrors ..._soc_1).
     "forced_charging_target_soc_2": {
@@ -108,6 +113,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_step": 1,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
+        "battery_only": True,
     },
     # Export (feed-in) limit as an absolute power in watts. Only takes effect when
     # the feed_in_limitation select is enabled. Sized to the device's rating.
@@ -171,6 +177,9 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
     max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
     entities: list[NumberEntity] = []
     for param, meta in DISPATCH_NUMBERS.items():
+        # Hide battery-only controls on PV-only plants — see #148.
+        if meta.get("battery_only") and not coordinator.has_battery:
+            continue
         if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, device_uuid, device_name, param, meta))
