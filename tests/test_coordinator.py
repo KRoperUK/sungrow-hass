@@ -367,6 +367,25 @@ async def test_device_data_best_effort_on_error(hass: HomeAssistant):
     assert "chg-1" not in coordinator.device_data
 
 
+async def test_device_data_forwards_ps_key_list(hass: HomeAssistant):
+    """Each device's ps_key is forwarded so getDeviceRealTimeData isn't rejected (009)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "ps_key": "12345_1_1_1"},
+        {"uuid": "inv-2", "device_type": DeviceType.INVERTER, "ps_key": "12345_1_1_2"},
+    ]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    plants.async_get_device_realtime.assert_awaited_once()
+    assert plants.async_get_device_realtime.await_args.kwargs["ps_key_list"] == ["12345_1_1_1", "12345_1_1_2"]
+
+
 async def test_device_data_dedupes_device_types(hass: HomeAssistant):
     """Two devices of the same type trigger a single per-type fetch."""
     plants = MagicMock()
