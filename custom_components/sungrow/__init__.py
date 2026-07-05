@@ -34,7 +34,7 @@ from .const import (
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
-PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 
 # How long to wait for a heartbeat loop to observe its stop event and exit
 # before force-cancelling it.
