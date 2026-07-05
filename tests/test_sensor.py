@@ -421,7 +421,16 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
     coordinator.enable_device_sensors = True
     # The platform reads the live device list from the coordinator for naming.
-    coordinator.devices = [{"uuid": "chg-1", "device_name": "AC011E", "device_type": 999}]
+    coordinator.devices = [
+        {
+            "uuid": "chg-1",
+            "device_name": "AC011E",
+            "device_type": 999,
+            "device_model_code": "AC011E-01",
+            "device_sn": "S1234567",
+            "factory_name": "SUNGROW",
+        }
+    ]
     coordinator.device_data = {
         "chg-1": {
             "ev_charger_power": {"code": "ev_charger_power", "value": "7.2", "unit": "kW"},
@@ -448,6 +457,10 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     assert sensor._attr_device_info["name"] == "AC011E"
     assert (DOMAIN, "chg-1") in sensor._attr_device_info["identifiers"]
     assert sensor._attr_device_info["via_device"] == (DOMAIN, "12345")
+    # Device card is enriched with the cloud's model/serial/manufacturer (#149).
+    assert sensor._attr_device_info["model"] == "AC011E-01"
+    assert sensor._attr_device_info["serial_number"] == "S1234567"
+    assert sensor._attr_device_info["manufacturer"] == "SUNGROW"
     # Reads its value from the coordinator's per-device data.
     assert sensor.native_value == 7.2
 

@@ -11,13 +11,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import select_dispatch_device
+from . import build_device_info, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 
@@ -164,14 +163,8 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
     target = select_dispatch_device(coordinator.devices)
     if target is None:
         return []
-    device_uuid = target.get("uuid")
-    if not device_uuid:
+    if not target.get("uuid"):
         return []
-    # The API returns the uuid as an int; device-registry identifiers must be strings
-    # to match `_known_device_ids` (which keys on `str(uuid)`). Without this the device
-    # is pruned on the first refresh after setup — the "pops in then disappears" bug.
-    device_uuid = str(device_uuid)
-    device_name = target.get("device_name") or coordinator.plant_name
     # Size the power sliders to the device's rated power when it can be derived
     # from the model code; otherwise use the conservative default.
     max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
@@ -182,7 +175,7 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
             continue
         if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
-        entities.append(SungrowDispatchNumber(coordinator, control, device_uuid, device_name, param, meta))
+        entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
     return entities
 
 
@@ -221,26 +214,21 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         self,
         coordinator: SungrowPlantCoordinator,
         control: Control,
-        device_uuid: str,
-        device_name: str,
+        device: dict[str, Any],
         param: str,
         meta: dict[str, Any],
     ) -> None:
         """Initialize the dispatch number."""
         super().__init__(coordinator)
         self.control = control
-        self.device_uuid = device_uuid
+        self.device_uuid = str(device["uuid"])
         self.param = param
         # Entity name comes from translations (entity.number.<param>.name).
         self._attr_translation_key = param
-        self._attr_unique_id = f"{coordinator.plant_id}_{device_uuid}_{param}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uuid)},
-            name=device_name,
-            manufacturer="Sungrow",
-            # Nest the dispatch device under the plant device the sensors created.
-            via_device=(DOMAIN, coordinator.plant_id),
-        )
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_{param}"
+        # Nest the dispatch device under the plant device the sensors created,
+        # enriched with the model/serial the cloud reports.
+        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
         self._attr_device_class = meta.get("device_class")
         self._attr_native_unit_of_measurement = meta.get("native_unit_of_measurement")
         self._attr_native_min_value = meta["native_min_value"]
