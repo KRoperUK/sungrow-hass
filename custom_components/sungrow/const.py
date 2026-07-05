@@ -64,3 +64,21 @@ INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
     "9": "mppt3_voltage",
     "10": "mppt3_current",
 }
+
+# Battery/ESS device-level measuring points surfaced as sensors for hybrid users (#154),
+# requested per-device when device sensors are enabled. Every ID is already in the
+# measure-point catalog, so it classifies automatically (level -> battery, charge/discharge
+# energy -> total_increasing, voltage/current/temperature accordingly).
+BATTERY_DEVICE_POINTS: dict[str, str] = {
+    "58604": "battery_level",
+    "58606": "battery_total_charge_energy",
+    "58607": "battery_total_discharge_energy",
+    "58601": "battery_voltage",
+    "58602": "battery_current",
+    "58603": "battery_temperature",
+    "58605": "battery_soh",
+}
+
+# The technical/health subset of the battery points shown as diagnostics; the rest
+# (SOC, charge/discharge energy) stay primary sensors for the dashboards.
+BATTERY_DIAGNOSTIC_CODES = frozenset({"battery_voltage", "battery_current", "battery_temperature", "battery_soh"})
