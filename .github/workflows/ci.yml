@@ -313,10 +313,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
           COMMIT_SHA: ${{ github.sha }}
+          # Release-please-style changelog for the changes since the last stable release.
+          CHANGELOG: ${{ steps.nextver.outputs.clean_changelog }}
         run: |
+          # Latest published stable (non-prerelease, non-draft) release, to steer users away
+          # from RC builds. Empty if none has shipped yet.
+          latest_stable=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)
+          if [ -n "$latest_stable" ]; then
+            stable_line="For everyday use, install the latest **stable** release instead: [\`${latest_stable}\`](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${latest_stable})."
+          else
+            stable_line="No stable release has been published yet."
+          fi
+          {
+            echo "> [!WARNING]"
+            echo "> **This is an automated release-candidate build, not an official release.**"
+            echo "> It previews the upcoming **v${VERSION}** release from \`main\` (commit \`${COMMIT_SHA}\`) and may be unstable."
+            echo "> ${stable_line}"
+            echo ""
+            echo "## What's changed for v${VERSION}"
+            echo ""
+            if [ -n "${CHANGELOG}" ]; then
+              printf '%s\n' "${CHANGELOG}"
+            else
+              echo "_No user-facing changes detected since the last release._"
+            fi
+          } > rc-notes.md
           gh release create "$TAG" \
             --prerelease \
             --title "$TAG" \
-            --notes "Release-candidate build from \`main\` at commit \`${COMMIT_SHA}\`." \
+            --notes-file rc-notes.md \
             || echo "Release already exists for this tag, skipping."
