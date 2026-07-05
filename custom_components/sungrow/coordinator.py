@@ -129,6 +129,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # setup; defaults True (fail-open) so an unavailable/unknown check never
         # hides working controls.
         self.dispatch_update_supported: bool = True
+        # Whether the plant has a battery. Battery-only dispatch controls
+        # (charge/discharge, SOC limits, forced-charge, battery-first) are hidden
+        # when False: on a PV-only inverter they can't act and instead put it into
+        # External-EMS mode, silently curtailing generation to ~0 (#148). Checked
+        # once at setup; defaults True (fail-open) so a failed check never hides a
+        # real battery user's controls.
+        self.has_battery: bool = True
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""

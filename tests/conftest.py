@@ -195,6 +195,8 @@ def mock_plants_service():
         plants_instance.async_get_plants = AsyncMock(return_value=MOCK_PLANT_LIST)
         plants_instance.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
         plants_instance.async_get_plant_devices = AsyncMock(return_value=[])
+        # Battery-presence detection (#148) fetches plant details during setup.
+        plants_instance.async_get_plant_details = AsyncMock(return_value=[{"design_capacity_battery": 10.0}])
         mock_plants_cls.return_value = plants_instance
 
         control_instance = MagicMock()
