@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import SungrowData
@@ -518,6 +520,29 @@ async def test_sensor_dynamic_add_when_placeholder_becomes_real(hass: HomeAssist
     for cb in listeners:
         cb()
     assert {e.point_code for e in added} == {"total_active_power", "battery_power"}
+
+
+async def test_inverter_diagnostic_sensor_is_diagnostic_and_enum(hass: HomeAssistant):
+    """Operating-status device sensor is DIAGNOSTIC and maps its code to a label (#149)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = True
+    coordinator.devices = [{"uuid": "inv-1", "device_name": "Inverter1", "device_type": DeviceType.INVERTER}]
+    coordinator.device_data = {"inv-1": {"operating_status": {"id": "29", "code": "operating_status", "value": "64"}}}
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator], control=MagicMock(), devices={"12345": coordinator.devices}
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    sensor = next(e for e in added if isinstance(e, SungrowDeviceSensor) and e.point_code == "operating_status")
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor._attr_device_class == SensorDeviceClass.ENUM
+    # Raw code "64" maps to a human label from the operating-status enum.
+    assert sensor.native_value not in (None, "64")
 
 
 async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):

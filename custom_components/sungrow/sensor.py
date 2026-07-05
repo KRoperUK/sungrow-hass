@@ -5,14 +5,14 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import build_device_info
-from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS
+from .const import CONF_GATEWAY, DEFAULT_CONSOLE_URL, DOMAIN, GATEWAY_CONSOLE_URLS, INVERTER_DIAGNOSTIC_POINTS
 from .coordinator import SungrowPlantCoordinator
 from .measure_points import (
     PERCENT_FRACTION_POINT_IDS,
@@ -27,6 +27,10 @@ from .measure_points import (
 PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
+
+# Inverter diagnostic point codes get the DIAGNOSTIC entity category so they land in
+# the device page's Diagnostic section instead of cluttering the main sensors (#149).
+_DIAGNOSTIC_CODES = frozenset(INVERTER_DIAGNOSTIC_POINTS.values())
 
 
 def infer_device_class(
@@ -260,6 +264,9 @@ class SungrowDeviceSensor(SungrowSensor):
         # Enrich the device card with the model/serial the cloud reports.
         self._attr_device_info = build_device_info(device, self.plant_id, fallback_name=coordinator.plant_name)
         self._apply_point_metadata(point_code, init_data, device_name)
+        # Inverter internals (operating status, MPPT, DC power, ...) are diagnostics.
+        if point_code in _DIAGNOSTIC_CODES:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload from the coordinator's per-device data."""
