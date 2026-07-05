@@ -54,11 +54,15 @@ jobs:
           cache: pip
           cache-dependency-path: .github/workflows/ci.yml
 
-      - name: Install dependencies
-        run: pip install ruff==0.15.16
+      - name: Install ruff
+        # Pin to the same ruff as the test env (requirements_test.txt) so lint and
+        # format can't drift between the two jobs.
+        run: pip install "$(grep -E '^ruff==' requirements_test.txt)"
 
       - name: Lint with ruff
-        run: ruff check custom_components/ tests/
+        # --output-format=github emits ::error annotations inline on the offending
+        # lines in the PR "Files changed" view.
+        run: ruff check --output-format=github custom_components/ tests/
 
       - name: Check formatting
         run: ruff format --check custom_components/ tests/
@@ -84,7 +88,14 @@ jobs:
         run: pip install -r requirements_test.txt
 
       - name: Type check with mypy
-        run: mypy
+        # Convert mypy output into GitHub annotations (inline on the PR diff) while
+        # preserving its exit status via pipefail, so type errors are surfaced on the
+        # offending line instead of only in the raw log.
+        run: |
+          set -o pipefail
+          mypy | sed -E \
+            -e 's/^([^:]+):([0-9]+): error: (.*)$/::error file=\1,line=\2::\3/' \
+            -e 's/^([^:]+):([0-9]+): note: (.*)$/::notice file=\1,line=\2::\3/'
 
       - name: Run tests with coverage
         run: >-
