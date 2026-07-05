@@ -545,6 +545,34 @@ async def test_inverter_diagnostic_sensor_is_diagnostic_and_enum(hass: HomeAssis
     assert sensor.native_value not in (None, "64")
 
 
+async def test_battery_device_sensor_categories(hass: HomeAssistant):
+    """Battery health points are diagnostic; SOC stays a primary sensor (#154)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = True
+    coordinator.devices = [{"uuid": "bat-1", "device_name": "Battery1", "device_type": DeviceType.BATTERY}]
+    coordinator.device_data = {
+        "bat-1": {
+            "battery_temperature": {"id": "58603", "code": "battery_temperature", "value": "25.0", "unit": "°C"},
+            "battery_level": {"id": "58604", "code": "battery_level", "value": "80", "unit": "%"},
+        }
+    }
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator], control=MagicMock(), devices={"12345": coordinator.devices}
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    by_code = {e.point_code: e for e in added if isinstance(e, SungrowDeviceSensor)}
+    assert by_code["battery_temperature"].entity_category == EntityCategory.DIAGNOSTIC
+    assert by_code["battery_temperature"].device_class == SensorDeviceClass.TEMPERATURE
+    assert by_code["battery_level"].entity_category is None  # SOC is a primary sensor
+    assert by_code["battery_level"].device_class == SensorDeviceClass.BATTERY
+
+
 async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):
     """No device sensors are created when the option is off, even with device data present."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())

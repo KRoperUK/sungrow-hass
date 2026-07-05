@@ -465,6 +465,41 @@ async def test_device_data_diagnostic_points_only_for_inverter(hass: HomeAssista
     assert extra is None or "29" not in extra
 
 
+async def test_device_data_requests_battery_points_for_battery_device(hass: HomeAssistant):
+    """A battery device is asked for the battery points, not the inverter-only ones (#154)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "bat-1", "device_type": DeviceType.BATTERY, "ps_key": "12345_43_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["58604"] == "battery_level"
+    assert extra["58606"] == "battery_total_charge_energy"
+    assert "29" not in extra  # not the inverter operating-status point
+
+
+async def test_device_data_ess_gets_both_inverter_and_battery_points(hass: HomeAssistant):
+    """An ESS device reports both the inverter and the battery points (#149/#154)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "ps_key": "12345_14_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert "29" in extra  # inverter operating status
+    assert "58604" in extra  # battery level
+
+
 async def test_device_data_dedupes_device_types(hass: HomeAssistant):
     """Two devices of the same type trigger a single per-type fetch."""
     plants = MagicMock()
