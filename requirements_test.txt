@@ -6,7 +6,7 @@ pytest-sugar
 python-dotenv
 
 # Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
-ruff==0.15.16
+ruff==0.15.20
 mypy==2.1.0
 
 # Component dependencies
