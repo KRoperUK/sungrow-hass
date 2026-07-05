@@ -45,3 +45,22 @@ MAX_SCAN_INTERVAL = 86400
 # calls against the ~2000/hour free-plan cap. Refresh at most this often (plus
 # always on the first poll) so newly added/removed devices are still picked up.
 DEVICE_REFRESH_INTERVAL = 900
+
+# Inverter/ESS device-level measuring points surfaced as diagnostic sensors (#149),
+# requested per-device when device sensors are enabled. Maps the documented inverter
+# point ID -> a stable code. Every ID is already in the measure-point catalog, so it
+# classifies automatically (29 -> operating-status enum, 14 -> DC power, 5-10 -> MPPT
+# voltage/current, 4 -> temperature, 27 -> frequency, 94 -> insulation resistance).
+INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
+    "29": "operating_status",
+    "14": "total_dc_power",
+    "4": "internal_temperature",
+    "27": "grid_frequency",
+    "94": "array_insulation_resistance",
+    "5": "mppt1_voltage",
+    "6": "mppt1_current",
+    "7": "mppt2_voltage",
+    "8": "mppt2_current",
+    "9": "mppt3_voltage",
+    "10": "mppt3_current",
+}
