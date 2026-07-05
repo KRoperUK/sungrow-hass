@@ -284,7 +284,29 @@ jobs:
           export VERSION RUN_ID HEAD_BRANCH WORKFLOW_EVENT
           TAG=$(bash scripts/compute-dev-tag.sh)
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Prune superseded main RC pre-releases
+        if: ${{ steps.tag.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          # On main there should only be RC builds for the *current* next-version. When a
+          # new feat/fix bumps the computed version (e.g. 3.2.1 -> 3.3.0), the earlier
+          # dev-v<old>-rc* builds are superseded and will never ship — delete them now
+          # rather than waiting for a real release or the 30-day sweep.
+          gh release list --limit 1000 --json tagName,isPrerelease \
+            --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+-rc[0-9]+$\"))) | .tagName" \
+          | while read -r tag; do
+              tag_version="${tag#dev-v}"
+              tag_version="${tag_version%-rc*}"
+              if [ "$tag_version" != "$VERSION" ]; then
+                echo "Deleting superseded RC pre-release: ${tag} (version ${tag_version} != ${VERSION})"
+                gh release delete "$tag" --yes --cleanup-tag
+              fi
+            done
 
       - name: Create pre-release
         if: ${{ steps.tag.outputs.skip != 'true' }}
