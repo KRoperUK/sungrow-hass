@@ -207,11 +207,22 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if type_id in seen_types:
                 continue
             seen_types.add(type_id)
+            # Forward the ps_key of every device of this type. getDeviceRealTimeData is
+            # keyed per-device and rejects the call with result_code 009 when neither
+            # ps_key_list nor sn_list is supplied (pysolarcloud >=0.9.1). Passing None
+            # lets the library discover the keys itself (an extra list call) for older
+            # payloads that omit ps_key.
+            ps_keys = [
+                str(d["ps_key"])
+                for d in self.devices
+                if getattr(d.get("device_type"), "value", d.get("device_type")) == type_id and d.get("ps_key")
+            ]
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(
                         self.plant_id,
                         device_type,
+                        ps_key_list=ps_keys or None,
                         extra_measure_points=self.extra_measure_points or None,
                     )
             except Exception as err:  # pylint: disable=broad-except
