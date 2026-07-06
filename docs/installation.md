@@ -7,6 +7,12 @@ icon: lucide/download
 Setting up the integration has three parts: create an **iSolarCloud OpenAPI application**,
 install the integration via **HACS**, then **add and authorize** it in Home Assistant.
 
+!!! tip "No cloud account? Use local Modbus"
+    You don't strictly need an iSolarCloud application if you only want **read-only** sensors
+    over your LAN. Install via HACS (step 2 below), and Home Assistant will **auto-discover**
+    your WiNet-S dongle for a cloud-free local setup. See
+    [Local Modbus (WiNet-S)](local-modbus.md) for the transport modes and current limitations.
+
 ## 1. Create an iSolarCloud OpenAPI application
 
 The integration talks to iSolarCloud's OpenAPI, which requires your own application credentials.

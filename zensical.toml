@@ -13,6 +13,7 @@ nav = [
   { "Home" = "index.md" },
   { "Installation & Setup" = "installation.md" },
   { "Configuration" = "configuration.md" },
+  { "Local Modbus" = "local-modbus.md" },
   { "Sensors" = "SENSORS.md" },
   { "Troubleshooting" = "TROUBLESHOOTING.md" },
 ]
