@@ -7,6 +7,13 @@ on:
             - docs/**
             - zensical.toml
             - .github/workflows/docs.yml
+            # Redeploy on a release so the version shown in the site header refreshes.
+            # release-please's "chore(main): release X.Y.Z" merge bumps these files, and
+            # any manual edit to them should also rebuild the docs.
+            - version.txt
+            - CHANGELOG.md
+            - custom_components/sungrow/manifest.json
+            - pyproject.toml
     workflow_dispatch: {}
 
 permissions:
