@@ -19,7 +19,7 @@ from custom_components.sungrow import (
     select_dispatch_device,
 )
 from custom_components.sungrow.const import DOMAIN
-from custom_components.sungrow.number import DISPATCH_NUMBERS
+from custom_components.sungrow.number import DISPATCH_NUMBERS, SungrowDispatchNumber
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
 from custom_components.sungrow.select import DISPATCH_SELECTS
 from custom_components.sungrow.select import async_setup_entry as select_setup_entry
@@ -74,6 +74,31 @@ async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_device_class == NumberDeviceClass.POWER
     assert power._attr_native_unit_of_measurement == "W"
+
+
+async def test_dispatch_controls_report_assumed_state(hass: HomeAssistant):
+    """Write-only device controls report assumed_state; the HA-internal timer does not.
+
+    The API doesn't read the current setpoint back (getDevPropertyPointValue is gated),
+    so the value shown is the last one we commanded — an assumption, not a device reading.
+    The forced-dispatch-duration timer is HA-internal, so its value is genuinely known.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM", "device_name": "Inverter 1"}]
+    _setup_entry_data(entry, devices)
+
+    numbers: list = []
+    await number_setup_entry(hass, entry, lambda e: numbers.extend(e))
+    selects: list = []
+    await select_setup_entry(hass, entry, lambda e: selects.extend(e))
+
+    # Every device-commanding number is assumed-state; the auto-revert timer is not.
+    for e in numbers:
+        assert e.assumed_state is isinstance(e, SungrowDispatchNumber), type(e).__name__
+    assert selects, "expected dispatch selects for an ESS device"
+    for e in selects:
+        assert e.assumed_state is True
 
 
 def test_select_dispatch_device_matches_all_representations():
