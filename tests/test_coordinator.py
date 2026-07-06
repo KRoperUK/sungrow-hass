@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType
@@ -15,6 +16,7 @@ from custom_components.sungrow.const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
+    DOMAIN,
 )
 from custom_components.sungrow.coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
@@ -141,6 +143,35 @@ async def test_update_data_transient_error_raises_update_failed(hass: HomeAssist
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
+
+
+async def test_whitelist_error_raises_repair_and_recovery_clears_it(hass: HomeAssistant):
+    """A whitelist rejection raises a Repair; a later success clears it (#153)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "E918"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is not None
+
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    await coordinator._async_update_data()
+    assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is None
+
+
+async def test_rate_limit_error_raises_its_repair_only(hass: HomeAssistant):
+    """A rate-limit rejection raises the rate_limited Repair, not the whitelist one (#153)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException({"error": "E999"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+    assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is None
 
 
 async def test_transient_failure_keeps_last_good_within_grace(hass: HomeAssistant):

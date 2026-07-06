@@ -70,6 +70,16 @@
       }
     }
   },
+  "issues": {
+    "whitelist_rejection": {
+      "title": "iSolarCloud rejected the request (whitelist)",
+      "description": "iSolarCloud is rejecting API requests for **{plant}** because this client's IP address or your account is not in your API application's whitelist (E918/E919). Add them in the iSolarCloud Developer Portal (or disable the whitelist); the integration recovers automatically once accepted."
+    },
+    "rate_limited": {
+      "title": "iSolarCloud API rate limit reached",
+      "description": "iSolarCloud is rejecting requests for **{plant}** because the API call limit was reached (E998/E999). Increase the polling interval in the integration options to make fewer calls; it recovers when the quota resets."
+    }
+  },
   "entity": {
     "binary_sensor": {
       "device_fault": {

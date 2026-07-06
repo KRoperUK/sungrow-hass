@@ -10,6 +10,7 @@ from typing import Any, cast
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType, Plants
@@ -22,6 +23,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
+    DOMAIN,
     INVERTER_DIAGNOSTIC_POINTS,
 )
 
@@ -101,6 +103,16 @@ def describe_api_error(err: Exception) -> str | None:
     return None
 
 
+# iSolarCloud error codes that warrant a user-facing Repair (#153). Each maps to a
+# translation key under ``issues.<key>``. Reauth is intentionally absent: HA already opens
+# a reauth flow when the coordinator raises ConfigEntryAuthFailed.
+_REPAIR_CODES: dict[str, frozenset[str]] = {
+    "whitelist_rejection": WHITELIST_ERRORS,
+    "rate_limited": frozenset({"E998", "E999"}),
+}
+_REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
+
+
 class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage fetching data from a single plant."""
 
@@ -161,6 +173,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
+            # Surface actionable errors (whitelist, rate limit) as HA Repairs (#153).
+            self._async_manage_repairs(err)
             # Transient failure (a timeout arrives here as TimeoutError). Rather than flap
             # every entity to "unavailable" on a brief cloud hiccup, keep serving the
             # last-good data while a recent success is still within the grace window (#152);
@@ -171,6 +185,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A timeout arrives here as TimeoutError and is treated as transient.
             raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
 
+        self._async_manage_repairs(None)
         self._last_successful_update = self.hass.loop.time()
 
         # Refresh the device list so devices added to the plant after setup are
@@ -189,6 +204,29 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._last_successful_update is None:
             return False
         return (self.hass.loop.time() - self._last_successful_update) < AVAILABILITY_GRACE_SECONDS
+
+    def _async_manage_repairs(self, err: Exception | None) -> None:
+        """Raise or clear Repair issues for actionable iSolarCloud errors (#153).
+
+        Called on every poll: creates the matching Repair when a known actionable code
+        occurs and clears the rest, so a recovered plant automatically dismisses its issue.
+        """
+        code = err.error if isinstance(err, PySolarCloudException) else None
+        for key, codes in _REPAIR_CODES.items():
+            issue_id = f"{key}_{self.plant_id}"
+            if code in codes:
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=key,
+                    translation_placeholders={"plant": self.plant_name},
+                    learn_more_url=_REPAIR_LEARN_MORE,
+                )
+            else:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     async def _async_maybe_refresh_devices(self) -> None:
         """Refresh the device list periodically rather than on every poll (saves quota).
