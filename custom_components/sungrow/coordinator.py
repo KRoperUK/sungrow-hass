@@ -18,6 +18,7 @@ from pysolarcloud.plants import DeviceType, Plants
 from .auth import AUTH_ERRORS
 from .const import (
     BATTERY_DEVICE_POINTS,
+    COMM_MODULE_POINTS,
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_SCAN_INTERVAL,
@@ -290,6 +291,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 extra.update(INVERTER_DIAGNOSTIC_POINTS)
             if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
                 extra.update(BATTERY_DEVICE_POINTS)
+            # Communication modules report WLAN/wireless signal strength (#149).
+            if type_id == DeviceType.COMMUNICATION_MODULE.value:
+                extra.update(COMM_MODULE_POINTS)
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(

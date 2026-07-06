@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import build_device_info
 from .const import (
     BATTERY_DIAGNOSTIC_CODES,
+    COMM_MODULE_POINTS,
     CONF_GATEWAY,
     DEFAULT_CONSOLE_URL,
     DOMAIN,
@@ -37,7 +38,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Inverter + battery-health point codes get the DIAGNOSTIC entity category so they land
 # in the device page's Diagnostic section instead of cluttering the main sensors (#149/#154).
-_DIAGNOSTIC_CODES = frozenset(INVERTER_DIAGNOSTIC_POINTS.values()) | BATTERY_DIAGNOSTIC_CODES
+_DIAGNOSTIC_CODES = (
+    frozenset(INVERTER_DIAGNOSTIC_POINTS.values()) | BATTERY_DIAGNOSTIC_CODES | frozenset(COMM_MODULE_POINTS.values())
+)
 
 
 def infer_device_class(

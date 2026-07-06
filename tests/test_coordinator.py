@@ -531,6 +531,23 @@ async def test_device_data_ess_gets_both_inverter_and_battery_points(hass: HomeA
     assert "58604" in extra  # battery level
 
 
+async def test_device_data_requests_comm_module_points(hass: HomeAssistant):
+    """A communication module is asked for the WLAN/signal points (#149)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "comm-1", "device_type": DeviceType.COMMUNICATION_MODULE, "ps_key": "12345_22_247_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["23014"] == "wlan_signal_strength"
+    assert "29" not in extra  # not the inverter points
+
+
 async def test_device_data_dedupes_device_types(hass: HomeAssistant):
     """Two devices of the same type trigger a single per-type fetch."""
     plants = MagicMock()
