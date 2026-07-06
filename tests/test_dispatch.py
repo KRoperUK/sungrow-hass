@@ -195,9 +195,11 @@ GRID_SIDE_NUMBERS = {
     "feed_in_limitation_value",
     "feed_in_limitation_ratio",
     "active_power_limit_ratio",
+    "q_t",
+    "pf",
 }
 BATTERY_ONLY_SELECTS = {"charge_discharge_command", "forced_charging", "battery_first"}
-GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch"}
+GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch", "reactive_power_regulation_mode"}
 
 
 def test_battery_only_sets_partition_dispatch_dicts():
@@ -671,6 +673,16 @@ async def test_param_write_encodings(hass: HomeAssistant):
     await by_param["forced_charging_target_soc_2"].async_set_native_value(80)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"forced_charging_target_soc_2": "80"})
 
+    # Reactive power ratio Q(t) is tenths of a percent, signed (x10) (#181).
+    await by_param["q_t"].async_set_native_value(30)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"q_t": "300"})
+    await by_param["q_t"].async_set_native_value(-60)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"q_t": "-600"})
+
+    # Power factor is thousandths, signed (x1000) (#181).
+    await by_param["pf"].async_set_native_value(0.9)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"pf": "900"})
+
 
 async def test_new_selects_write_verified_codes(hass: HomeAssistant):
     """Feed-in / battery-first selects write the device-verified enable/disable codes."""
@@ -690,6 +702,12 @@ async def test_new_selects_write_verified_codes(hass: HomeAssistant):
     await by_param["battery_first"].async_select_option("Disable")
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"battery_first": "85"})
     assert by_param["battery_first"]._attr_entity_category == EntityCategory.CONFIG
+
+    # Reactive power mode writes the Appendix 10 enum code (#181).
+    await by_param["reactive_power_regulation_mode"].async_select_option("Reactive Power Ratio Q(t)")
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"reactive_power_regulation_mode": "162"})
+    await by_param["reactive_power_regulation_mode"].async_select_option("Off")
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"reactive_power_regulation_mode": "85"})
 
 
 # ---------------------------------------------------------------------------
