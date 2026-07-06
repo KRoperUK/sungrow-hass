@@ -61,6 +61,20 @@ def test_inverter_diagnostic_points_include_grid_health():
     assert P["29"] == "operating_status"
 
 
+def test_inverter_diagnostic_points_include_per_string():
+    """The inverter map carries per-string DC voltage/current (#189)."""
+    from custom_components.sungrow.const import INVERTER_DIAGNOSTIC_POINTS as P
+
+    # Strings 1-8: voltage 96-103, current 70-77 (live-confirmed for strings 1-2).
+    assert P["96"] == "string_1_voltage"
+    assert P["70"] == "string_1_current"
+    assert P["97"] == "string_2_voltage"
+    assert P["103"] == "string_8_voltage"
+    assert P["77"] == "string_8_current"
+    string_codes = [c for c in P.values() if c.startswith("string_")]
+    assert len(string_codes) == 16  # 8 strings x (voltage + current)
+
+
 def test_meter_device_points_present():
     """The meter map (#179) carries instantaneous power/PF/frequency + per-phase."""
     from custom_components.sungrow.const import METER_DEVICE_POINTS as M
