@@ -88,6 +88,20 @@ Entities only go unavailable if the failures persist beyond that window — whic
 usually points at a real, sustained outage or an auth/whitelist problem (see the
 sections below).
 
+How the coordinator reacts to each poll:
+
+```mermaid
+flowchart TD
+    P["Poll iSolarCloud"] --> R{Result?}
+    R -->|Success| OK["Serve fresh data<br/>restore interval · clear Repairs"]
+    R -->|"Auth dead<br/>(E900/E912…)"| RA["Trigger re-authorization"]
+    R -->|"Rate limit<br/>(E998/E999)"| BK["Back off interval (×2, ≤1 h)<br/>raise a Repair"]
+    R -->|"Whitelist<br/>(E918/E919)"| WL["Raise a Repair"]
+    R -->|"Transient<br/>(network · 5xx)"| GR{"Within ~15 min<br/>grace window?"}
+    GR -->|Yes| KEEP["Keep last-known values<br/>(stay available)"]
+    GR -->|No| UN["Mark entities unavailable"]
+```
+
 ---
 
 ## A "Repair" appeared: whitelist rejection or rate limit

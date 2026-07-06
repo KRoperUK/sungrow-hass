@@ -7,6 +7,24 @@
 
 Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`sungrow-isolarcloud`](https://github.com/KRoperUK/pysolarcloud) library (a maintained fork of `pysolarcloud`).
 
+It authorizes **once** against your iSolarCloud OpenAPI application, discovers every plant on the account, and polls each on a schedule — mapping your inverters, batteries, meters and WiNet-S onto Home Assistant's device tree, with the correct device/state classes so everything feeds straight into the Energy dashboard.
+
+📖 **[Full documentation & setup guide → sungrow-hass.kroper.uk](https://sungrow-hass.kroper.uk/)**
+
+```mermaid
+flowchart LR
+    subgraph HA["🏠 Home Assistant"]
+        direction TB
+        E["Config entry<br/>(iSolarCloud account)"] --> C["Coordinator<br/>per plant"]
+        C --> S["Sensors · binary sensors<br/>numbers · selects"]
+    end
+    HA <-->|"OAuth 2.0 · token refresh"| API["☁️ iSolarCloud<br/>OpenAPI"]
+    C -.->|"poll ~5 min"| API
+    API --> HW["🔌 Inverters · batteries<br/>meters · WiNet-S"]
+```
+
+Your hardware maps onto Home Assistant as **one account → many plants → each plant's physical devices** (inverter, battery, meter, WiNet-S) nested underneath it. See [Sensors → Device grouping](https://sungrow-hass.kroper.uk/SENSORS/#device-grouping).
+
 ## Features
 
 - **Cloud Polling** — fetches real-time data from the iSolarCloud API.
