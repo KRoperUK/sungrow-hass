@@ -267,10 +267,9 @@ jobs:
           # If this version is already fully released, remove any leftover RC
           # pre-releases for it and skip creating a new RC build.
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            VERSION_REGEX=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
             echo "Full release v${VERSION} exists; deleting matching RC pre-releases."
-            gh release list --limit 1000 --json tagName,isPrerelease \
-              --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v${VERSION_REGEX}-rc[0-9]+$\"))) | .tagName" \
+            gh release list --limit 1000 --json tagName --jq '.[].tagName' \
+            | { grep -E "^dev-v${VERSION}-rc[0-9]+$" || true; } \
             | while read -r tag; do
                 echo "Deleting stale RC pre-release: ${tag}"
                 gh release delete "$tag" --yes --cleanup-tag
@@ -278,13 +277,13 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Incrementing RC number for this version: highest existing dev-v<ver>-rc<n> + 1,
-          # so builds are rc1, rc2, rc3, ... It resets to rc1 when the next version bumps,
-          # since no dev-v<new>-rc* exist yet.
-          version_regex=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
-          highest_rc=$(gh release list --limit 1000 --json tagName,isPrerelease \
-            --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v${version_regex}-rc[0-9]+$\"))) | .tagName" \
-            | sed -E 's/.*-rc([0-9]+)$/\1/' | sort -n | tail -1)
+          # Incrementing RC number for this version: highest existing dev-v<ver>-rcN + 1, so
+          # builds are rc1, rc2, rc3, ... (resets to rc1 when the next version bumps, since no
+          # dev-v<new>-rc* exist yet). A plain grep over the release tag names avoids jq's
+          # string-escaping pitfalls — an unescaped "\." inside a jq string is an invalid
+          # escape and made the previous jq `test()` fail, so it always computed rc1.
+          highest_rc=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' \
+            | grep -E "^dev-v${VERSION}-rc[0-9]+$" | sed -E 's/^.*-rc//' | sort -n | tail -1 || true)
           RC_NUMBER=$(( ${highest_rc:-0} + 1 ))
           HEAD_BRANCH=main
           WORKFLOW_EVENT=push
