@@ -70,7 +70,25 @@
       }
     }
   },
+  "issues": {
+    "whitelist_rejection": {
+      "title": "iSolarCloud a rejeté la requête (liste blanche)",
+      "description": "iSolarCloud rejette les requêtes API pour **{plant}** car l'adresse IP de ce client ou votre compte ne figure pas dans la liste blanche de votre application API (E918/E919). Ajoutez-les dans le portail développeur iSolarCloud (ou désactivez la liste blanche) ; l'intégration se rétablit automatiquement une fois acceptés."
+    },
+    "rate_limited": {
+      "title": "Limite de requêtes de l'API iSolarCloud atteinte",
+      "description": "iSolarCloud rejette les requêtes pour **{plant}** car la limite d'appels de l'API a été atteinte (E998/E999). Augmentez l'intervalle d'interrogation dans les options de l'intégration pour effectuer moins d'appels ; le service se rétablit une fois le quota réinitialisé."
+    }
+  },
   "entity": {
+    "binary_sensor": {
+      "device_connectivity": {
+        "name": "Connectivité"
+      },
+      "device_fault": {
+        "name": "Défaut"
+      }
+    },
     "number": {
       "charge_discharge_power": {
         "name": "Puissance de charge/décharge"
@@ -95,6 +113,15 @@
       },
       "active_power_limit_ratio": {
         "name": "Limite de puissance active"
+      },
+      "q_t": {
+        "name": "Ratio de puissance réactive Q(t)"
+      },
+      "pf": {
+        "name": "Facteur de puissance"
+      },
+      "forced_dispatch_duration": {
+        "name": "Durée du pilotage forcé"
       }
     },
     "select": {
@@ -112,6 +139,9 @@
       },
       "battery_first": {
         "name": "Mode Batterie prioritaire"
+      },
+      "reactive_power_regulation_mode": {
+        "name": "Mode de puissance réactive"
       }
     }
   },

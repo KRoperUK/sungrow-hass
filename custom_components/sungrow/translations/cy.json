@@ -70,7 +70,25 @@
       }
     }
   },
+  "issues": {
+    "whitelist_rejection": {
+      "title": "Gwrthododd iSolarCloud y cais (rhestr wen)",
+      "description": "Mae iSolarCloud yn gwrthod ceisiadau API ar gyfer **{plant}** oherwydd nad yw cyfeiriad IP y cleient hwn na'ch cyfrif ar restr wen eich cymhwysiad API (E918/E919). Ychwanegwch nhw ym Mhortal Datblygwyr iSolarCloud (neu analluogwch y rhestr wen); mae'r integreiddiad yn adfer yn awtomatig unwaith y byddant wedi'u derbyn."
+    },
+    "rate_limited": {
+      "title": "Cyrhaeddwyd terfyn cyfradd API iSolarCloud",
+      "description": "Mae iSolarCloud yn gwrthod ceisiadau ar gyfer **{plant}** oherwydd cyrhaeddwyd y terfyn galwadau API (E998/E999). Cynyddwch y cyfwng holi yn opsiynau'r integreiddiad i wneud llai o alwadau; mae'n adfer pan fydd y cwota'n ailosod."
+    }
+  },
   "entity": {
+    "binary_sensor": {
+      "device_connectivity": {
+        "name": "Cysylltedd"
+      },
+      "device_fault": {
+        "name": "Nam"
+      }
+    },
     "number": {
       "charge_discharge_power": {
         "name": "Pŵer Gwefru/Dadwefru"
@@ -95,6 +113,15 @@
       },
       "active_power_limit_ratio": {
         "name": "Terfyn Pŵer Actif"
+      },
+      "q_t": {
+        "name": "Cymhareb Pŵer Adweithiol Q(t)"
+      },
+      "pf": {
+        "name": "Ffactor Pŵer"
+      },
+      "forced_dispatch_duration": {
+        "name": "Hyd Anfon Gorfodol"
       }
     },
     "select": {
@@ -112,6 +139,9 @@
       },
       "battery_first": {
         "name": "Modd Batri yn Gyntaf"
+      },
+      "reactive_power_regulation_mode": {
+        "name": "Modd Pŵer Adweithiol"
       }
     }
   },
