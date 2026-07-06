@@ -10,6 +10,7 @@ from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -90,6 +91,9 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Zeroconf-discovered WiNet-S local Modbus host, carried into the confirm step
         # that creates the cloud-free Modbus-only entry (#159).
         self._discovered_modbus_host: str | None = None
+        # Entry id of an existing cloud entry that already monitors the discovered
+        # inverter, when discovery offers to add local Modbus to it (hybrid, #218).
+        self._cloud_entry_id: str | None = None
 
     @staticmethod
     @callback
@@ -189,7 +193,59 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_modbus_host = host
         self.init_info = {CONF_SERIAL: serial, CONF_MODEL: model or "Inverter"}
         self.context["title_placeholders"] = {"name": f"Sungrow {model or 'inverter'}"}
+        # If this inverter is already set up via the cloud, offer to add fast local Modbus
+        # to that entry (hybrid) rather than creating a duplicate device (#218).
+        cloud_entry = self._find_cloud_entry_for_serial(serial)
+        if cloud_entry is not None:
+            self._cloud_entry_id = cloud_entry.entry_id
+            return await self.async_step_attach_modbus()
         return await self.async_step_zeroconf_confirm()
+
+    def _find_cloud_entry_for_serial(self, serial: str) -> ConfigEntry | None:
+        """Return a cloud entry that already monitors this inverter serial, else None (#218).
+
+        Matches on the device-registry ``serial_number`` (set from the cloud ``device_sn``),
+        which equals the WiNet-S-advertised serial for the same physical inverter. Cloud
+        entries that already have a Modbus host are skipped — they are hybrid already.
+        """
+        registry = dr.async_get(self.hass)
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+                continue
+            if entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST):
+                continue
+            for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+                if device.serial_number and device.serial_number == serial:
+                    return entry
+        return None
+
+    async def async_step_attach_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Offer to enable local Modbus on the existing cloud entry for this inverter (#218).
+
+        Confirming writes the discovered host into the cloud entry's options and reloads it,
+        so the Phase 2 hybrid overlay serves Modbus-preferred values with cloud fallback —
+        one device, no duplicate.
+        """
+        cloud_entry = self.hass.config_entries.async_get_entry(self._cloud_entry_id or "")
+        if cloud_entry is None:
+            # The cloud entry vanished between steps; fall back to a standalone local entry.
+            return await self.async_step_zeroconf_confirm()
+        if user_input is not None:
+            self.hass.config_entries.async_update_entry(
+                cloud_entry,
+                options={**cloud_entry.options, CONF_MODBUS_HOST: self._discovered_modbus_host},
+            )
+            self.hass.async_create_task(self.hass.config_entries.async_reload(cloud_entry.entry_id))
+            return self.async_abort(reason="modbus_enabled_on_cloud")
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="attach_modbus",
+            description_placeholders={
+                "model": self.init_info.get(CONF_MODEL, "Inverter"),
+                "host": self._discovered_modbus_host or "",
+                "cloud": cloud_entry.title,
+            },
+        )
 
     async def async_step_zeroconf_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Confirm setting up the discovered WiNet-S as a local (Modbus-only) integration."""

@@ -48,6 +48,10 @@
         "data": {
           "modbus_host": "Host Modbus local (IP del WiNet-S)"
         }
+      },
+      "attach_modbus": {
+        "title": "Añadir Modbus local a su inversor Sungrow",
+        "description": "Se detectó un Sungrow **{model}** en **{host}** (WiNet-S), y ya está configurado a través de iSolarCloud (**{cloud}**). Añada Modbus local rápido a esa entrada — sus datos provendrán primero de la conexión local (Modbus preferido) y recurrirán a la nube — sin crear un dispositivo duplicado."
       }
     },
     "progress": {
@@ -66,7 +70,8 @@
       "reauth_successful": "La reautenticación se realizó correctamente",
       "reconfigure_successful": "La reconfiguración se realizó correctamente",
       "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original.",
-      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible."
+      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible.",
+      "modbus_enabled_on_cloud": "Se habilitó Modbus local en su entrada de iSolarCloud existente para este inversor."
     }
   },
   "options": {
