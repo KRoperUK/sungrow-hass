@@ -82,3 +82,11 @@ BATTERY_DEVICE_POINTS: dict[str, str] = {
 # The technical/health subset of the battery points shown as diagnostics; the rest
 # (SOC, charge/discharge energy) stay primary sensors for the dashboards.
 BATTERY_DIAGNOSTIC_CODES = frozenset({"battery_voltage", "battery_current", "battery_temperature", "battery_soh"})
+
+# Communication-module (WiNet-S) device-level measuring points surfaced as diagnostic
+# sensors (#149), requested per-device when device sensors are enabled. Both IDs are in
+# the measure-point catalog.
+COMM_MODULE_POINTS: dict[str, str] = {
+    "23014": "wlan_signal_strength",
+    "23001": "wireless_signal_strength",
+}

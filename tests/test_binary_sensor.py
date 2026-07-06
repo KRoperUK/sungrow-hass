@@ -10,8 +10,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import SungrowData
 from custom_components.sungrow.binary_sensor import (
+    SungrowDeviceConnectivityBinarySensor,
     SungrowDeviceFaultBinarySensor,
     async_setup_entry,
+    connectivity_is_on,
     fault_is_on,
 )
 from custom_components.sungrow.const import DOMAIN
@@ -64,14 +66,14 @@ async def test_fault_binary_sensor_created_per_device(hass: HomeAssistant):
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 2
-    by_uuid = {e.device_uuid: e for e in added}
-    assert by_uuid["inv-1"]._attr_device_class == BinarySensorDeviceClass.PROBLEM
-    assert by_uuid["inv-1"]._attr_entity_category == EntityCategory.DIAGNOSTIC
-    assert by_uuid["inv-1"]._attr_unique_id == "12345_inv-1_fault"
-    assert by_uuid["inv-1"].is_on is False
-    assert by_uuid["meter-1"].is_on is True
-    assert by_uuid["meter-1"].extra_state_attributes["fault_status"] == "FAULT"
+    fault = {e.device_uuid: e for e in added if isinstance(e, SungrowDeviceFaultBinarySensor)}
+    assert set(fault) == {"inv-1", "meter-1"}  # the no-uuid device is skipped
+    assert fault["inv-1"]._attr_device_class == BinarySensorDeviceClass.PROBLEM
+    assert fault["inv-1"]._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert fault["inv-1"]._attr_unique_id == "12345_inv-1_fault"
+    assert fault["inv-1"].is_on is False
+    assert fault["meter-1"].is_on is True
+    assert fault["meter-1"].extra_state_attributes["fault_status"] == "FAULT"
 
 
 async def test_fault_binary_sensor_unavailable_when_device_gone(hass: HomeAssistant):
@@ -89,6 +91,35 @@ async def test_fault_binary_sensor_unavailable_when_device_gone(hass: HomeAssist
     data.coordinators[0].devices = []
     assert sensor.available is False
     assert sensor.is_on is None
+
+
+def test_connectivity_is_on_maps_dev_status():
+    """connectivity_is_on maps dev_status 1/0 to online/offline, else unknown."""
+    assert connectivity_is_on("1") is True
+    assert connectivity_is_on(1) is True
+    assert connectivity_is_on("0") is False
+    assert connectivity_is_on(0) is False
+    assert connectivity_is_on(None) is None
+    assert connectivity_is_on("x") is None
+
+
+async def test_connectivity_binary_sensor(hass: HomeAssistant):
+    """A CONNECTIVITY sensor per device reflects dev_status + exposes the commissioning date."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "meter-1", "device_name": "Meter1", "dev_status": "0", "grid_connection_date": "2025-10-26 23:41:51"}
+    ]
+    _setup_entry_data(entry, devices)
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    conn = next(e for e in added if isinstance(e, SungrowDeviceConnectivityBinarySensor))
+    assert conn._attr_device_class == BinarySensorDeviceClass.CONNECTIVITY
+    assert conn._attr_unique_id == "12345_meter-1_online"
+    assert conn.is_on is False  # dev_status "0" -> offline
+    assert conn.extra_state_attributes["commissioning_date"] == "2025-10-26 23:41:51"
 
 
 def test_fault_binary_sensor_device_info_enriched():
