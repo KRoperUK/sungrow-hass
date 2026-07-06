@@ -77,6 +77,40 @@ If you are on a pre-0.3.0 version, please update first.
 
 ---
 
+## Entities flicker to "unavailable" on a single bad poll
+
+They shouldn't any more. A single failed poll (a momentary network drop or a
+transient iSolarCloud 5xx) used to flip every entity for the plant to
+*unavailable* until the next successful interval. The integration now keeps
+serving the **last-known values through a short grace period (~15 minutes)** and
+retries in the background, so a brief blip is invisible on your dashboards.
+Entities only go unavailable if the failures persist beyond that window — which
+usually points at a real, sustained outage or an auth/whitelist problem (see the
+sections below).
+
+---
+
+## A "Repair" appeared: whitelist rejection or rate limit
+
+The integration raises a Home Assistant **Repair** (Settings → System → Repairs)
+when iSolarCloud rejects requests for a reason you can act on:
+
+- **"iSolarCloud rejected the request (whitelist)" (E918/E919).** Your account or
+  the IP address Home Assistant calls from is not on the API application's
+  whitelist. Open the **iSolarCloud Developer Portal → your application** and add
+  the IP/account to the whitelist (or disable the whitelist). The integration
+  recovers automatically once the request is accepted, and the Repair clears
+  itself.
+- **"iSolarCloud API rate limit reached" (E998/E999).** You've exceeded the
+  hourly/monthly call quota (the free plan allows ~2000 calls/hour). The
+  integration **automatically backs off** — doubling the effective polling
+  interval up to a 1-hour cap — so it stops hammering the API, but to fix the
+  root cause, **raise the polling interval** (Configure → Polling interval) and,
+  if you have per-device sensors enabled, consider turning them off (each device
+  type adds a call per poll). The Repair clears once the quota resets.
+
+---
+
 ## Sensors update too often / not often enough
 
 The default polling interval is **5 minutes**. You can change it:
@@ -85,7 +119,8 @@ The default polling interval is **5 minutes**. You can change it:
 
 iSolarCloud typically allows ~2000 API calls/hour, so very low intervals across
 many sensors can still be served, but a conservative interval is gentler on the
-API and your account.
+API and your account. If you do hit the quota, the integration automatically
+backs off and raises a Repair — see [A "Repair" appeared](#a-repair-appeared-whitelist-rejection-or-rate-limit).
 
 ---
 
@@ -124,6 +159,27 @@ To help map it:
    returned by default — recognised codes like `ev_charger_power` /
    `ev_charger_energy` get a friendly name automatically. Leave the option off if
    you only need plant-level data (it adds extra API calls).
+
+---
+
+## The battery / charge / discharge controls are missing
+
+On a **PV-only plant** (solar panels and an inverter, no battery) the battery
+dispatch controls are **intentionally hidden**. That includes **Charge/Discharge
+Command**, **Charge/Discharge Power**, **SOC Upper/Lower Limit**, **Forced
+Charging**, **Forced Charge Target SOC**, and **Battery First Mode**.
+
+This is deliberate. Sending a charge/discharge command to an inverter that has no
+battery can push it into **External-EMS ("Dispatched running") mode**, where the
+inverter follows the (impossible) battery command and **stops generating** — one
+report saw a battery-less inverter sit at a few watts all day until the command
+was cleared. Hiding these controls removes the footgun. The integration decides
+by looking for a battery/ESS device on the plant, so if you *do* have a battery
+but the controls are missing, make sure the battery shows up as its own device in
+the iSolarCloud app (and file an issue with a diagnostics dump).
+
+Non-battery controls — **Export Limitation**, **Export Limit (Power/%)**, and
+**Active Power Limiting** — remain available on PV-only plants.
 
 ---
 
