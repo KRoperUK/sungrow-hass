@@ -258,7 +258,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SKIPPED: ${{ steps.nextver.outputs.skipped }}
           NEXT_VERSION: ${{ steps.nextver.outputs.version }}
-          RUN_ID: ${{ github.run_id }}
         run: |
           if [ "$SKIPPED" = "true" ] || [ -z "$NEXT_VERSION" ]; then
             VERSION=$(jq -r .version custom_components/sungrow/manifest.json)
@@ -279,9 +278,17 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Incrementing RC number for this version: highest existing dev-v<ver>-rc<n> + 1,
+          # so builds are rc1, rc2, rc3, ... It resets to rc1 when the next version bumps,
+          # since no dev-v<new>-rc* exist yet.
+          version_regex=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+          highest_rc=$(gh release list --limit 1000 --json tagName,isPrerelease \
+            --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v${version_regex}-rc[0-9]+$\"))) | .tagName" \
+            | sed -E 's/.*-rc([0-9]+)$/\1/' | sort -n | tail -1)
+          RC_NUMBER=$(( ${highest_rc:-0} + 1 ))
           HEAD_BRANCH=main
           WORKFLOW_EVENT=push
-          export VERSION RUN_ID HEAD_BRANCH WORKFLOW_EVENT
+          export VERSION RC_NUMBER HEAD_BRANCH WORKFLOW_EVENT
           TAG=$(bash scripts/compute-dev-tag.sh)
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
