@@ -17,7 +17,7 @@
   ],
   "quality_scale": "platinum",
   "requirements": [
-    "sungrow-isolarcloud==0.10.2"
+    "sungrow-isolarcloud==0.10.3"
   ],
   "version": "3.3.0"
 }
