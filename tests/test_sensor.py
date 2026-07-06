@@ -46,6 +46,8 @@ from .conftest import MOCK_CONFIG_DATA
         ("%", "battery_soc", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT),
         # Generic percentage gets a state class but no device class.
         ("%", "efficiency", None, SensorStateClass.MEASUREMENT),
+        # Dimensionless integer tallies graph as a measurement, not text.
+        ("", "afci_fault_count", None, SensorStateClass.MEASUREMENT),
         # Unknown / empty units.
         ("", "status", None, None),
         (None, "status", None, None),
@@ -148,7 +150,10 @@ def test_plant_detail_sensor_values_and_units():
     descs = {d.key: d for d in PLANT_DETAIL_SENSORS}
 
     alarm = SungrowPlantDetailSensor(coordinator, descs["alarm_count"], "123", "Plant", "http://x")
-    assert alarm.native_value == 2.0
+    # Counts are whole numbers, displayed without a fractional part.
+    assert alarm.native_value == 2
+    assert isinstance(alarm.native_value, int)
+    assert alarm._attr_suggested_display_precision == 0
     assert alarm._attr_unique_id == "123_detail_alarm_count"
     assert alarm._attr_device_info["identifiers"] == {(DOMAIN, "123")}
     assert alarm._attr_icon == "mdi:alert-outline"
@@ -158,11 +163,12 @@ def test_plant_detail_sensor_values_and_units():
     assert power._attr_native_unit_of_measurement == "W"
     assert power._attr_icon == "mdi:solar-power"
 
-    # Tariff sensor takes its unit from the plant's configured currency.
+    # Tariff sensor takes its unit from the plant's configured currency; import
+    # price is money paid (cash-minus).
     price = SungrowPlantDetailSensor(coordinator, descs["ps_consumption_power_price_kwh"], "123", "Plant", "http://x")
     assert price.native_value == 0.3887
     assert price._attr_native_unit_of_measurement == "GBP/kWh"
-    assert price._attr_icon == "mdi:cash-plus"
+    assert price._attr_icon == "mdi:cash-minus"
 
 
 def test_plant_detail_sensor_absent_field_is_none():
@@ -172,6 +178,81 @@ def test_plant_detail_sensor_absent_field_is_none():
     desc = next(d for d in PLANT_DETAIL_SENSORS if d.key == "fault_count")
     sensor = SungrowPlantDetailSensor(coordinator, desc, "123", "Plant", "http://x")
     assert sensor.native_value is None
+
+
+def test_fault_count_is_integer():
+    """Fault count is a whole number, displayed without decimals."""
+    coordinator = MagicMock()
+    coordinator.plant_detail = {"fault_count": 4}
+    desc = next(d for d in PLANT_DETAIL_SENSORS if d.key == "fault_count")
+    sensor = SungrowPlantDetailSensor(coordinator, desc, "123", "Plant", "http://x")
+    assert sensor.native_value == 4
+    assert isinstance(sensor.native_value, int)
+    assert sensor._attr_suggested_display_precision == 0
+
+
+def test_export_price_icon_is_cash_plus():
+    """Export price is money earned (cash-plus); import price is money paid (cash-minus)."""
+    coordinator = MagicMock()
+    coordinator.plant_detail = {"ps_feedin_power_price_kwh": "0.15", "power_price_unit": "GBP"}
+    desc = next(d for d in PLANT_DETAIL_SENSORS if d.key == "ps_feedin_power_price_kwh")
+    sensor = SungrowPlantDetailSensor(coordinator, desc, "123", "Plant", "http://x")
+    assert sensor._attr_icon == "mdi:cash-plus"
+
+
+# ---------------------------------------------------------------------------
+# Per-device diagnostic naming, icons & classification (aesthetics)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("code", "point_id", "expected_name"),
+    [
+        ("mppt1_voltage", "5", "MPPT1 Voltage"),
+        ("mppt2_current", "8", "MPPT2 Current"),
+        ("mppt3_voltage", "9", "MPPT3 Voltage"),
+        ("total_dc_power", "14", "Total DC Power"),
+        ("negative_voltage_to_ground", "90", "Negative Voltage to Ground"),
+        ("afci_fault_count", "120", "AFCI Fault Count"),
+        ("wlan_signal_strength", "23014", "WLAN Signal Strength"),
+        ("battery_dc_contactor_status", "58635", "Battery DC Contactor Status"),
+        ("battery_fault_module_id", "58636", "Battery Fault Module ID"),
+    ],
+)
+def test_acronym_display_names(code, point_id, expected_name):
+    """Acronym/initialism codes keep their capitalisation instead of being title-cased."""
+    point = {"id": point_id, "code": code, "value": "1", "unit": ""}
+    coordinator = _coord_with_devices([], data={code: point})
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_name == expected_name
+
+
+@pytest.mark.parametrize(
+    ("code", "point_id", "unit", "expected_icon"),
+    [
+        ("array_insulation_resistance", "94", "kΩ", "mdi:omega"),
+        ("afci_fault_count", "120", "", "mdi:flash-alert"),
+        ("battery_operation_status", "58608", "", "mdi:battery-sync"),
+        ("battery_fault_module_id", "58636", "", "mdi:alert-circle"),
+    ],
+)
+def test_diagnostic_icon_overrides(code, point_id, unit, expected_icon):
+    """Otherwise-unclassified diagnostics get a fitting icon instead of the solar fallback."""
+    point = {"id": point_id, "code": code, "value": "1", "unit": unit}
+    coordinator = _coord_with_devices([], data={code: point})
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_icon == expected_icon
+
+
+def test_afci_fault_count_is_integer_measurement():
+    """AFCI fault count graphs as a whole-number measurement, not a text sensor."""
+    point = {"id": "120", "code": "afci_fault_count", "value": "3", "unit": ""}
+    coordinator = _coord_with_devices([], data={"afci_fault_count": point})
+    sensor = SungrowSensor(coordinator, "afci_fault_count", "123", "Plant", point)
+    assert sensor._attr_device_class is None
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    assert sensor._attr_suggested_display_precision == 0
+    assert sensor.native_value == 3.0
 
 
 # ---------------------------------------------------------------------------

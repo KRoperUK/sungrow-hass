@@ -157,6 +157,10 @@ def _classify_by_code(code: str) -> _ClassPair | None:
         return (SensorDeviceClass.BATTERY, _MEASUREMENT)
     if "signal_strength" in lowered or "signal strength" in lowered:
         return (SensorDeviceClass.SIGNAL_STRENGTH, _MEASUREMENT)
+    if "count" in lowered:
+        # Dimensionless integer tallies (e.g. afci_fault_count) graph as a plain
+        # numeric measurement instead of falling through to a text sensor.
+        return (None, _MEASUREMENT)
     return None
 
 
