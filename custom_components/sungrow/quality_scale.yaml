@@ -85,7 +85,11 @@ rules:
   # --- Gold ---
   devices:
     status: done
-    comment: Sensors group under a plant device; dispatch controls under their own device.
+    comment: >-
+      Each physical device (inverter/battery/meter/comm module) is modelled as its
+      own HA device nested under the plant via via_device and enriched with
+      model/serial/manufacturer; plant sensors re-home onto the device they
+      describe (#158) and dispatch controls attach to the dispatch device.
   diagnostics:
     status: done
   discovery:
@@ -147,12 +151,13 @@ rules:
   reconfiguration-flow:
     status: done
   repair-issues:
-    status: exempt
+    status: done
     comment: >-
-      The only user-actionable failure is invalid/expired credentials, which is
-      surfaced through the reauthentication flow (ConfigEntryAuthFailed ->
-      async_step_reauth). No other persistent, user-fixable condition exists that
-      a separate repair issue would address.
+      Developer-Portal whitelist rejections (E918/E919) and API quota/rate-limit
+      rejections (E998/E999) surface as actionable Home Assistant Repairs via the
+      coordinator's _async_manage_repairs, and clear automatically once the plant
+      recovers (#153). Invalid/expired credentials are handled separately through
+      the reauthentication flow (ConfigEntryAuthFailed -> async_step_reauth).
   stale-devices:
     status: done
     comment: >-
