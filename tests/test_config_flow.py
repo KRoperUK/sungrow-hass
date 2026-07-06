@@ -14,6 +14,7 @@ import pytest
 from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -890,3 +891,65 @@ async def test_zeroconf_aborts_when_already_configured_and_updates_host(hass: Ho
     assert result["reason"] == "already_configured"
     # The WiNet-S moved to a new DHCP lease; the stored host follows it.
     assert entry.data[CONF_MODBUS_HOST] == "192.168.1.99"
+
+
+def _add_cloud_entry_with_inverter(
+    hass: HomeAssistant, serial: str, *, title: str = "My Cloud Plant"
+) -> MockConfigEntry:
+    """A cloud entry whose device registry has an inverter with the given serial (#218)."""
+    cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id", title=title)
+    cloud.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, f"cloud-{serial}")},
+        serial_number=serial,
+        manufacturer="Sungrow",
+    )
+    return cloud
+
+
+async def test_zeroconf_offers_attach_when_inverter_already_cloud_configured(hass: HomeAssistant):
+    """Discovering an inverter already set up via cloud offers to add local Modbus to it (#218)."""
+    _add_cloud_entry_with_inverter(hass, "A2340512345")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(serial="A2340512345")
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "attach_modbus"
+    assert result["description_placeholders"]["cloud"] == "My Cloud Plant"
+
+
+async def test_zeroconf_attach_enables_hybrid_on_cloud_entry(hass: HomeAssistant):
+    """Confirming the attach step writes the Modbus host onto the cloud entry (hybrid) (#218)."""
+    cloud = _add_cloud_entry_with_inverter(hass, "SNMATCH")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_ZEROCONF},
+        data=_winet_discovery(host="192.168.1.77", serial="SNMATCH"),
+    )
+    assert result["step_id"] == "attach_modbus"
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "modbus_enabled_on_cloud"
+    # The cloud entry became hybrid: the discovered host is now in its options.
+    assert cloud.options[CONF_MODBUS_HOST] == "192.168.1.77"
+
+
+async def test_zeroconf_no_attach_when_cloud_entry_already_hybrid(hass: HomeAssistant):
+    """A cloud entry that already has a Modbus host is skipped — discovery stays standalone (#218)."""
+    cloud = _add_cloud_entry_with_inverter(hass, "A2340512345")
+    hass.config_entries.async_update_entry(cloud, options={CONF_MODBUS_HOST: "10.0.0.1"})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(serial="A2340512345")
+    )
+
+    # No hybrid attach offered; falls through to the standalone Modbus-only confirm.
+    assert result["step_id"] == "zeroconf_confirm"

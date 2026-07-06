@@ -48,6 +48,10 @@
         "data": {
           "modbus_host": "Gwesteiwr Modbus lleol (IP WiNet-S)"
         }
+      },
+      "attach_modbus": {
+        "title": "Ychwanegu Modbus lleol at eich gwrthdröydd Sungrow",
+        "description": "Canfuwyd Sungrow **{model}** yn **{host}** (WiNet-S), ac mae eisoes wedi'i sefydlu drwy iSolarCloud (**{cloud}**). Ychwanegwch Modbus lleol cyflym at y cofnod hwnnw — daw ei ddata o'r cysylltiad lleol yn gyntaf (Modbus a ffefrir) gan syrthio'n ôl i'r cwmwl — heb greu dyfais ddyblyg."
       }
     },
     "progress": {
@@ -66,7 +70,8 @@
       "reauth_successful": "Roedd yr ail-ddilysiad yn llwyddiannus",
       "reconfigure_successful": "Roedd yr ailgyflunio'n llwyddiannus",
       "wrong_account": "Nid yw'r cyfrif awdurdodedig yn cyfateb i App ID yr integreiddiad hwn. Defnyddiwch y cymhwysiad datblygwr gwreiddiol.",
-      "not_sungrow_device": "Nid yw'r ddyfais a ddarganfuwyd yn wrthdröydd Sungrow a gefnogir."
+      "not_sungrow_device": "Nid yw'r ddyfais a ddarganfuwyd yn wrthdröydd Sungrow a gefnogir.",
+      "modbus_enabled_on_cloud": "Galluogwyd Modbus lleol ar eich cofnod iSolarCloud presennol ar gyfer y gwrthdröydd hwn."
     }
   },
   "options": {
