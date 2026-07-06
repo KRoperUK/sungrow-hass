@@ -174,6 +174,22 @@ def build_device_info(device: dict[str, Any], plant_id: str, *, fallback_name: s
     )
 
 
+def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) -> DeviceInfo:
+    """Build the plant "service" DeviceInfo that anchors the per-device ``via_device`` tree.
+
+    Registered explicitly at setup and used as the fallback for any plant sensor that does
+    not re-home onto a physical device (#158), so the plant device always exists as the
+    parent even when every sensor moves onto an inverter/battery/meter.
+    """
+    return DeviceInfo(
+        identifiers={(DOMAIN, plant_id)},
+        name=plant_name,
+        manufacturer="Sungrow",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        configuration_url=console_url,
+    )
+
+
 class IterableSchema(vol.Schema):
     """A Schema that can be iterated over (yielding nothing) to satisfy HA's checks."""
 

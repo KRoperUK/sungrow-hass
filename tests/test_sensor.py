@@ -64,6 +64,53 @@ def test_infer_device_class_power_factor_no_unit():
 
 
 # ---------------------------------------------------------------------------
+# Per-device re-homing (#158)
+# ---------------------------------------------------------------------------
+
+
+def _coord_with_devices(devices, data=None):
+    coordinator = MagicMock()
+    coordinator.data = data or {}
+    coordinator.devices = devices
+    coordinator.plant_name = "Plant"
+    return coordinator
+
+
+def test_sensor_rehomes_to_singular_device():
+    """A mapped point re-homes onto the single device of its type; unique_id unchanged."""
+    inv = {
+        "uuid": "inv-1",
+        "device_type": DeviceType.INVERTER,
+        "device_model_code": "SG3.6RS",
+        "device_sn": "A1",
+        "factory_name": "SUNGROW",
+    }
+    coordinator = _coord_with_devices([inv])
+    sensor = SungrowSensor(
+        coordinator, "inverter_ac_power", "123", "Plant", {"code": "inverter_ac_power", "value": "1", "unit": "W"}
+    )
+    assert (DOMAIN, "inv-1") in sensor._attr_device_info["identifiers"]
+    assert sensor._attr_device_info["model"] == "SG3.6RS"
+    # Non-breaking: unique_id is still the plant-scoped code.
+    assert sensor._attr_unique_id == "123_inverter_ac_power"
+
+
+def test_sensor_stays_on_plant_when_no_device_or_unmapped():
+    """No matching device (or an unmapped code) keeps the sensor on the plant device."""
+    # No devices at all -> plant.
+    coordinator = _coord_with_devices([])
+    sensor = SungrowSensor(
+        coordinator, "total_active_power", "123", "Plant", {"code": "total_active_power", "value": "1", "unit": "kW"}
+    )
+    assert sensor._attr_device_info["identifiers"] == {(DOMAIN, "123")}
+    assert sensor._attr_device_info.get("entry_type") is not None
+    # Unmapped code with a device present -> still plant.
+    coord2 = _coord_with_devices([{"uuid": "inv-1", "device_type": DeviceType.INVERTER}])
+    load = SungrowSensor(coord2, "load_power", "123", "Plant", {"code": "load_power", "value": "1", "unit": "W"})
+    assert load._attr_device_info["identifiers"] == {(DOMAIN, "123")}
+
+
+# ---------------------------------------------------------------------------
 # SungrowSensor unit tests
 # ---------------------------------------------------------------------------
 
@@ -74,6 +121,7 @@ class TestSungrowSensor:
     def _make_coordinator(self, data=None):
         coordinator = MagicMock()
         coordinator.data = data or {}
+        coordinator.devices = []  # #158: SungrowSensor reads this to pick its device
         return coordinator
 
     def test_sensor_name_from_code(self):

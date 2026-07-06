@@ -7,17 +7,15 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import build_device_info
+from . import build_device_info, build_plant_device_info, resolve_point_device
 from .const import (
     BATTERY_DIAGNOSTIC_CODES,
     COMM_MODULE_POINTS,
     CONF_GATEWAY,
     DEFAULT_CONSOLE_URL,
-    DOMAIN,
     GATEWAY_CONSOLE_URLS,
     INVERTER_DIAGNOSTIC_POINTS,
 )
@@ -153,14 +151,14 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         self.plant_id = plant_id
         self._attr_unique_id = f"{plant_id}_{point_code}"
 
-        # Group sensors under a device per plant.
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, plant_id)},
-            name=plant_name,
-            manufacturer="Sungrow",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url=console_url,
-        )
+        # Re-home the sensor onto its physical device when the plant has exactly one
+        # device of the mapped type; otherwise keep it on the plant device (#158). The
+        # unique_id above is unchanged, so HA re-parents the entity without renaming it.
+        device = resolve_point_device(point_code, getattr(coordinator, "devices", None) or [])
+        if device is not None:
+            self._attr_device_info = build_device_info(device, plant_id, fallback_name=plant_name)
+        else:
+            self._attr_device_info = build_plant_device_info(plant_id, plant_name, console_url)
         self._apply_point_metadata(point_code, init_data, plant_name)
 
     def _apply_point_metadata(self, point_code: str, init_data: dict[str, Any], label: str) -> None:
