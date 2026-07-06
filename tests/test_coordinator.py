@@ -223,6 +223,39 @@ async def test_non_rate_limit_error_does_not_back_off(hass: HomeAssistant):
     assert coordinator.update_interval == base
 
 
+async def test_transient_error_preserves_rate_limit_backoff_and_repair(hass: HomeAssistant):
+    """A transient error during an active rate-limit must not reset the backoff or clear the Repair.
+
+    Regression: a single interleaved ConnectionError/TimeoutError used to snap the
+    interval back to base and dismiss the rate_limited Repair, so the integration
+    immediately resumed 5-minute polling and re-tripped the quota (#153/#156).
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException.from_response({"result_code": "E999"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+    base = coordinator.update_interval
+    registry = ir.async_get(hass)
+
+    # Rate-limited: back off and raise the Repair.
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 2
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+    # A transient network error must NOT undo the backoff or clear the Repair.
+    plants.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("blip"))
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 2
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+    # Only a real success restores the interval and clears the Repair.
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    await coordinator._async_update_data()
+    assert coordinator.update_interval == base
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is None
+
+
 async def test_transient_failure_keeps_last_good_within_grace(hass: HomeAssistant):
     """A brief poll failure keeps the last-good data instead of flapping unavailable (#152)."""
     plants = MagicMock()
@@ -501,6 +534,29 @@ async def test_operating_status_uses_13146_for_ess_when_disabled(hass: HomeAssis
     assert extra == {"13146": "operating_status"}
 
 
+async def test_ess_operating_status_avoids_point29_collision(hass: HomeAssistant):
+    """An ESS with device sensors ON requests 13146 for operating status, not point 29.
+
+    Both 29 and 13146 map to the "operating_status" code, so requesting both would let
+    one silently overwrite the other in the per-device merge, flapping the reason (#182).
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "ps_key": "12345_14_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["13146"] == "operating_status"
+    assert "29" not in extra  # inverter operating-status point dropped for ESS (no collision)
+    # The rest of the inverter diagnostic set is still requested.
+    assert extra["14"] == "total_dc_power"
+
+
 async def test_device_data_best_effort_on_error(hass: HomeAssistant):
     """A failing device type is skipped without failing the whole update."""
     plants = MagicMock()
@@ -634,7 +690,9 @@ async def test_device_data_ess_gets_both_inverter_and_battery_points(hass: HomeA
     await coordinator._async_update_data()
 
     extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
-    assert "29" in extra  # inverter operating status
+    assert "13146" in extra  # ESS operating status (inverter point 29 dropped to avoid a collision)
+    assert "29" not in extra
+    assert "14" in extra  # inverter DC power — the rest of the diagnostic set still applies
     assert "58604" in extra  # battery level
 
 
