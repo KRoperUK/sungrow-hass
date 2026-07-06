@@ -41,6 +41,13 @@
       "zeroconf_confirm": {
         "title": "Lokalen Sungrow-Wechselrichter einrichten",
         "description": "Ein Sungrow **{model}** wurde in Ihrem Netzwerk unter **{host}** (WiNet-S) gefunden. Richten Sie ihn ein, um Daten direkt über lokales Modbus zu lesen — schnell, ohne Limit und offline-fähig, ohne iSolarCloud-Konto."
+      },
+      "reconfigure_modbus": {
+        "title": "Lokalen Sungrow-Wechselrichter neu konfigurieren",
+        "description": "Aktualisieren Sie die WiNet-S-IP-Adresse, falls sie sich in Ihrem Netzwerk geändert hat. Dies ist eine lokale Modbus-Verbindung — es ist kein iSolarCloud-Konto beteiligt.",
+        "data": {
+          "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP)"
+        }
       }
     },
     "progress": {

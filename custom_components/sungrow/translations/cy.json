@@ -41,6 +41,13 @@
       "zeroconf_confirm": {
         "title": "Gosod gwrthdröydd Sungrow lleol",
         "description": "Darganfuwyd Sungrow **{model}** ar eich rhwydwaith yn **{host}** (WiNet-S). Gosodwch ef i ddarllen data'n uniongyrchol dros Modbus lleol — cyflym, heb derfyn ac all-lein, heb angen cyfrif iSolarCloud."
+      },
+      "reconfigure_modbus": {
+        "title": "Ailgyflunio gwrthdröydd Sungrow lleol",
+        "description": "Diweddarwch gyfeiriad IP y WiNet-S os yw wedi newid ar eich rhwydwaith. Cysylltiad Modbus lleol yw hwn — nid oes cyfrif iSolarCloud yn gysylltiedig.",
+        "data": {
+          "modbus_host": "Gwesteiwr Modbus lleol (IP WiNet-S)"
+        }
       }
     },
     "progress": {
