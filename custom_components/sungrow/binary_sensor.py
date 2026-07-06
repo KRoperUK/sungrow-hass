@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import build_device_info
 from .coordinator import SungrowPlantCoordinator
+from .measure_points import resolve_enum_value
 
 # Read-only, updated in bulk by the coordinator.
 PARALLEL_UPDATES = 0
@@ -133,10 +134,28 @@ class SungrowDeviceFaultBinarySensor(CoordinatorEntity[SungrowPlantCoordinator],
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the raw fault status for troubleshooting."""
+        """Expose the raw fault status plus a human-readable operating-status reason."""
         device = self._device() or {}
         status = device.get("dev_fault_status")
-        return {"fault_status": str(getattr(status, "name", status)) if status is not None else None}
+        return {
+            "fault_status": str(getattr(status, "name", status)) if status is not None else None,
+            "operating_status": self._operating_status_reason(),
+        }
+
+    def _operating_status_reason(self) -> str | None:
+        """Human-readable operating status for this device, if reported (#182).
+
+        Sourced from the operating-status measure point (inverter point 29 / ESS 13146)
+        the coordinator always fetches, so it explains *why* a device is in a problem
+        state ("Shut down due to faults", "Low insulation resistance", ...). ``None`` for
+        devices that report no operating status (battery/meter/comm) or when the
+        per-device endpoint is unavailable.
+        """
+        device_data = getattr(self.coordinator, "device_data", None) or {}
+        point = device_data.get(self.device_uuid, {}).get("operating_status")
+        if not isinstance(point, dict):
+            return None
+        return resolve_enum_value(str(point.get("id") or ""), point.get("value"))
 
 
 class SungrowDeviceConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):

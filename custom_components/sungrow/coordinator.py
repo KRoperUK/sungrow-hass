@@ -25,7 +25,9 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    ESS_OPERATING_STATUS_POINT,
     INVERTER_DIAGNOSTIC_POINTS,
+    INVERTER_OPERATING_STATUS_POINT,
     METER_DEVICE_POINTS,
 )
 
@@ -228,8 +230,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the plant-level diagnostic sensors (#178). Throttled and best-effort.
         await self._async_maybe_refresh_plant_detail()
 
-        if self.enable_device_sensors:
-            self.device_data = await self._async_fetch_device_data()
+        # Always fetch per-device data: even with per-device sensors off, we request
+        # each inverter/ESS device's operating status so the Fault binary sensor can
+        # show a human-readable reason (#182). The heavy diagnostic sets are still gated
+        # on the option inside the fetch.
+        self.device_data = await self._async_fetch_device_data()
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         return cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
@@ -365,20 +370,34 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for d in self.devices
                 if getattr(d.get("device_type"), "value", d.get("device_type")) == type_id and d.get("ps_key")
             ]
-            # Inverter/ESS devices also report the diagnostic points (operating status,
-            # MPPT, DC power, ...); request them on top of any user-configured extras (#149).
-            # Battery/ESS devices likewise report battery points (SOC, temp, SOH, ...) (#154).
-            extra = dict(self.extra_measure_points)
-            if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
-                extra.update(INVERTER_DIAGNOSTIC_POINTS)
-            if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
-                extra.update(BATTERY_DEVICE_POINTS)
-            # Communication modules report WLAN/wireless signal strength (#149).
-            if type_id == DeviceType.COMMUNICATION_MODULE.value:
-                extra.update(COMM_MODULE_POINTS)
-            # Energy meters report instantaneous power / PF / frequency / per-phase (#179).
-            if type_id == DeviceType.METER.value:
-                extra.update(METER_DEVICE_POINTS)
+            extra: dict[str, str] = {}
+            # Always request the operating-status point for inverters/ESS so the Fault
+            # binary sensor can surface a reason regardless of the device-sensor option
+            # (#182). Inverters use point 29, ESS/hybrids 13146.
+            if type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value:
+                extra.update(ESS_OPERATING_STATUS_POINT)
+            elif type_id == DeviceType.INVERTER.value:
+                extra.update(INVERTER_OPERATING_STATUS_POINT)
+            # The full diagnostic/battery/meter/comm sets (and user extras) are only
+            # fetched when the user has opted into per-device sensors (#149/#154/#179).
+            # With the option on, an unmapped device type still gets a best-effort fetch
+            # (extra=None -> the default measure points) as before.
+            if self.enable_device_sensors:
+                extra.update(self.extra_measure_points)
+                if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
+                    extra.update(INVERTER_DIAGNOSTIC_POINTS)
+                if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
+                    extra.update(BATTERY_DEVICE_POINTS)
+                # Communication modules report WLAN/wireless signal strength (#149).
+                if type_id == DeviceType.COMMUNICATION_MODULE.value:
+                    extra.update(COMM_MODULE_POINTS)
+                # Energy meters report instantaneous power / PF / frequency / per-phase (#179).
+                if type_id == DeviceType.METER.value:
+                    extra.update(METER_DEVICE_POINTS)
+            elif not extra:
+                # Device sensors off and this type reports no operating status
+                # (battery/meter/comm/unknown) — nothing to fetch, skip it.
+                continue
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(
