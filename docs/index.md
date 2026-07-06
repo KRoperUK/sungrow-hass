@@ -42,6 +42,33 @@ inverters** through the **iSolarCloud** cloud API, using the
   available across restarts; if credentials expire you're prompted to re-authorize in place.
 - **Configurable polling interval** — tune how often data is fetched.
 
+## How it works
+
+The integration authorizes **once** against your iSolarCloud OpenAPI application, then discovers
+every plant on the account and runs one *coordinator* per plant that polls the cloud on your
+chosen interval. Each rotated refresh token is written back to the config entry, so entities stay
+available across restarts.
+
+```mermaid
+flowchart LR
+    subgraph HA["🏠 Home Assistant"]
+        direction TB
+        E["Config entry<br/>(iSolarCloud account)"]
+        E --> C1["Coordinator<br/>Plant A"]
+        E --> C2["Coordinator<br/>Plant B"]
+        C1 --> S1["Sensors · binary sensors<br/>numbers · selects"]
+        C2 --> S2["Sensors · binary sensors<br/>numbers · selects"]
+    end
+    HA <-->|"OAuth 2.0 · token refresh"| API["☁️ iSolarCloud<br/>OpenAPI"]
+    C1 -.->|"poll ~5 min"| API
+    C2 -.->|"poll ~5 min"| API
+    API --> INV["🔌 Inverters · batteries<br/>meters · WiNet-S"]
+```
+
+Your hardware maps cleanly onto Home Assistant's device tree — see
+[Device grouping](SENSORS.md#device-grouping) for how the account → plant → device hierarchy is
+modelled.
+
 ## Requirements
 
 - Home Assistant with [HACS](https://hacs.xyz/) installed.

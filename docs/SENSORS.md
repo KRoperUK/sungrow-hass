@@ -6,7 +6,26 @@ The integration models each iSolarCloud plant as a Home Assistant device, with t
 
 ## Device grouping
 
-Rather than piling every reading onto a single plant device, each plant sensor is attached to the physical device it describes — inverter power/yield to the **inverter**, state-of-charge and battery flows to the **battery/ESS**, grid and import/export readings to the **meter** — all nested beneath the plant. A reading is only moved onto a device when the plant has exactly **one** device of that type; genuine plant aggregates (e.g. *Total Active Power* on a two-inverter site) and household-load or forecast readings stay on the plant device. This grouping is automatic and changes only how entities are grouped — **entity IDs and history are unchanged**, so existing automations and dashboards keep working.
+The integration mirrors your real hardware in Home Assistant's device tree: **one iSolarCloud account maps to one config entry, which holds one *plant* device per plant, and each physical device (inverter, battery/ESS, meter, WiNet-S) is nested under its plant** via `via_device`.
+
+```mermaid
+flowchart TD
+    ACC["🔑 Config entry<br/><i>iSolarCloud account · App ID</i>"]
+    ACC --> P1["🏭 Plant device<br/><i>7 Tadmore Close · service</i>"]
+    ACC -. "many plants per account" .-> P2["🏭 Plant device<br/><i>…another site</i>"]
+    P1 --> INV["🔌 Inverter<br/>SG3.6RS"]
+    P1 --> MET["📈 Meter<br/>SGSmartMeter"]
+    P1 --> COM["📶 Comm module<br/>WiNet-S"]
+    P1 --> BAT["🔋 Battery / ESS<br/><i>if fitted</i>"]
+```
+
+The **plant** is a *service* device (no physical hardware of its own) that anchors the tree. Each plant reading is then attached to the physical device it describes — inverter power/yield to the **inverter**, state-of-charge and battery flows to the **battery/ESS**, grid and import/export readings to the **meter**. A reading is only moved onto a device when the plant has exactly **one** device of that type; genuine plant aggregates (e.g. *Total Active Power* on a two-inverter site) and household-load or forecast readings stay on the plant device. Grouping is automatic and changes only *where* entities appear — **entity IDs and history are unchanged**, so existing automations and dashboards keep working.
+
+!!! info "Why the device list looks flat"
+    Home Assistant lists **every** device on a config entry in one flat list, so the plant appears
+    alongside the inverter/meter/comm module rather than visually nested. The parent link is still
+    there: open a device and you'll see **“Connected via *&lt;plant&gt;*”**, and the topology drives
+    area assignment. Nothing to fix — that's just how HA renders the list.
 
 ## Common dashboard values
 

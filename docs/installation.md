@@ -46,6 +46,26 @@ The integration talks to iSolarCloud's OpenAPI, which requires your own applicat
 
 ## 3. Add and authorize the integration
 
+Setup is two-phase: Home Assistant creates the hub entry first (so the OAuth callback endpoint
+exists *before* any redirect — this avoids a first-install 404), then walks you through
+authorization. At a glance:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor You
+    participant HA as Home Assistant
+    participant SC as iSolarCloud
+    You->>HA: Add integration → region + App Key/Secret/ID
+    HA->>HA: Create hub entry, register callback view
+    HA-->>You: Open iSolarCloud authorization page
+    You->>SC: Sign in and approve the app
+    SC-->>HA: Redirect to /api/sungrow_hass/callback?code=…
+    HA->>SC: Exchange code for tokens
+    SC-->>HA: Access + refresh tokens
+    HA->>HA: Persist tokens, discover plants, create entities
+```
+
 1. Go to **Settings → Devices & Services → Add Integration** and choose **Sungrow iSolarCloud**.
 2. Select your **Gateway region** (Europe, International, China, or Australia — it must match the
    region your devices are physically connected to).
