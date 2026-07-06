@@ -28,9 +28,12 @@ from .const import (
     CONF_APP_SECRET,
     CONF_GATEWAY,
     CONF_SCAN_INTERVAL,
+    DEFAULT_CONSOLE_URL,
     DEFAULT_HOST,
     DOMAIN,
+    GATEWAY_CONSOLE_URLS,
     GATEWAYS,
+    POINT_DEVICE_TYPE,
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
@@ -112,6 +115,21 @@ def _has_battery_device(devices: list[dict[str, Any]]) -> bool:
     )
 
 
+def resolve_point_device(point_code: str, devices: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the single physical device a plant point belongs to, else None (=plant).
+
+    Re-homes a flat plant sensor onto its device (#158) only when the plant has exactly
+    one device of a mapped type (the "singular" rule); 0 or >1 matches keep the point on
+    the plant device so genuine aggregates (e.g. total power on a 2-inverter plant) stay
+    correct. Codes with no mapping also stay on the plant.
+    """
+    types = POINT_DEVICE_TYPE.get(point_code)
+    if not types:
+        return None
+    matches = [d for d in devices if d.get("uuid") and any(_matches_device_type(d, t) for t in types)]
+    return matches[0] if len(matches) == 1 else None
+
+
 async def _async_has_battery(plants_service: Plants, plant_id: str, devices: list[dict[str, Any]]) -> bool:
     """Return whether a plant has a battery, to gate battery-only dispatch controls (#148).
 
@@ -155,6 +173,22 @@ def build_device_info(device: dict[str, Any], plant_id: str, *, fallback_name: s
         model=device.get("device_model_code") or device.get("device_model_name"),
         serial_number=device.get("device_sn"),
         via_device=(DOMAIN, plant_id),
+    )
+
+
+def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) -> DeviceInfo:
+    """Build the plant "service" DeviceInfo that anchors the per-device ``via_device`` tree.
+
+    Registered explicitly at setup and used as the fallback for any plant sensor that does
+    not re-home onto a physical device (#158), so the plant device always exists as the
+    parent even when every sensor moves onto an inverter/battery/meter.
+    """
+    return DeviceInfo(
+        identifiers={(DOMAIN, plant_id)},
+        name=plant_name,
+        manufacturer="Sungrow",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        configuration_url=console_url,
     )
 
 
@@ -291,6 +325,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         control=control_service,
         devices=devices_by_plant,
     )
+
+    # Register the plant "service" device explicitly so it always exists as the
+    # via_device parent — even when every plant sensor re-homes onto a physical
+    # device (#158). Without this, a re-homed device references a non-existent
+    # via_device (HA warns and breaks it in 2025.12).
+    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
+    device_registry = dr.async_get(hass)
+    for coordinator in coordinators:
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
