@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -40,6 +41,33 @@ _DIAGNOSTIC_CODES = (
     frozenset(INVERTER_DIAGNOSTIC_POINTS.values()) | BATTERY_DIAGNOSTIC_CODES | frozenset(COMM_MODULE_POINTS.values())
 )
 
+# Sentinel unit: tariff sensors take their unit from the plant's currency at runtime.
+_CURRENCY_PER_KWH = "__currency_per_kwh__"
+
+
+@dataclass(frozen=True)
+class PlantDetailSensor:
+    """Descriptor for a plant-level sensor sourced from getPowerStationDetail (#178)."""
+
+    key: str
+    name: str
+    device_class: SensorDeviceClass | None = None
+    state_class: SensorStateClass | None = None
+    unit: str | None = None
+    diagnostic: bool = True
+
+
+# Plant-detail fields worth surfacing as their own sensors on the plant device (#178):
+# operational health (alarm/fault counts), the nameplate power, and the import/export
+# tariffs the plant is configured with. Fields absent from a given plant are skipped.
+PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
+    PlantDetailSensor("alarm_count", "Alarm Count", state_class=SensorStateClass.MEASUREMENT),
+    PlantDetailSensor("fault_count", "Fault Count", state_class=SensorStateClass.MEASUREMENT),
+    PlantDetailSensor("install_power", "Installed Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W"),
+    PlantDetailSensor("ps_consumption_power_price_kwh", "Import Price", unit=_CURRENCY_PER_KWH, diagnostic=False),
+    PlantDetailSensor("ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False),
+)
+
 
 def infer_device_class(
     unit: str | None, point_code: str, point_id: str = ""
@@ -53,7 +81,7 @@ def infer_device_class(
     return resolve_classification(unit, point_code, point_id)
 
 
-def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SungrowSensor]:
+def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SensorEntity]:
     """Build the full set of sensors the coordinator currently warrants.
 
     Called both at setup and on every coordinator update, so points/devices that
@@ -66,7 +94,7 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
     would otherwise litter the UI with permanently "Unknown" entities. Because this
     builder re-runs every poll, a point that later reports real data is added then.
     """
-    sensors: list[SungrowSensor] = []
+    sensors: list[SensorEntity] = []
 
     # Plant-level sensors.
     # The data structure is { "P_CODE": { "code": ..., "value": ..., "unit": ..., "name": ... } }
@@ -78,6 +106,17 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
             if sensor.native_value is None:
                 continue
             sensors.append(sensor)
+
+    # Plant-detail sensors (nameplate power, alarm/fault counts, import/export tariffs)
+    # from getPowerStationDetail, attached to the plant device (#178). Fields the plant
+    # doesn't report are skipped.
+    for desc in PLANT_DETAIL_SENSORS:
+        raw = coordinator.plant_detail.get(desc.key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        sensors.append(
+            SungrowPlantDetailSensor(coordinator, desc, coordinator.plant_id, coordinator.plant_name, console_url)
+        )
 
     # Per-device sensors (opt-in, issue #74): surface points reported per device
     # (EV chargers, meters, extra batteries). Points already present at the plant
@@ -110,7 +149,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     @callback
     def _add_new_entities() -> None:
         """Add entities for any plant points / devices not seen yet."""
-        new_entities: list[SungrowSensor] = []
+        new_entities: list[SensorEntity] = []
         for coordinator in coordinators:
             for entity in _build_sensors(coordinator, console_url):
                 uid = entity.unique_id
@@ -281,3 +320,49 @@ class SungrowDeviceSensor(SungrowSensor):
         device_data = getattr(self.coordinator, "device_data", None) or {}
         point: dict[str, Any] | None = device_data.get(self.device_uuid, {}).get(self.point_code)
         return point
+
+
+class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], SensorEntity):
+    """A plant-level sensor sourced from getPowerStationDetail (#178).
+
+    Surfaces operational health (alarm/fault counts), the nameplate power and the
+    import/export tariffs on the plant device, refreshed from the coordinator's
+    throttled plant-detail fetch rather than the realtime measure points.
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: SungrowPlantCoordinator,
+        desc: PlantDetailSensor,
+        plant_id: str,
+        plant_name: str,
+        console_url: str,
+    ) -> None:
+        """Initialize a plant-detail sensor."""
+        super().__init__(coordinator)
+        self._desc = desc
+        self._attr_unique_id = f"{plant_id}_detail_{desc.key}"
+        self._attr_name = desc.name
+        self._attr_device_info = build_plant_device_info(plant_id, plant_name, console_url)
+        self._attr_device_class = desc.device_class
+        self._attr_state_class = desc.state_class
+        if desc.diagnostic:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if desc.unit == _CURRENCY_PER_KWH:
+            currency = str(coordinator.plant_detail.get("power_price_unit") or "").strip()
+            self._attr_native_unit_of_measurement = f"{currency}/kWh" if currency else None
+        else:
+            self._attr_native_unit_of_measurement = desc.unit
+
+    @property
+    def native_value(self) -> float | str | None:
+        """Return the current value of the plant-detail field."""
+        raw = self.coordinator.plant_detail.get(self._desc.key)
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return str(raw)

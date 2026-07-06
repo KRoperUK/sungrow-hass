@@ -636,3 +636,36 @@ async def test_device_data_dedupes_device_types(hass: HomeAssistant):
     await coordinator._async_update_data()
 
     plants.async_get_device_realtime.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Plant detail (#178)
+# ---------------------------------------------------------------------------
+
+
+async def test_plant_detail_fetched_and_stored(hass: HomeAssistant):
+    """The plant-detail fields are fetched during a poll and stored on the coordinator (#178)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_plant_details = AsyncMock(
+        return_value=[{"alarm_count": 0, "fault_count": 1, "install_power": 3600.0, "power_price_unit": "GBP"}]
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", [])
+
+    await coordinator._async_update_data()
+
+    assert coordinator.plant_detail["install_power"] == 3600.0
+    assert coordinator.plant_detail["fault_count"] == 1
+    plants.async_get_plant_details.assert_awaited()
+
+
+async def test_plant_detail_best_effort_on_error(hass: HomeAssistant):
+    """A failing plant-detail fetch doesn't fail the whole poll (#178)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_plant_details = AsyncMock(side_effect=RuntimeError("detail endpoint down"))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", [])
+
+    await coordinator._async_update_data()  # must not raise
+
+    assert coordinator.plant_detail == {}
