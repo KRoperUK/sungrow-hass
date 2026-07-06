@@ -81,6 +81,25 @@ INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
     "95": "bus_voltage",
     "90": "negative_voltage_to_ground",
     "120": "afci_fault_count",
+    # Per-string DC voltage/current for array analysis (#189). Live-confirmed on a
+    # 2-string SG3.6RS (strings 1-2 populated, 3-8 skipped). Strings 1-8 cover
+    # residential + small-commercial arrays; a string a model lacks returns nothing.
+    "96": "string_1_voltage",
+    "70": "string_1_current",
+    "97": "string_2_voltage",
+    "71": "string_2_current",
+    "98": "string_3_voltage",
+    "72": "string_3_current",
+    "99": "string_4_voltage",
+    "73": "string_4_current",
+    "100": "string_5_voltage",
+    "74": "string_5_current",
+    "101": "string_6_voltage",
+    "75": "string_6_current",
+    "102": "string_7_voltage",
+    "76": "string_7_current",
+    "103": "string_8_voltage",
+    "77": "string_8_current",
 }
 
 # Battery/ESS device-level measuring points surfaced as sensors for hybrid users (#154),
