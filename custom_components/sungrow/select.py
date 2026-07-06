@@ -161,6 +161,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # uses these; other selects leave them unset.
         self._revert_cancel: CALLBACK_TYPE | None = None
         self._revert_deadline: float | None = None
+        # Set once the entity is removed (e.g. an entry reload) so an already-fired
+        # auto-revert task doesn't act on the plant after this instance is gone (#157).
+        self._removed = False
 
     async def async_added_to_hass(self) -> None:
         """Restore the last selected option across restarts.
@@ -200,6 +203,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
 
     async def async_will_remove_from_hass(self) -> None:
         """Cancel the auto-revert timer when the command select is removed."""
+        self._removed = True
         self._cancel_revert()
         await super().async_will_remove_from_hass()
 
@@ -290,6 +294,11 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
 
     async def _do_revert(self) -> None:
         """Revert a forced Charge/Discharge to Stop and stop the heartbeat (#157)."""
+        if self._removed:
+            # The timer fired, but the entity was removed (e.g. an entry reload) before
+            # this task ran. Acting now would stop a freshly-restored heartbeat and write
+            # state on a dead entity, so bail out — the new instance owns the heartbeat.
+            return
         _LOGGER.info("Forced-dispatch timeout for %s: reverting to Stop", self.device_uuid)
         stop_option = "Stop"
         try:

@@ -358,12 +358,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
 
 async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Unload a config entry."""
-    heartbeats = entry.runtime_data.heartbeats
-    for heartbeat in list(heartbeats.values()):
-        await _stop_heartbeat(heartbeat)
-    heartbeats.clear()
-
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # Unload the platforms first: only tear down the heartbeats if that succeeds. Stopping
+    # them up front would strand an active Charge/Discharge dispatch without its keepalive
+    # (the inverter times out of External-EMS mode) while the entry stays LOADED on a
+    # failed unload.
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        heartbeats = entry.runtime_data.heartbeats
+        for heartbeat in list(heartbeats.values()):
+            await _stop_heartbeat(heartbeat)
+        heartbeats.clear()
+    return unloaded
 
 
 def _known_device_ids(entry: SungrowConfigEntry) -> set[tuple[str, str]]:
@@ -435,12 +440,6 @@ async def async_start_heartbeat(
     data = entry.runtime_data
     heartbeats = data.heartbeats
 
-    # Stop any existing loop for this plant and wait for it to exit before
-    # starting a new one, so two loops never run for the same device.
-    existing = heartbeats.pop(plant_id, None)
-    if existing is not None:
-        await _stop_heartbeat(existing)
-
     stop_event = asyncio.Event()
     control: Control = data.control
     # Tracked by the config entry so HA cancels it automatically on unload.
@@ -449,7 +448,14 @@ async def async_start_heartbeat(
         control.heartbeat_loop(device_uuid, interval, stop_event),
         name=f"sungrow-heartbeat-{plant_id}",
     )
+    # Publish the new loop into the map BEFORE awaiting the old one's stop, so two
+    # concurrent starts can't interleave across that await and orphan a task (a task
+    # left running but no longer in `heartbeats`). Whichever start runs last owns the
+    # map; every task it displaces is stopped by the displacing call.
+    existing = heartbeats.get(plant_id)
     heartbeats[plant_id] = (stop_event, task)
+    if existing is not None:
+        await _stop_heartbeat(existing)
 
 
 async def async_stop_heartbeat(hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str) -> None:
