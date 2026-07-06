@@ -19,7 +19,7 @@ from custom_components.sungrow import (
     select_dispatch_device,
 )
 from custom_components.sungrow.const import DOMAIN
-from custom_components.sungrow.number import DISPATCH_NUMBERS
+from custom_components.sungrow.number import DISPATCH_NUMBERS, SungrowDispatchNumber
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
 from custom_components.sungrow.select import DISPATCH_SELECTS
 from custom_components.sungrow.select import async_setup_entry as select_setup_entry
@@ -74,6 +74,31 @@ async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_device_class == NumberDeviceClass.POWER
     assert power._attr_native_unit_of_measurement == "W"
+
+
+async def test_dispatch_controls_report_assumed_state(hass: HomeAssistant):
+    """Write-only device controls report assumed_state; the HA-internal timer does not.
+
+    The API doesn't read the current setpoint back (getDevPropertyPointValue is gated),
+    so the value shown is the last one we commanded — an assumption, not a device reading.
+    The forced-dispatch-duration timer is HA-internal, so its value is genuinely known.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM", "device_name": "Inverter 1"}]
+    _setup_entry_data(entry, devices)
+
+    numbers: list = []
+    await number_setup_entry(hass, entry, lambda e: numbers.extend(e))
+    selects: list = []
+    await select_setup_entry(hass, entry, lambda e: selects.extend(e))
+
+    # Every device-commanding number is assumed-state; the auto-revert timer is not.
+    for e in numbers:
+        assert e.assumed_state is isinstance(e, SungrowDispatchNumber), type(e).__name__
+    assert selects, "expected dispatch selects for an ESS device"
+    for e in selects:
+        assert e.assumed_state is True
 
 
 def test_select_dispatch_device_matches_all_representations():
@@ -956,6 +981,39 @@ async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
     mock_stop.assert_awaited_once()
     assert command.current_option == "Stop"
     assert command._revert_deadline is None
+
+
+async def test_autorevert_after_removal_is_noop(hass: HomeAssistant):
+    """A revert task firing after the entity is removed must not touch the plant (#157).
+
+    On an entry reload the auto-revert timer can fire before the queued _do_revert runs;
+    acting then would stop the freshly-restored heartbeat and write state on a dead entity.
+    """
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_write_ha_state = MagicMock()
+    command._attr_current_option = "Charge"
+
+    # Removal (e.g. an entry reload) sets the guard flag.
+    with patch.object(CoordinatorEntity, "async_will_remove_from_hass", new=AsyncMock()):
+        await command.async_will_remove_from_hass()
+    assert command._removed is True
+
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
+        await command._do_revert()
+
+    # No effect on the plant: heartbeat untouched, no Stop written, no state write.
+    mock_stop.assert_not_awaited()
+    data.control.async_update_parameters.assert_not_awaited()
+    command.async_write_ha_state.assert_not_called()
 
 
 async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant):

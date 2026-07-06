@@ -234,6 +234,11 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
     """Number entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
+    # Dispatch parameters are write-only: the API doesn't read the current setpoint back
+    # (getDevPropertyPointValue is permission-gated), so the value shown is the last one
+    # we commanded — an assumption, not a device reading. Unset until first set/restored,
+    # which correctly reads as "unknown" per HA's entity-unavailable guidance.
+    _attr_assumed_state = True
 
     def __init__(
         self,
