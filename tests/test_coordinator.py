@@ -527,6 +527,10 @@ async def test_device_data_requests_inverter_diagnostic_points(hass: HomeAssista
     assert extra["29"] == "operating_status"
     assert extra["14"] == "total_dc_power"
     assert "5" in extra  # MPPT1 voltage
+    # Grid-side health points added in #179.
+    assert extra["18"] == "phase_a_voltage"
+    assert extra["26"] == "power_factor"
+    assert extra["95"] == "bus_voltage"
 
 
 async def test_device_data_diagnostic_points_only_for_inverter(hass: HomeAssistant):
@@ -561,6 +565,25 @@ async def test_device_data_requests_battery_points_for_battery_device(hass: Home
     assert extra["58604"] == "battery_level"
     assert extra["58606"] == "battery_total_charge_energy"
     assert "29" not in extra  # not the inverter operating-status point
+
+
+async def test_device_data_requests_meter_points_for_meter_device(hass: HomeAssistant):
+    """A meter device is asked for the meter points, not the inverter/battery ones (#179)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "meter-1", "device_type": DeviceType.METER, "ps_key": "12345_7_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["8018"] == "meter_active_power"
+    assert extra["8064"] == "meter_frequency"
+    assert "29" not in extra  # not the inverter operating-status point
+    assert "58604" not in extra  # not the battery points
 
 
 async def test_device_data_ess_gets_both_inverter_and_battery_points(hass: HomeAssistant):
