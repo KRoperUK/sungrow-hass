@@ -31,6 +31,7 @@ from .const import (
     DEFAULT_HOST,
     DOMAIN,
     GATEWAYS,
+    POINT_DEVICE_TYPE,
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
@@ -110,6 +111,21 @@ def _has_battery_device(devices: list[dict[str, Any]]) -> bool:
         _matches_device_type(d, DeviceType.ENERGY_STORAGE_SYSTEM) or _matches_device_type(d, DeviceType.BATTERY)
         for d in devices
     )
+
+
+def resolve_point_device(point_code: str, devices: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the single physical device a plant point belongs to, else None (=plant).
+
+    Re-homes a flat plant sensor onto its device (#158) only when the plant has exactly
+    one device of a mapped type (the "singular" rule); 0 or >1 matches keep the point on
+    the plant device so genuine aggregates (e.g. total power on a 2-inverter plant) stay
+    correct. Codes with no mapping also stay on the plant.
+    """
+    types = POINT_DEVICE_TYPE.get(point_code)
+    if not types:
+        return None
+    matches = [d for d in devices if d.get("uuid") and any(_matches_device_type(d, t) for t in types)]
+    return matches[0] if len(matches) == 1 else None
 
 
 async def _async_has_battery(plants_service: Plants, plant_id: str, devices: list[dict[str, Any]]) -> bool:
