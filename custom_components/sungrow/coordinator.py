@@ -26,6 +26,7 @@ from .const import (
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
     INVERTER_DIAGNOSTIC_POINTS,
+    METER_DEVICE_POINTS,
 )
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
@@ -370,6 +371,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Communication modules report WLAN/wireless signal strength (#149).
             if type_id == DeviceType.COMMUNICATION_MODULE.value:
                 extra.update(COMM_MODULE_POINTS)
+            # Energy meters report instantaneous power / PF / frequency / per-phase (#179).
+            if type_id == DeviceType.METER.value:
+                extra.update(METER_DEVICE_POINTS)
             try:
                 async with asyncio.timeout(self._poll_timeout):
                     result = await self.plants_service.async_get_device_realtime(
