@@ -34,6 +34,21 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [3.4.1](https://github.com/KRoperUK/sungrow-hass/compare/v3.4.0...v3.4.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* harden the EMS heartbeat lifecycle against reload/unload races ([#208](https://github.com/KRoperUK/sungrow-hass/issues/208)) ([f0c13ab](https://github.com/KRoperUK/sungrow-hass/commit/f0c13abae327ee92db2919cba0805b0416fe01da))
+* keep rate-limit backoff on transient errors; fix ESS operating-status collision ([ed815ca](https://github.com/KRoperUK/sungrow-hass/commit/ed815ca7f67502d4fda86984b16e8d0c7411ec96))
+* keep rate-limit backoff on transient errors; fix ESS operating-status collision ([eabc140](https://github.com/KRoperUK/sungrow-hass/commit/eabc140d51d296aa3596888bef81fcd40d4a549d))
+* mark write-only dispatch controls as assumed_state ([9737157](https://github.com/KRoperUK/sungrow-hass/commit/9737157f8005509dde516f22ce92e837954368f8))
+* mark write-only dispatch controls as assumed_state ([9737157](https://github.com/KRoperUK/sungrow-hass/commit/9737157f8005509dde516f22ce92e837954368f8))
+* mark write-only dispatch controls as assumed_state ([69c541d](https://github.com/KRoperUK/sungrow-hass/commit/69c541db6cf9ffaa5fccbbdc6877261511ad6418))
+* normalise the ℃ unit glyph to °C; record tariff sensors as statistics ([8d9297c](https://github.com/KRoperUK/sungrow-hass/commit/8d9297c97598f66a3cc9344ad7ed8ddc2a95013d))
+* normalise the ℃ unit glyph to °C; record tariff sensors as statistics ([8d9297c](https://github.com/KRoperUK/sungrow-hass/commit/8d9297c97598f66a3cc9344ad7ed8ddc2a95013d))
+* normalise the ℃ unit glyph to °C; record tariff sensors as statistics ([30db2c8](https://github.com/KRoperUK/sungrow-hass/commit/30db2c8f4d78ac5ba7e63c26786194c1c0c3a2eb))
+
 ## [3.4.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.3.0...v3.4.0) (2026-07-06)
 
 
