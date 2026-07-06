@@ -34,6 +34,27 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [3.3.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.2.0...v3.3.0) (2026-07-06)
+
+
+### Features
+
+* add a per-device fault/alarm binary sensor ([#151](https://github.com/KRoperUK/sungrow-hass/issues/151)) ([#166](https://github.com/KRoperUK/sungrow-hass/issues/166)) ([436dd88](https://github.com/KRoperUK/sungrow-hass/commit/436dd885bda443c07089094d4ea260ad32d33141))
+* add device connectivity, commissioning date & WLAN signal strength ([#149](https://github.com/KRoperUK/sungrow-hass/issues/149)) ([1f2a775](https://github.com/KRoperUK/sungrow-hass/commit/1f2a775dccced032e80d995ba52c816825da3075))
+* back off the poll interval when rate-limited ([#156](https://github.com/KRoperUK/sungrow-hass/issues/156)) ([948bcf0](https://github.com/KRoperUK/sungrow-hass/commit/948bcf0f0512f495846c98c24adee66e976ea76d))
+* enrich device registry with model/serial/manufacturer ([#149](https://github.com/KRoperUK/sungrow-hass/issues/149)) ([#162](https://github.com/KRoperUK/sungrow-hass/issues/162)) ([b1430dc](https://github.com/KRoperUK/sungrow-hass/commit/b1430dcc76783057e07bc8bc5aa8173ae358c2e7))
+* expose battery/ESS device-level sensors for hybrid users ([#154](https://github.com/KRoperUK/sungrow-hass/issues/154)) ([0d7edbf](https://github.com/KRoperUK/sungrow-hass/commit/0d7edbf13d9c52cf78551d52cc23ff36486f4263))
+* expose inverter device-level diagnostic sensors ([#149](https://github.com/KRoperUK/sungrow-hass/issues/149)) ([#165](https://github.com/KRoperUK/sungrow-hass/issues/165)) ([5886c8d](https://github.com/KRoperUK/sungrow-hass/commit/5886c8d13853ba035a44cbc1f8d052d7273f361b))
+* raise HA Repair issues for whitelist & rate-limit errors ([#153](https://github.com/KRoperUK/sungrow-hass/issues/153)) ([#171](https://github.com/KRoperUK/sungrow-hass/issues/171)) ([e065ee0](https://github.com/KRoperUK/sungrow-hass/commit/e065ee07a06745a9fbf1cc5da4f62fc7f7857607))
+
+
+### Bug Fixes
+
+* delete stale main RC prereleases for released versions ([#146](https://github.com/KRoperUK/sungrow-hass/issues/146)) ([c596524](https://github.com/KRoperUK/sungrow-hass/commit/c5965249776a057e1460fec77f0ba5aa853b3ea2))
+* hide battery-only dispatch controls on PV-only plants ([#148](https://github.com/KRoperUK/sungrow-hass/issues/148)) ([#150](https://github.com/KRoperUK/sungrow-hass/issues/150)) ([f58d8aa](https://github.com/KRoperUK/sungrow-hass/commit/f58d8aa1757bf4f742b5aa4cd48d524a72886279))
+* pass ps_key_list to device realtime; bump pysolarcloud to 0.9.1 ([#155](https://github.com/KRoperUK/sungrow-hass/issues/155)) ([#163](https://github.com/KRoperUK/sungrow-hass/issues/163)) ([cd8bbc7](https://github.com/KRoperUK/sungrow-hass/commit/cd8bbc7dcf519c5bb3363a4782abf3b8b1715a2a))
+* ride out transient poll failures instead of flapping unavailable ([#152](https://github.com/KRoperUK/sungrow-hass/issues/152)) ([#167](https://github.com/KRoperUK/sungrow-hass/issues/167)) ([cd3014d](https://github.com/KRoperUK/sungrow-hass/commit/cd3014d1f8194d42f1f68b83cecb8b8120aeb86b))
+
 ## [3.2.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.1.0...v3.2.0) (2026-07-04)
 
 
