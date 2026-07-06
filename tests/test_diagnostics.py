@@ -220,6 +220,7 @@ async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
                 "dev_sn": "SN123456",
                 "sn": "SN123456",
                 "device_sn": "SN123456",
+                "communication_dev_sn": "B2281508668",
                 "ps_id": "123",
             }
         ]
@@ -236,7 +237,7 @@ async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
     assert "access_token" not in json.dumps(diag)
 
     device = diag["plants"]["123"]["all_devices"][0]
-    for key in ("uuid", "ps_key", "dev_sn", "sn", "device_sn"):
+    for key in ("uuid", "ps_key", "dev_sn", "sn", "device_sn", "communication_dev_sn"):
         assert device[key] == "**REDACTED**"
     # Non-sensitive fields survive: the device name and the plant id (ps_id) are
     # kept so a support report stays useful.
