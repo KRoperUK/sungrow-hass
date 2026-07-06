@@ -197,6 +197,10 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: Control) -> li
         if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
+    # The forced-dispatch auto-revert timeout only makes sense alongside the battery
+    # charge/discharge controls, so gate it on the same has_battery check (#157/#148).
+    if coordinator.has_battery:
+        entities.append(SungrowForcedDispatchDurationNumber(coordinator, target))
     return entities
 
 
@@ -288,3 +292,49 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # command select (Charge/Discharge start it, Stop stops it), so writing power
         # — even 0 — never arms or re-arms dispatch here (see #112).
         self._attr_native_value = value
+
+
+# Default duration (minutes) for a forced Charge/Discharge before auto-revert (#157).
+DEFAULT_FORCED_DISPATCH_DURATION = 0  # 0 = auto-revert disabled (legacy behaviour)
+
+
+class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreNumber):
+    """Local number controlling the forced-dispatch auto-revert timeout (#157).
+
+    Unlike the other dispatch numbers this writes *nothing* to the inverter — it only
+    records, on the coordinator, how long a forced Charge/Discharge command may stay
+    active before the command select reverts it to Stop. 0 disables auto-revert.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "forced_dispatch_duration"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 1440  # 24 h
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "min"
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: SungrowPlantCoordinator, device: dict[str, Any]) -> None:
+        """Initialize the forced-dispatch duration number."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        # Identifies the entity (like the dispatch numbers) though it writes no param.
+        self.param = "forced_dispatch_duration"
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_forced_dispatch_duration"
+        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+        self._attr_native_value = DEFAULT_FORCED_DISPATCH_DURATION
+        coordinator.forced_dispatch_duration_minutes = DEFAULT_FORCED_DISPATCH_DURATION
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the configured duration and publish it to the coordinator."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._attr_native_value = last.native_value
+        self.coordinator.forced_dispatch_duration_minutes = self._attr_native_value or 0
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store the new duration locally and publish it to the coordinator."""
+        self._attr_native_value = value
+        self.coordinator.forced_dispatch_duration_minutes = value

@@ -31,6 +31,8 @@ inverters** through the **iSolarCloud** cloud API, using the
 - **Dispatch / control** — number and select entities for charge/discharge command, power, SOC
   limits, forced charging and export/active-power limiting, with an automatic EMS heartbeat while
   dispatching. Battery controls are hidden on PV-only plants.
+- **Safer dispatch** — an optional **Forced Dispatch Duration** auto-reverts a forced
+  charge/discharge to *Stop* after a set time (surviving restarts), so it can't silently persist.
 - **Resilient polling** — rides out brief API/network hiccups instead of flapping unavailable, and
   auto-backs-off when rate-limited.
 - **Guided repairs** — whitelist and rate-limit rejections surface as actionable Home Assistant

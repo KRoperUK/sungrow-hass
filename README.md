@@ -17,6 +17,7 @@ Custom component that integrates Sungrow inverters via the iSolarCloud API into 
 - **Plant health & tariffs** — plant-wide alarm/fault counts, nameplate power, and your configured import/export electricity prices, surfaced as sensors on the plant device.
 - **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery charge/discharge power or EV charger values) via the options flow.
 - **Dispatch / control entities** — number and select entities for charge/discharge command, power, SOC limits, forced charging, and export/active-power limiting, with automatic EMS heartbeat when dispatching. Battery-only controls are hidden on PV-only plants so they can't be triggered on a system without a battery.
+- **Safer dispatch (auto-revert)** — set a **Forced Dispatch Duration** and a forced charge/discharge automatically reverts to *Stop* after that long (surviving restarts), so a command can't silently persist and curtail your solar. Leave it at 0 to keep the legacy always-on behaviour.
 - **Resilient polling** — rides out brief network/API hiccups instead of flapping every entity to *unavailable*, and automatically backs off the polling interval when iSolarCloud rate-limits the account.
 - **Guided repairs** — surfaces iSolarCloud whitelist (E918/E919) and rate-limit (E998/E999) rejections as actionable Home Assistant **Repairs** with fix instructions.
 - **Config Flow** — set up entirely through the Home Assistant UI.

@@ -119,6 +119,9 @@
       },
       "pf": {
         "name": "Power Factor"
+      },
+      "forced_dispatch_duration": {
+        "name": "Forced Dispatch Duration"
       }
     },
     "select": {
