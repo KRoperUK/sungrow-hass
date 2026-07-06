@@ -614,3 +614,44 @@ def test_resolve_point_device_unmapped_and_hybrid():
 def test_resolve_point_device_ignores_uuidless():
     """A device without a uuid can't own a point."""
     assert resolve_point_device("inverter_ac_power", [{"device_type": DeviceType.INVERTER}]) is None
+
+
+async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """The plant device is registered explicitly so it anchors via_device even when
+    every plant sensor re-homes onto a physical device (#158)."""
+    from homeassistant.helpers import device_registry as dr
+
+    inv_uuid = 4841885
+    inv = {
+        "uuid": inv_uuid,
+        "device_type": 1,
+        "device_name": "Inv",
+        "device_model_code": "SG3.6RS",
+        "device_sn": "A1",
+        "factory_name": "SUNGROW",
+        "dev_fault_status": 4,
+        "dev_status": "1",
+        "ps_key": "57_1_1_1",
+    }
+
+    async def _devices(plant_id, *a, **k):
+        return [inv] if str(plant_id) == "12345" else []
+
+    mock_plants_service.async_get_plant_devices = AsyncMock(side_effect=_devices)
+    mock_plants_service.async_get_realtime_data = AsyncMock(
+        return_value={
+            "12345": {"inverter_ac_power": {"code": "inverter_ac_power", "value": "1", "unit": "W"}},
+            "67890": {},
+        }
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = dr.async_get(hass)
+    # Plant anchor device exists (the sole plant sensor re-homed onto the inverter)...
+    assert registry.async_get_device(identifiers={(DOMAIN, "12345")}) is not None
+    # ...and the physical inverter device exists too.
+    assert registry.async_get_device(identifiers={(DOMAIN, str(inv_uuid))}) is not None

@@ -28,8 +28,10 @@ from .const import (
     CONF_APP_SECRET,
     CONF_GATEWAY,
     CONF_SCAN_INTERVAL,
+    DEFAULT_CONSOLE_URL,
     DEFAULT_HOST,
     DOMAIN,
+    GATEWAY_CONSOLE_URLS,
     GATEWAYS,
     POINT_DEVICE_TYPE,
 )
@@ -323,6 +325,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         control=control_service,
         devices=devices_by_plant,
     )
+
+    # Register the plant "service" device explicitly so it always exists as the
+    # via_device parent — even when every plant sensor re-homes onto a physical
+    # device (#158). Without this, a re-homed device references a non-existent
+    # via_device (HA warns and breaks it in 2025.12).
+    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
+    device_registry = dr.async_get(hass)
+    for coordinator in coordinators:
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
