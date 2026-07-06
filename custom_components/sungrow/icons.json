@@ -30,6 +30,9 @@
       },
       "pf": {
         "default": "mdi:angle-acute"
+      },
+      "forced_dispatch_duration": {
+        "default": "mdi:timer-sand"
       }
     },
     "select": {

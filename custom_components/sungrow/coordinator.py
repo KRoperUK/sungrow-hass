@@ -183,6 +183,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # once at setup; defaults True (fail-open) so a failed check never hides a
         # real battery user's controls.
         self.has_battery: bool = True
+        # How long (minutes) a forced Charge/Discharge command stays active before the
+        # command select auto-reverts it to Stop, so a forced command can't silently
+        # persist and curtail PV (#157/#148). 0 disables auto-revert (legacy behaviour).
+        # Owned by the "Forced Dispatch Duration" number; read by the command select.
+        self.forced_dispatch_duration_minutes: float = 0
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""

@@ -36,6 +36,9 @@ def _coordinator_with(plant_id, plant_name):
     # Default to a battery plant so the full dispatch set is built; the no-battery
     # gating tests (#148) override this to False.
     coordinator.has_battery = True
+    # Auto-revert off by default (a MagicMock would otherwise read as a truthy duration
+    # and arm the timer); the #157 revert tests set a real value.
+    coordinator.forced_dispatch_duration_minutes = 0
     return coordinator
 
 
@@ -67,7 +70,7 @@ async def test_number_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == len(DISPATCH_NUMBERS)
+    assert len(added) == len(DISPATCH_NUMBERS) + 1  # + forced_dispatch_duration (#157)
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_device_class == NumberDeviceClass.POWER
     assert power._attr_native_unit_of_measurement == "W"
@@ -119,7 +122,7 @@ async def test_number_setup_falls_back_to_inverter(hass: HomeAssistant):
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == len(DISPATCH_NUMBERS)
+    assert len(added) == len(DISPATCH_NUMBERS) + 1  # + forced_dispatch_duration (#157)
 
 
 @pytest.mark.parametrize(("uuid_in", "uuid_str"), [(4841885, "4841885"), ("already-str", "already-str")])
@@ -254,7 +257,7 @@ async def test_dispatch_full_set_with_battery(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda e: numbers.extend(e))
     await select_setup_entry(hass, entry, lambda e: selects.extend(e))
 
-    assert {e.param for e in numbers} == set(DISPATCH_NUMBERS)
+    assert {e.param for e in numbers} == set(DISPATCH_NUMBERS) | {"forced_dispatch_duration"}
     assert {e.param for e in selects} == set(DISPATCH_SELECTS)
 
 
@@ -887,6 +890,134 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
     assert mock_start.call_args.args[3] == "ess-1"
 
 
+# ---------------------------------------------------------------------------
+# Forced-dispatch auto-revert (#157)
+# ---------------------------------------------------------------------------
+
+
+async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
+    """The duration number stores its value on the coordinator, writing nothing to the API."""
+    from custom_components.sungrow.number import SungrowForcedDispatchDurationNumber
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    number = SungrowForcedDispatchDurationNumber(data.coordinators[0], {"uuid": "ess-1"})
+
+    await number.async_set_native_value(30)
+
+    assert number.native_value == 30
+    assert data.coordinators[0].forced_dispatch_duration_minutes == 30
+    data.control.async_update_parameters.assert_not_called()
+
+
+async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
+    """Selecting Charge arms the auto-revert (with a persisted deadline); Stop cancels it."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    data.coordinators[0].forced_dispatch_duration_minutes = 10
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()),
+    ):
+        await command.async_select_option("Charge")
+        assert command._revert_deadline is not None
+        assert command.extra_state_attributes == {"revert_at": command._revert_deadline}
+
+        await command.async_select_option("Stop")
+        assert command._revert_deadline is None
+        assert command.extra_state_attributes is None
+
+
+async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
+    """When the revert fires it writes Stop, stops the heartbeat and updates the UI (#157)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_write_ha_state = MagicMock()
+    command._attr_current_option = "Charge"
+
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
+        await command._do_revert()
+
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_command": "204"})
+    mock_stop.assert_awaited_once()
+    assert command.current_option == "Stop"
+    assert command._revert_deadline is None
+
+
+async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant):
+    """A forced command whose deadline passed while HA was down reverts to Stop on restore."""
+    import time
+
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command.async_write_ha_state = MagicMock()
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge", {"revert_at": time.time() - 10}))
+
+    with (
+        patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+        patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()),
+    ):
+        await command.async_added_to_hass()
+
+    # Reverted, not resumed: Stop written, heartbeat never started.
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_command": "204"})
+    mock_start.assert_not_awaited()
+    assert command.current_option == "Stop"
+
+
+async def test_restored_command_rearms_when_deadline_future(hass: HomeAssistant):
+    """A forced command still within its window resumes dispatch and re-arms the revert."""
+    import time
+
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    future = time.time() + 300
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge", {"revert_at": future}))
+
+    with (
+        patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+    ):
+        await command.async_added_to_hass()
+
+    mock_start.assert_awaited_once()  # dispatch resumed
+    assert command._revert_deadline == future  # re-armed for the remaining time
+    command._cancel_revert()  # avoid a lingering scheduled callback in the test
+
+
 async def test_restored_stop_command_leaves_heartbeat_off(hass: HomeAssistant):
     """A restored 'Stop' command must not start the heartbeat (#112)."""
     from homeassistant.core import State
@@ -935,13 +1066,13 @@ async def test_number_dynamic_add_when_device_appears(hass: HomeAssistant):
     for cb in listeners:
         cb()
 
-    assert len(added) == len(DISPATCH_NUMBERS)
+    assert len(added) == len(DISPATCH_NUMBERS) + 1  # + forced_dispatch_duration (#157)
     assert all(e.device_uuid == "ess-1" for e in added)
 
     # Firing again must not duplicate the controls.
     for cb in listeners:
         cb()
-    assert len(added) == len(DISPATCH_NUMBERS)
+    assert len(added) == len(DISPATCH_NUMBERS) + 1  # + forced_dispatch_duration (#157)
 
 
 async def test_select_dynamic_add_when_device_appears(hass: HomeAssistant):
