@@ -73,6 +73,13 @@
           "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)",
           "modbus_host": "Local Modbus host (WiNet-S IP) — optional; leave blank for cloud only"
         }
+      },
+      "modbus_options": {
+        "title": "Local Modbus Options",
+        "description": "Adjust how often Home Assistant reads the inverter directly over local Modbus. There is no cloud API quota, so you can poll frequently; the minimum is 10 seconds.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
       }
     }
   },

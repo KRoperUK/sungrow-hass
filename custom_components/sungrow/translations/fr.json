@@ -73,6 +73,13 @@
           "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)",
           "modbus_host": "Hôte Modbus local (IP du WiNet-S) — optionnel ; laisser vide pour le cloud uniquement"
         }
+      },
+      "modbus_options": {
+        "title": "Options Modbus locales",
+        "description": "Ajustez la fréquence à laquelle Home Assistant lit l'onduleur directement via Modbus local. Il n'y a pas de quota d'API cloud, vous pouvez donc interroger fréquemment ; le minimum est de 10 secondes.",
+        "data": {
+          "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
       }
     }
   },

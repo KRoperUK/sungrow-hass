@@ -73,6 +73,13 @@
           "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)",
           "modbus_host": "Host Modbus local (IP del WiNet-S) — opcional; déjelo en blanco para usar solo la nube"
         }
+      },
+      "modbus_options": {
+        "title": "Opciones de Modbus local",
+        "description": "Ajuste la frecuencia con la que Home Assistant lee el inversor directamente a través de Modbus local. No hay cuota de API en la nube, por lo que puede sondear con frecuencia; el mínimo es de 10 segundos.",
+        "data": {
+          "scan_interval": "Intervalo de sondeo (segundos)"
+        }
       }
     }
   },

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pysolarcloud
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -168,9 +169,20 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     # The local client supplied the realtime data.
     assert data.coordinators[0].data["grid_frequency"]["value"] == 49.9
 
-    # A Modbus-only entry (no dispatch, no heartbeat) unloads cleanly.
-    assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
+    # A Modbus-only entry must unload ONLY the platform it set up (sensor). Unloading
+    # number/select/binary_sensor — never forwarded — fails the unload in production,
+    # which breaks the options-change reload and takes every entity unavailable.
+    orig = hass.config_entries.async_unload_platforms
+    seen: dict[str, list[Platform]] = {}
+
+    async def _spy(e, platforms):
+        seen["platforms"] = list(platforms)
+        return await orig(e, platforms)
+
+    with patch.object(hass.config_entries, "async_unload_platforms", side_effect=_spy):
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert seen["platforms"] == [Platform.SENSOR]
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 

@@ -665,6 +665,48 @@ async def test_options_flow_stores_and_trims_modbus_host(hass: HomeAssistant, mo
     assert entry.options[CONF_MODBUS_HOST] == "192.168.1.93"
 
 
+async def test_options_flow_modbus_only_hides_cloud_settings(hass: HomeAssistant):
+    """A Modbus-only entry's options show only the local poll interval — no cloud fields (#159).
+
+    Regression: the cloud iSolarCloud-quota description, extra measure points, per-device
+    sensors and the "leave blank for cloud only" host field must not appear on a local entry.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(return_value={"grid_frequency": {"value": 49.9}})
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["step_id"] == "modbus_options"
+        # Only the poll interval — none of the cloud-only settings.
+        keys = {str(m.schema) for m in result["data_schema"].schema}
+        assert keys == {CONF_SCAN_INTERVAL}
+
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={CONF_SCAN_INTERVAL: 15}
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["data"] == {CONF_SCAN_INTERVAL: 15}
+    assert entry.options[CONF_SCAN_INTERVAL] == 15
+
+
 async def test_options_flow_rejects_invalid_extra_measure_points(
     hass: HomeAssistant, mock_setup_auth, mock_plants_service
 ):
