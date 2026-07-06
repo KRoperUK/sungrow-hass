@@ -6,8 +6,9 @@ Guidance for AI coding agents (Claude Code, etc.) working in this repository.
 
 A **Home Assistant custom integration** (`custom_components/sungrow`) that polls
 Sungrow inverters via the **iSolarCloud** cloud API, using the
-[`pysolarcloud`](https://pypi.org/project/pysolarcloud/) library. Distributed via
-HACS. `iot_class` is `cloud_polling`.
+[`sungrow-isolarcloud`](https://pypi.org/project/sungrow-isolarcloud/) library — a
+fork of `pysolarcloud`, imported as `pysolarcloud`. Distributed via HACS; quality
+scale is **platinum**. `iot_class` is `cloud_polling`.
 
 ## Architecture
 
@@ -15,12 +16,13 @@ HACS. `iot_class` is `cloud_polling`.
 | --- | --- |
 | `__init__.py` | Entry setup/unload. Builds `SungrowAuth` + `Plants`, creates one coordinator per plant, **persists rotated tokens back to the config entry**, classifies errors into `ConfigEntryNotReady` (transient) vs `ConfigEntryAuthFailed` (reauth). Registers the OAuth callback HTTP view. |
 | `auth.py` | `SungrowAuth(pysolarcloud.Auth)` — adds a `token_updater` callback that fires when the access token is refreshed (pysolarcloud rotates the refresh token in memory). `AUTH_ERRORS` lists upstream error codes that mean "credentials dead". |
-| `coordinator.py` | `SungrowPlantCoordinator(DataUpdateCoordinator)` — fetches realtime (and, when enabled, per-device) data per plant; reads the scan interval from `entry.options`; `is_auth_error()` maps exceptions to reauth vs retry. Also owns: **`has_battery`** gating (dispatch controls), an **availability grace window** (`_within_availability_grace`, `AVAILABILITY_GRACE_SECONDS=900`) so a single failed poll doesn't flap entities unavailable, **rate-limit back-off** (`is_rate_limit_error`, `_adjust_poll_backoff`, doubling up to `BACKOFF_MAX_INTERVAL=1h`), and **Repairs** (`_async_manage_repairs` raises/clears `whitelist_rejection` / `rate_limited` issues). |
-| `config_flow.py` | **Two-phase setup:** the user step creates the hub entry from credentials (no tokens) and sets a unique ID (App ID); the token-less entry then raises `ConfigEntryAuthFailed`, so **authorization runs via reauth** (`async_step_reauth` → auto OAuth-callback wait with a manual code/URL fallback). Creating the hub first runs `async_setup`, which registers the callback view *before* any redirect (fixes the first-install 404). Also hosts the **options** flow (`SungrowOptionsFlow`, polling interval, extra measure points, per-device sensors). |
-| `sensor.py` | Builds `SungrowSensor` (plant) and `SungrowDeviceSensor` (per-device) entities from the stored coordinators. `infer_device_class()` maps units → device/state class so the Energy dashboard works; `_DIAGNOSTIC_CODES` marks the diagnostic points. |
-| `binary_sensor.py` | Per-device `SungrowDeviceFaultBinarySensor` (PROBLEM, from `dev_fault_status`) and `SungrowDeviceConnectivityBinarySensor` (CONNECTIVITY, from `dev_status`, exposes commissioning date). |
-| `number.py` / `select.py` | Dispatch **Number**/**Select** entities (charge/discharge, SOC limits, forced charging, export/active-power limits). `battery_only` params are gated on `coordinator.has_battery` (#148); power sliders are sized to the device's rated power. `select.py` owns the EMS heartbeat lifecycle. |
-| `const.py` | Domain, config keys, `GATEWAYS`, scan-interval defaults, and the per-device point maps (`INVERTER_DIAGNOSTIC_POINTS`, `BATTERY_DEVICE_POINTS`, `COMM_MODULE_POINTS`). |
+| `coordinator.py` | `SungrowPlantCoordinator(DataUpdateCoordinator)` — fetches realtime (and, when enabled, per-device) data per plant; reads the scan interval from `entry.options`; `is_auth_error()` maps exceptions to reauth vs retry. Also owns: **`has_battery`** gating (dispatch controls), an **availability grace window** (`_within_availability_grace`, `AVAILABILITY_GRACE_SECONDS=900`) so a single failed poll doesn't flap entities unavailable, **rate-limit back-off** (`is_rate_limit_error`, `_adjust_poll_backoff`, doubling up to `BACKOFF_MAX_INTERVAL=1h`), and **Repairs** (raises/clears the `whitelist_rejection` / `rate_limited` issues; only a *successful* poll clears them). Also always fetches each inverter/ESS device's operating status (points 29/13146) so the Fault sensor can show a reason (#182). |
+| `config_flow.py` | **Two-phase setup:** the user step creates the hub entry from credentials (no tokens) and sets a unique ID (App ID); the token-less entry then raises `ConfigEntryAuthFailed`, so **authorization runs via reauth** (`async_step_reauth` → auto OAuth-callback wait with a manual code/URL fallback). Creating the hub first runs `async_setup`, which registers the callback view *before* any redirect (fixes the first-install 404). Also hosts the **reconfigure** flow (`async_step_reconfigure`, change region/credentials in place) and the **options** flow (`SungrowOptionsFlow`, polling interval, extra measure points, per-device sensors). |
+| `sensor.py` | Builds `SungrowSensor` (plant), `SungrowDeviceSensor` (per-device) and `SungrowPlantDetailSensor` (plant-level health/tariffs from getPowerStationDetail, #178) entities from the stored coordinators. `infer_device_class()` maps units → device/state class so the Energy dashboard works; `_DIAGNOSTIC_CODES` marks the diagnostic points. |
+| `binary_sensor.py` | Per-device `SungrowDeviceFaultBinarySensor` (PROBLEM, from `dev_fault_status`; exposes an `operating_status` reason attribute, #182) and `SungrowDeviceConnectivityBinarySensor` (CONNECTIVITY, from `dev_status`, exposes commissioning date). |
+| `number.py` / `select.py` | Dispatch **Number**/**Select** entities (charge/discharge, SOC limits, forced charging, export/active-power limits, reactive power). `battery_only` params are gated on `coordinator.has_battery` (#148); power sliders are sized to the device's rated power. Write-only controls set `assumed_state` (no API read-back). `select.py` owns the EMS heartbeat lifecycle. |
+| `const.py` | Domain, config keys, `GATEWAYS`, scan-interval defaults, and the per-device point maps (`INVERTER_DIAGNOSTIC_POINTS`, `BATTERY_DEVICE_POINTS`, `METER_DEVICE_POINTS`, `COMM_MODULE_POINTS`, operating-status points). |
+| `measure_points.py` / `measure_points_data.py` | English naming (`resolve_name`, `CODE_ALIASES`), unit/code classification (`resolve_classification`, `normalize_unit`) and enum resolution, grounded in the official iSolarCloud measure-point catalogs. `measure_points_data.py` holds the catalog rows, enum tables and aliases. |
 | `__init__.py` helpers | `build_device_info()` (model/serial/manufacturer device cards), `_async_has_battery` (battery detection), `PLATFORMS = [BINARY_SENSOR, NUMBER, SELECT, SENSOR]`. |
 
 ### Critical invariant — token persistence
@@ -31,8 +33,8 @@ token**. If the new tokens are not written back to the config entry, the next
 Home Assistant restart reloads an invalidated refresh token and every entity goes
 unavailable (the historical bug behind issues #14/#15/#20/#21). The
 `token_updater` callback wired in `__init__.py.async_setup_entry` is what keeps
-this working — **do not remove it**, and keep `pysolarcloud` pinned in
-`manifest.json`.
+this working — **do not remove it**, and keep `sungrow-isolarcloud` pinned in
+`manifest.json` (and `requirements_test.txt`).
 
 ## Commands
 
@@ -61,8 +63,8 @@ Coverage threshold (`fail_under`) is set in `pyproject.toml`; keep it green.
 - Every behaviour change needs tests. Tests mock `pysolarcloud` (`SungrowAuth`,
   `Plants`) — see `tests/conftest.py` fixtures (`mock_setup_auth`,
   `mock_plants_service`, `mock_auth`).
-- `strings.json` and `translations/en.json` must stay in sync (a test enforces
-  the strings shape).
+- `strings.json` and **every** `translations/*.json` must stay in sync (a test
+  enforces key parity across all languages, not just `en`).
 
 ## Workflow / repo rules
 
