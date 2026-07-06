@@ -100,7 +100,12 @@ COMM_MODULE_POINTS: dict[str, str] = {
 # Unmapped codes (load, plant aggregates, ratios, forecasts) intentionally stay on
 # the plant, since a household load is not a device and ratios/forecasts are analytics.
 _PV_TYPES = frozenset(
-    {DeviceType.INVERTER, DeviceType.MICROINVERTER, DeviceType.ENERGY_STORAGE_SYSTEM, DeviceType.ENERGY_STORAGE_SYSTEM_2}
+    {
+        DeviceType.INVERTER,
+        DeviceType.MICROINVERTER,
+        DeviceType.ENERGY_STORAGE_SYSTEM,
+        DeviceType.ENERGY_STORAGE_SYSTEM_2,
+    }
 )
 _BATTERY_TYPES = frozenset({DeviceType.ENERGY_STORAGE_SYSTEM, DeviceType.ENERGY_STORAGE_SYSTEM_2, DeviceType.BATTERY})
 _METER_TYPES = frozenset({DeviceType.METER, DeviceType.GRID_CONNECTION_POINT})
