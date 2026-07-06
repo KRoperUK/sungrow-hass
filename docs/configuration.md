@@ -54,11 +54,13 @@ heartbeat** so the setting is applied and maintained.
 
 ## Per-device sensors
 
-By default, sensors are grouped at the plant level. You can optionally enable **per-device
-sensors** to surface points reported by individual devices (e.g. an EV charger or a second
-battery) under their own device in Home Assistant. Enabling this also surfaces the documented
-**diagnostic** points per device type — inverter temperature / MPPT voltages & currents, battery
-health (voltage, current, temperature, SOH), and WiNet-S WLAN/wireless signal strength.
+Plant readings are already grouped under the physical device they come from — inverter, battery,
+meter or WiNet-S — nested beneath the plant (see [Sensors → Device grouping](SENSORS.md#device-grouping)).
+On top of that, you can optionally enable **per-device sensors** to fetch points reported *only* by
+an individual device (e.g. an EV charger or a second battery) and expose them under that device.
+Enabling this also surfaces the documented **diagnostic** points per device type — inverter
+temperature / MPPT voltages & currents, battery health (voltage, current, temperature, SOH), and
+WiNet-S WLAN/wireless signal strength.
 
 Regardless of this option, every device gets a **Fault** (problem) and **Connectivity**
 (online/offline) binary sensor, and its device card is enriched with model, serial number and

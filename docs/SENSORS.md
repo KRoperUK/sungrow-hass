@@ -1,8 +1,12 @@
 # Sungrow iSolarCloud sensor mapping
 
-The integration creates one Home Assistant device per iSolarCloud plant, then adds a sensor for every realtime measure point that the plant returns. The point codes come from the iSolarCloud API; this guide maps the most common ones to the values shown in the iSolarCloud app.
+The integration models each iSolarCloud plant as a Home Assistant device, with the plant's physical devices (inverter, battery, meter, WiNet-S) nested underneath it. It adds a sensor for every realtime measure point the plant returns and **groups each one under the physical device it belongs to** when that device can be identified (see [Device grouping](#device-grouping)). The point codes come from the iSolarCloud API; this guide maps the most common ones to the values shown in the iSolarCloud app.
 
 > Not every inverter / battery / meter returns every point. The available set depends on your model, firmware, and region. If a value you expect is missing, see [Adding extra measure points](#adding-extra-measure-points) below.
+
+## Device grouping
+
+Rather than piling every reading onto a single plant device, each plant sensor is attached to the physical device it describes — inverter power/yield to the **inverter**, state-of-charge and battery flows to the **battery/ESS**, grid and import/export readings to the **meter** — all nested beneath the plant. A reading is only moved onto a device when the plant has exactly **one** device of that type; genuine plant aggregates (e.g. *Total Active Power* on a two-inverter site) and household-load or forecast readings stay on the plant device. This grouping is automatic and changes only how entities are grouped — **entity IDs and history are unchanged**, so existing automations and dashboards keep working.
 
 ## Common dashboard values
 

@@ -8,6 +8,7 @@ import pysolarcloud
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import (
@@ -17,6 +18,7 @@ from custom_components.sungrow import (
     async_setup,
     async_start_heartbeat,
     async_stop_heartbeat,
+    resolve_point_device,
 )
 from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
 
@@ -574,3 +576,82 @@ class TestSungrowAuthCallbackView:
         assert response.status == 400
         assert not future_a.done()
         assert not future_b.done()
+
+
+# ---------------------------------------------------------------------------
+# resolve_point_device (per-device modelling, #158)
+# ---------------------------------------------------------------------------
+
+
+def _dev(uuid, dtype):
+    return {"uuid": uuid, "device_type": dtype}
+
+
+def test_resolve_point_device_singular_rehomes():
+    """A mapped point re-homes onto the single device of its type."""
+    inv = _dev("inv-1", DeviceType.INVERTER)
+    meter = _dev("m-1", DeviceType.METER)
+    devices = [inv, meter]
+    assert resolve_point_device("inverter_ac_power", devices) is inv
+    assert resolve_point_device("grid_active_power", devices) is meter
+
+
+def test_resolve_point_device_zero_or_multiple_stays_plant():
+    """0 or >1 matching devices keep the point on the plant (aggregate stays correct)."""
+    two_inv = [_dev("inv-1", DeviceType.INVERTER), _dev("inv-2", DeviceType.INVERTER)]
+    assert resolve_point_device("inverter_ac_power", two_inv) is None
+    assert resolve_point_device("battery_soc", [_dev("inv-1", DeviceType.INVERTER)]) is None
+
+
+def test_resolve_point_device_unmapped_and_hybrid():
+    """Unmapped codes stay on the plant; a hybrid ESS satisfies both PV and battery points."""
+    assert resolve_point_device("load_power", [_dev("inv-1", DeviceType.INVERTER)]) is None
+    ess = _dev("ess-1", DeviceType.ENERGY_STORAGE_SYSTEM)
+    assert resolve_point_device("inverter_ac_power", [ess]) is ess
+    assert resolve_point_device("battery_soc", [ess]) is ess
+
+
+def test_resolve_point_device_ignores_uuidless():
+    """A device without a uuid can't own a point."""
+    assert resolve_point_device("inverter_ac_power", [{"device_type": DeviceType.INVERTER}]) is None
+
+
+async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """The plant device is registered explicitly so it anchors via_device even when
+    every plant sensor re-homes onto a physical device (#158)."""
+    from homeassistant.helpers import device_registry as dr
+
+    inv_uuid = 4841885
+    inv = {
+        "uuid": inv_uuid,
+        "device_type": 1,
+        "device_name": "Inv",
+        "device_model_code": "SG3.6RS",
+        "device_sn": "A1",
+        "factory_name": "SUNGROW",
+        "dev_fault_status": 4,
+        "dev_status": "1",
+        "ps_key": "57_1_1_1",
+    }
+
+    async def _devices(plant_id, *a, **k):
+        return [inv] if str(plant_id) == "12345" else []
+
+    mock_plants_service.async_get_plant_devices = AsyncMock(side_effect=_devices)
+    mock_plants_service.async_get_realtime_data = AsyncMock(
+        return_value={
+            "12345": {"inverter_ac_power": {"code": "inverter_ac_power", "value": "1", "unit": "W"}},
+            "67890": {},
+        }
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = dr.async_get(hass)
+    # Plant anchor device exists (the sole plant sensor re-homed onto the inverter)...
+    assert registry.async_get_device(identifiers={(DOMAIN, "12345")}) is not None
+    # ...and the physical inverter device exists too.
+    assert registry.async_get_device(identifiers={(DOMAIN, str(inv_uuid))}) is not None

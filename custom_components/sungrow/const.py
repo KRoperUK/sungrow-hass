@@ -1,5 +1,7 @@
 """Constants for the Sungrow iSolarCloud integration."""
 
+from pysolarcloud.plants import DeviceType
+
 DOMAIN = "sungrow"
 CONF_APP_KEY = "app_key"
 CONF_APP_SECRET = "app_secret"
@@ -89,4 +91,97 @@ BATTERY_DIAGNOSTIC_CODES = frozenset({"battery_voltage", "battery_current", "bat
 COMM_MODULE_POINTS: dict[str, str] = {
     "23014": "wlan_signal_strength",
     "23001": "wireless_signal_strength",
+}
+
+# Physical-device modelling (#158): map a plant realtime point code to the device
+# type(s) that own it. A sensor re-homes onto that device only when the plant has
+# exactly one matching device (see resolve_point_device); otherwise it stays on the
+# plant device. Grounded in the 74 real codes from a live plant + docs/SENSORS.md.
+# Unmapped codes (load, plant aggregates, ratios, forecasts) intentionally stay on
+# the plant, since a household load is not a device and ratios/forecasts are analytics.
+_PV_TYPES = frozenset(
+    {
+        DeviceType.INVERTER,
+        DeviceType.MICROINVERTER,
+        DeviceType.ENERGY_STORAGE_SYSTEM,
+        DeviceType.ENERGY_STORAGE_SYSTEM_2,
+    }
+)
+_BATTERY_TYPES = frozenset({DeviceType.ENERGY_STORAGE_SYSTEM, DeviceType.ENERGY_STORAGE_SYSTEM_2, DeviceType.BATTERY})
+_METER_TYPES = frozenset({DeviceType.METER, DeviceType.GRID_CONNECTION_POINT})
+
+POINT_DEVICE_TYPE: dict[str, frozenset[DeviceType]] = {
+    # PV / inverter
+    "total_active_power": _PV_TYPES,
+    "total_active_power_of_pv": _PV_TYPES,
+    "inverter_ac_power": _PV_TYPES,
+    "inverter_ac_power_normalization": _PV_TYPES,
+    "inverter_daily_yield": _PV_TYPES,
+    "inverter_total_yield": _PV_TYPES,
+    "inverter_pr": _PV_TYPES,
+    "daily_yield": _PV_TYPES,
+    "total_yield": _PV_TYPES,
+    "total_pv_yield": _PV_TYPES,
+    "daily_pv_yield_ems": _PV_TYPES,
+    "pv_active_power_ems": _PV_TYPES,
+    "total_dc_power": _PV_TYPES,
+    "daily_equivalent_hours_of_inverter": _PV_TYPES,
+    # Battery / ESS
+    "battery_level_soc": _BATTERY_TYPES,
+    "battery_soc": _BATTERY_TYPES,
+    "total_field_soc": _BATTERY_TYPES,
+    "energy_storage_soc_ems": _BATTERY_TYPES,
+    "total_field_energy_storage_active_power": _BATTERY_TYPES,
+    "total_field_energy_storage_maximum_reactive_power": _BATTERY_TYPES,
+    "total_field_maximum_rechargeable_power": _BATTERY_TYPES,
+    "total_field_maximum_dischargeable_power": _BATTERY_TYPES,
+    "total_field_chargeable_energy": _BATTERY_TYPES,
+    "total_field_dischargeable_energy": _BATTERY_TYPES,
+    "total_field_charge_capacity": _BATTERY_TYPES,
+    "total_field_discharge_capacity": _BATTERY_TYPES,
+    "daily_field_charge_capacity": _BATTERY_TYPES,
+    "daily_field_discharge_capacity": _BATTERY_TYPES,
+    "total_field_power_factor": _BATTERY_TYPES,
+    "total_field_reactive_power": _BATTERY_TYPES,
+    "total_number_of_charge_discharge": _BATTERY_TYPES,
+    "energy_storage_active_power_ems": _BATTERY_TYPES,
+    "energy_storage_cumulative_charge": _BATTERY_TYPES,
+    "energy_storage_remaining_charge": _BATTERY_TYPES,
+    "energy_storage_remaining_charge_ems": _BATTERY_TYPES,
+    "ess_daily_charge_ems": _BATTERY_TYPES,
+    "ess_daily_discharge_ems": _BATTERY_TYPES,
+    "cumulative_discharge": _BATTERY_TYPES,
+    "planned_charging_power": _BATTERY_TYPES,
+    "planned_discharging_power": _BATTERY_TYPES,
+    "planned_es_charging_discharging_power": _BATTERY_TYPES,
+    "planned_es_soc": _BATTERY_TYPES,
+    "battery_charge_power": _BATTERY_TYPES,
+    "battery_discharge_power": _BATTERY_TYPES,
+    "battery_level": _BATTERY_TYPES,
+    "battery_soh": _BATTERY_TYPES,
+    "battery_voltage": _BATTERY_TYPES,
+    "battery_current": _BATTERY_TYPES,
+    "battery_temperature": _BATTERY_TYPES,
+    "battery_total_charge_energy": _BATTERY_TYPES,
+    "battery_total_discharge_energy": _BATTERY_TYPES,
+    # Meter / grid
+    "grid_active_power": _METER_TYPES,
+    "grid_active_power_ems": _METER_TYPES,
+    "meter_ac_power": _METER_TYPES,
+    "meter_active_power": _METER_TYPES,
+    "meter_daily_yield": _METER_TYPES,
+    "meter_total_yield": _METER_TYPES,
+    "meter_e_daily_consumption": _METER_TYPES,
+    "accumulative_power_consumption_by_meter": _METER_TYPES,
+    "feed_in_energy_today": _METER_TYPES,
+    "feed_in_energy_total": _METER_TYPES,
+    "daily_feed_in_energy_pv": _METER_TYPES,
+    "energy_purchased_today": _METER_TYPES,
+    "total_purchased_energy": _METER_TYPES,
+    "meter_forward_active_energy": _METER_TYPES,
+    "meter_reverse_active_energy": _METER_TYPES,
+    "meter_daily_forward_active_energy": _METER_TYPES,
+    "meter_daily_reverse_active_energy": _METER_TYPES,
+    "meter_apparent_power": _METER_TYPES,
+    "meter_frequency": _METER_TYPES,
 }

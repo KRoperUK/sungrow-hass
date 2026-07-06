@@ -21,6 +21,9 @@ inverters** through the **iSolarCloud** cloud API, using the
 - **Device health & diagnostics** — per-device **Fault** and **Connectivity** binary sensors,
   device-level diagnostics (inverter temperature, MPPT, WLAN signal), and device cards enriched
   with model, serial number and manufacturer.
+- **Per-device grouping** — plant readings are grouped under the physical device they come from
+  (inverter, battery, meter, WiNet-S), nested beneath the plant, so the device tree mirrors your
+  hardware. Entity IDs and history are unchanged; multi-inverter aggregates stay on the plant.
 - **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery
   charge/discharge power or EV-charger values) from the options flow.
 - **Dispatch / control** — number and select entities for charge/discharge command, power, SOC
