@@ -18,14 +18,30 @@ _LOGGER = logging.getLogger(__name__)
 # calls against the quota during) a diagnostics download.
 PROBE_TIMEOUT = 30
 
-# Stable identifiers redacted from the diagnostics download. Credentials
+# Identifiers redacted from the diagnostics download. Credentials
 # (app_key/app_secret) and tokens are never included in the payload to begin
 # with; this additionally scrubs the App ID and the per-device hardware
 # identifiers (uuid, ps_key, and every serial-number field — including the
-# communication dongle's ``communication_dev_sn``) that would otherwise leak in
-# the device lists. ``ps_id`` (the plant id) is deliberately kept — it is needed
-# to correlate a report with an account for support and is not a secret.
-TO_REDACT = {"app_id", "uuid", "ps_key", "dev_sn", "sn", "device_sn", "communication_dev_sn"}
+# communication dongle's ``communication_dev_sn``).
+#
+# ``plant_name`` / ``device_name`` / ``ps_name`` are redacted too: users routinely
+# name their plant and inverter after their address or location (e.g. "7 Acacia
+# Avenue" / "Acacia-Avenue-Inverter"), so leaving them in a bundle a user shares for
+# support would leak a home address. The hardware is still identifiable for support
+# from ``device_type`` / ``device_model_code`` / ``factory_name`` (kept), and reports
+# stay correlatable via ``ps_id`` (the plant id — deliberately kept; not a secret).
+TO_REDACT = {
+    "app_id",
+    "uuid",
+    "ps_key",
+    "dev_sn",
+    "sn",
+    "device_sn",
+    "communication_dev_sn",
+    "plant_name",
+    "device_name",
+    "ps_name",
+}
 
 
 def _anonymise_device_keys(realtime: Any, uuid_map: dict[str, str]) -> Any:
