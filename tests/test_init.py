@@ -18,6 +18,7 @@ from custom_components.sungrow import (
     async_setup,
     async_start_heartbeat,
     async_stop_heartbeat,
+    async_unload_entry,
     resolve_point_device,
 )
 from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
@@ -213,6 +214,31 @@ async def test_unload_cancels_running_heartbeat(hass: HomeAssistant, mock_setup_
 
     assert stop_event.is_set()
     assert task.done()
+
+
+async def test_unload_keeps_heartbeat_when_platform_unload_fails(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """A failed platform unload leaves the heartbeats running (the entry stays LOADED)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    stop_event = asyncio.Event()
+    task = entry.async_create_background_task(hass, stop_event.wait(), name="test-heartbeat")
+    entry.runtime_data.heartbeats["12345"] = (stop_event, task)
+
+    with patch.object(hass.config_entries, "async_unload_platforms", new=AsyncMock(return_value=False)):
+        result = await async_unload_entry(hass, entry)
+
+    assert result is False
+    # Heartbeat untouched: not stopped, still tracked — dispatch keepalive survives.
+    assert not stop_event.is_set()
+    assert "12345" in entry.runtime_data.heartbeats
+
+    stop_event.set()
+    await task  # clean up the lingering task
 
 
 async def test_setup_entry_no_tokens_triggers_reauth(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
