@@ -95,11 +95,35 @@ BATTERY_DEVICE_POINTS: dict[str, str] = {
     "58602": "battery_current",
     "58603": "battery_temperature",
     "58605": "battery_soh",
+    # Cell/module-level health (#180): imbalance and thermal early-warning. Min/max
+    # cell voltage flags a weak/failing cell; min/max module temperature flags a
+    # thermal spread; the status/contactor/fault-module points aid fault diagnosis.
+    "58608": "battery_operation_status",
+    "58610": "battery_max_cell_voltage",
+    "58612": "battery_min_cell_voltage",
+    "58614": "battery_max_module_temperature",
+    "58616": "battery_min_module_temperature",
+    "58635": "battery_dc_contactor_status",
+    "58636": "battery_fault_module_id",
 }
 
 # The technical/health subset of the battery points shown as diagnostics; the rest
 # (SOC, charge/discharge energy) stay primary sensors for the dashboards.
-BATTERY_DIAGNOSTIC_CODES = frozenset({"battery_voltage", "battery_current", "battery_temperature", "battery_soh"})
+BATTERY_DIAGNOSTIC_CODES = frozenset(
+    {
+        "battery_voltage",
+        "battery_current",
+        "battery_temperature",
+        "battery_soh",
+        "battery_operation_status",
+        "battery_max_cell_voltage",
+        "battery_min_cell_voltage",
+        "battery_max_module_temperature",
+        "battery_min_module_temperature",
+        "battery_dc_contactor_status",
+        "battery_fault_module_id",
+    }
+)
 
 # Communication-module (WiNet-S) device-level measuring points surfaced as diagnostic
 # sensors (#149), requested per-device when device sensors are enabled. Both IDs are in
