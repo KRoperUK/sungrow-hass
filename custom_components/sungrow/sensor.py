@@ -44,9 +44,20 @@ _DIAGNOSTIC_CODES = (
 # Sentinel unit: tariff sensors take their unit from the plant's currency at runtime.
 _CURRENCY_PER_KWH = "__currency_per_kwh__"
 
-# Per-code icon overrides for otherwise-unclassified plant points that read better with
-# a specific icon than the generic solar-panel fallback.
-_CODE_ICON_OVERRIDES = {"power_fraction": "mdi:gauge"}
+# Per-code icon overrides for points that read better with a specific icon than the
+# generic solar-panel fallback (or the class default). Applies regardless of
+# classification, so status/count points get a fitting glyph too.
+_CODE_ICON_OVERRIDES = {
+    "power_fraction": "mdi:gauge",
+    "array_insulation_resistance": "mdi:omega",
+    "afci_fault_count": "mdi:flash-alert",
+    "battery_operation_status": "mdi:battery-sync",
+    "battery_fault_module_id": "mdi:alert-circle",
+}
+
+# Dimensionless integer tallies displayed without a fractional part (issue-driven:
+# a fault count of "3" reads better than "3.0").
+_INTEGER_COUNT_CODES = frozenset({"afci_fault_count"})
 
 
 @dataclass(frozen=True)
@@ -60,15 +71,26 @@ class PlantDetailSensor:
     unit: str | None = None
     diagnostic: bool = True
     icon: str | None = None
+    integer: bool = False
 
 
 # Plant-detail fields worth surfacing as their own sensors on the plant device (#178):
 # operational health (alarm/fault counts), the nameplate power, and the import/export
 # tariffs the plant is configured with. Fields absent from a given plant are skipped.
 PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
-    PlantDetailSensor("alarm_count", "Alarm Count", state_class=SensorStateClass.MEASUREMENT, icon="mdi:alert-outline"),
     PlantDetailSensor(
-        "fault_count", "Fault Count", state_class=SensorStateClass.MEASUREMENT, icon="mdi:alert-circle-outline"
+        "alarm_count",
+        "Alarm Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:alert-outline",
+        integer=True,
+    ),
+    PlantDetailSensor(
+        "fault_count",
+        "Fault Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:alert-circle-outline",
+        integer=True,
     ),
     PlantDetailSensor(
         "install_power",
@@ -78,11 +100,16 @@ PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
         "W",
         icon="mdi:solar-power",
     ),
+    # Import price is money paid (cash-minus); export price is money earned (cash-plus).
     PlantDetailSensor(
-        "ps_consumption_power_price_kwh", "Import Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-plus"
+        "ps_consumption_power_price_kwh",
+        "Import Price",
+        unit=_CURRENCY_PER_KWH,
+        diagnostic=False,
+        icon="mdi:cash-minus",
     ),
     PlantDetailSensor(
-        "ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-minus"
+        "ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-plus"
     ),
 )
 
@@ -275,6 +302,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         else:
             self._attr_icon = None if device_class else "mdi:solar-power-variant"
 
+        # Integer tallies (fault counts) show no decimal places.
+        if point_code in _INTEGER_COUNT_CODES:
+            self._attr_suggested_display_precision = 0
+
     def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload for this sensor (plant-level source)."""
         data = self.coordinator.data
@@ -376,6 +407,8 @@ class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], Senso
         self._attr_device_class = desc.device_class
         self._attr_state_class = desc.state_class
         self._attr_icon = desc.icon
+        if desc.integer:
+            self._attr_suggested_display_precision = 0
         if desc.diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
         if desc.unit == _CURRENCY_PER_KWH:
@@ -385,12 +418,14 @@ class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], Senso
             self._attr_native_unit_of_measurement = desc.unit
 
     @property
-    def native_value(self) -> float | str | None:
+    def native_value(self) -> float | int | str | None:
         """Return the current value of the plant-detail field."""
         raw = self.coordinator.plant_detail.get(self._desc.key)
         if raw is None or str(raw).strip() == "":
             return None
         try:
-            return float(raw)
+            num = float(raw)
         except (TypeError, ValueError):
             return str(raw)
+        # Counts (alarm/fault) are whole numbers, not floats.
+        return int(num) if self._desc.integer else num

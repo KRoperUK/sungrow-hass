@@ -810,4 +810,18 @@ CODE_ALIASES: dict[str, str] = {
     "micro_yield_today": "Microinverter Yield Today",
     "micro_power_factor": "Microinverter Power Factor",
     "micro_running_status": "Microinverter Running Status",
+    # Per-device diagnostic codes whose acronyms/initialisms the generic
+    # title-caser would mangle ("Mppt1", "Wlan", "Afci", "Dc", "Id").
+    "mppt1_voltage": "MPPT1 Voltage",
+    "mppt1_current": "MPPT1 Current",
+    "mppt2_voltage": "MPPT2 Voltage",
+    "mppt2_current": "MPPT2 Current",
+    "mppt3_voltage": "MPPT3 Voltage",
+    "mppt3_current": "MPPT3 Current",
+    "total_dc_power": "Total DC Power",
+    "negative_voltage_to_ground": "Negative Voltage to Ground",
+    "afci_fault_count": "AFCI Fault Count",
+    "wlan_signal_strength": "WLAN Signal Strength",
+    "battery_dc_contactor_status": "Battery DC Contactor Status",
+    "battery_fault_module_id": "Battery Fault Module ID",
 }
