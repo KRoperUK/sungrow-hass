@@ -64,7 +64,9 @@ WiNet-S WLAN/wireless signal strength.
 
 Regardless of this option, every device gets a **Fault** (problem) and **Connectivity**
 (online/offline) binary sensor, and its device card is enriched with model, serial number and
-manufacturer. The Connectivity sensor exposes the commissioning date as an attribute.
+manufacturer. The Fault sensor exposes an `operating_status` attribute with a human-readable
+reason for inverter/ESS devices (e.g. *Shut down due to faults*, *Low insulation resistance*),
+and the Connectivity sensor exposes the commissioning date as an attribute.
 
 ## Energy dashboard
 
