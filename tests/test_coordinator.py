@@ -453,7 +453,7 @@ async def test_device_data_fetched_when_enabled(hass: HomeAssistant):
 
 
 async def test_device_data_not_fetched_when_disabled(hass: HomeAssistant):
-    """With the option off, per-device realtime is never requested."""
+    """With the option off, a non-inverter device (no operating status) isn't requested."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
     plants.async_get_device_realtime = AsyncMock(return_value={})
@@ -464,6 +464,41 @@ async def test_device_data_not_fetched_when_disabled(hass: HomeAssistant):
 
     assert coordinator.device_data == {}
     plants.async_get_device_realtime.assert_not_awaited()
+
+
+async def test_operating_status_fetched_for_inverter_when_disabled(hass: HomeAssistant):
+    """Even with device sensors off, an inverter's operating status is fetched (#182).
+
+    This is what lets the Fault binary sensor show a reason without the full device-
+    sensor set enabled; only the single operating-status point is requested.
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(
+        return_value={"inv-1": {"operating_status": {"id": "29", "code": "operating_status", "value": "64"}}}
+    )
+    devices = [{"uuid": "inv-1", "device_type": DeviceType.INVERTER, "ps_key": "12345_1_1_1"}]
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra == {"29": "operating_status"}  # only operating status, none of the heavy sets
+    assert coordinator.device_data["inv-1"]["operating_status"]["value"] == "64"
+
+
+async def test_operating_status_uses_13146_for_ess_when_disabled(hass: HomeAssistant):
+    """ESS/hybrid operating status is requested on point 13146, not the inverter point (#182)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "ps_key": "12345_14_1_1"}]
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra == {"13146": "operating_status"}
 
 
 async def test_device_data_best_effort_on_error(hass: HomeAssistant):

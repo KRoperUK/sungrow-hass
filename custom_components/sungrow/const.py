@@ -48,6 +48,14 @@ MAX_SCAN_INTERVAL = 86400
 # always on the first poll) so newly added/removed devices are still picked up.
 DEVICE_REFRESH_INTERVAL = 900
 
+# Operating-status measuring point per inverter family (#182). Always requested — even
+# when per-device sensors are off — so the Fault binary sensor can surface a
+# human-readable reason ("Shut down due to faults", "Low insulation resistance", ...).
+# Inverters report status on point 29, ESS/hybrids on 13146; both resolve via the shared
+# operating-status enum.
+INVERTER_OPERATING_STATUS_POINT: dict[str, str] = {"29": "operating_status"}
+ESS_OPERATING_STATUS_POINT: dict[str, str] = {"13146": "operating_status"}
+
 # Inverter/ESS device-level measuring points surfaced as diagnostic sensors (#149),
 # requested per-device when device sensors are enabled. Maps the documented inverter
 # point ID -> a stable code. Every ID is already in the measure-point catalog, so it

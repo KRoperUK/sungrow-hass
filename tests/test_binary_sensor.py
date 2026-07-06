@@ -21,13 +21,14 @@ from custom_components.sungrow.const import DOMAIN
 from .conftest import MOCK_CONFIG_DATA
 
 
-def _coordinator_with(devices):
+def _coordinator_with(devices, device_data=None):
     coordinator = MagicMock()
     coordinator.plant_id = "12345"
     coordinator.plant_name = "Test Plant"
     coordinator.config_entry = MagicMock()
     coordinator.last_update_success = True
     coordinator.devices = devices
+    coordinator.device_data = device_data or {}
     return coordinator
 
 
@@ -74,6 +75,34 @@ async def test_fault_binary_sensor_created_per_device(hass: HomeAssistant):
     assert fault["inv-1"].is_on is False
     assert fault["meter-1"].is_on is True
     assert fault["meter-1"].extra_state_attributes["fault_status"] == "FAULT"
+
+
+def test_fault_sensor_surfaces_operating_status_reason():
+    """The Fault sensor exposes a human-readable operating-status reason (#182)."""
+    devices = [{"uuid": "inv-1", "device_name": "Inverter1", "dev_fault_status": DeviceFaultStaus.FAULT}]
+    device_data = {"inv-1": {"operating_status": {"id": "29", "code": "operating_status", "value": "21760"}}}
+    coordinator = _coordinator_with(devices, device_data=device_data)
+    sensor = SungrowDeviceFaultBinarySensor(coordinator, devices[0])
+    attrs = sensor.extra_state_attributes
+    assert attrs["fault_status"] == "FAULT"
+    assert attrs["operating_status"] == "Shut down due to faults"
+
+
+def test_fault_sensor_operating_status_reason_for_ess():
+    """ESS/hybrid operating status resolves via point 13146, not the inverter point (#182)."""
+    devices = [{"uuid": "ess-1", "device_name": "Hybrid", "dev_fault_status": DeviceFaultStaus.ALARM}]
+    device_data = {"ess-1": {"operating_status": {"id": "13146", "code": "operating_status", "value": "37120"}}}
+    coordinator = _coordinator_with(devices, device_data=device_data)
+    sensor = SungrowDeviceFaultBinarySensor(coordinator, devices[0])
+    assert sensor.extra_state_attributes["operating_status"] == "Running with alarm"
+
+
+def test_fault_sensor_operating_status_none_when_not_reported():
+    """Devices with no operating-status reading expose operating_status=None (#182)."""
+    devices = [{"uuid": "meter-1", "device_name": "Meter1", "dev_fault_status": DeviceFaultStaus.NORMAL}]
+    coordinator = _coordinator_with(devices)  # empty device_data
+    sensor = SungrowDeviceFaultBinarySensor(coordinator, devices[0])
+    assert sensor.extra_state_attributes["operating_status"] is None
 
 
 async def test_fault_binary_sensor_unavailable_when_device_gone(hass: HomeAssistant):
