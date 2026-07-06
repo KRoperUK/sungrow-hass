@@ -143,12 +143,15 @@ If your inverter / ESS supports parameter configuration, the integration also cr
 | Reactive Power Mode | `reactive_power_regulation_mode` | Off / Power Factor / Q(t) / Q(P) / Q(U) | — |
 | Reactive Power Ratio Q(t) | `q_t` | −60–60 % | — |
 | Power Factor | `pf` | −1 to 1 | — |
+| Forced Dispatch Duration | *(local)* | 0–1440 min (0 = off) | ✅ |
 
 The power sliders (charge/discharge power, export limit power) are sized to the device's **rated power**, parsed from its model code (e.g. `SG3.6RS` → 3.6 kW), falling back to 5000 W when the rating can't be derived.
 
 The **reactive-power** controls work together: set **Reactive Power Mode** first, then the relevant value — **Power Factor** only takes effect in *Power Factor* mode, and **Reactive Power Ratio Q(t)** only in *Q(t)* mode. These are grid-quality controls and are available on PV-only plants too (they aren't battery-gated).
 
 When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integration automatically starts sending the External EMS heartbeat (param `10017`) every 60 seconds so the inverter stays in dispatch mode. Selecting **Stop** turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
+
+> **Auto-revert (safety).** Set **Forced Dispatch Duration** to a number of minutes and a forced *Charge*/*Discharge* automatically reverts to **Stop** after that long — so a forced command can't silently persist and curtail your solar (the [#148](https://github.com/KRoperUK/sungrow-hass/issues/148) footgun). The countdown survives a Home Assistant restart (if it expires while HA is down, the command reverts on startup). Leave it at **0** to keep the legacy behaviour (a forced command stays until you change it). It's a local control — it writes nothing to the inverter itself.
 
 > Dispatch support requires the correct iSolarCloud API plan and firmware. The integration will only create dispatch entities if it can discover a compatible inverter or ESS device for the plant.
 

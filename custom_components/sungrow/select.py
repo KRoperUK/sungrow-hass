@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
@@ -155,6 +157,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
         self._attr_options = list(self.options_map.keys())
         self._attr_entity_category = meta.get("entity_category")
+        # Auto-revert timer for forced Charge/Discharge (#157). Only the command select
+        # uses these; other selects leave them unset.
+        self._revert_cancel: CALLBACK_TYPE | None = None
+        self._revert_deadline: float | None = None
 
     async def async_added_to_hass(self) -> None:
         """Restore the last selected option across restarts.
@@ -175,6 +181,13 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             if self.param == "charge_discharge_command" and last.state in {"Charge", "Discharge"}:
                 entry = self.coordinator.config_entry
                 assert entry is not None
+                # Restore the auto-revert deadline first (#157): if the forced command
+                # already timed out while HA was down, revert to Stop instead of resuming
+                # dispatch; otherwise resume the heartbeat and re-arm for the time left.
+                deadline = self._restore_revert_deadline(last.attributes.get("revert_at"))
+                if deadline is not None and deadline <= time.time():
+                    await self._do_revert()
+                    return
                 await async_start_heartbeat(
                     self.hass,
                     entry,
@@ -182,6 +195,23 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                     self.device_uuid,
                     interval=60,
                 )
+                if deadline is not None:
+                    self._arm_revert(deadline=deadline)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel the auto-revert timer when the command select is removed."""
+        self._cancel_revert()
+        await super().async_will_remove_from_hass()
+
+    @staticmethod
+    def _restore_revert_deadline(raw: Any) -> float | None:
+        """Parse a restored ``revert_at`` epoch attribute, or None if absent/invalid."""
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
 
     async def async_select_option(self, option: str) -> None:
         """Update the dispatch parameter on the inverter."""
@@ -209,10 +239,74 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 self.device_uuid,
                 interval=60,
             )
+            # Arm the auto-revert so this forced command can't silently persist (#157).
+            self._arm_revert()
         elif self.param == "charge_discharge_command" and option == "Stop":
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
+            self._cancel_revert()
 
     # NOTE: the heartbeat is deliberately NOT stopped from async_will_remove_from_hass.
     # All ~13 dispatch entities share one heartbeat keyed by plant_id, so stopping it
     # on any single entity's removal (e.g. disabling "SOC Upper Limit") would kill
     # dispatch for the whole plant. Teardown is handled once by async_unload_entry (#112).
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Expose the pending auto-revert deadline so it survives a restart (#157)."""
+        if self.param == "charge_discharge_command" and self._revert_deadline is not None:
+            return {"revert_at": self._revert_deadline}
+        return None
+
+    def _revert_seconds(self) -> float:
+        """Configured auto-revert timeout in seconds (0 = disabled)."""
+        try:
+            minutes = float(getattr(self.coordinator, "forced_dispatch_duration_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return minutes * 60
+
+    def _arm_revert(self, *, deadline: float | None = None) -> None:
+        """Schedule the revert-to-Stop, replacing any pending one.
+
+        ``deadline`` (epoch seconds) is supplied when restoring across a restart;
+        otherwise it's computed from the configured duration. A duration of 0 disables
+        auto-revert and leaves nothing scheduled.
+        """
+        self._cancel_revert()
+        if deadline is None:
+            seconds = self._revert_seconds()
+            if seconds <= 0:
+                return
+            deadline = time.time() + seconds
+        self._revert_deadline = deadline
+        delay = max(0.0, deadline - time.time())
+        self._revert_cancel = async_call_later(self.hass, delay, self._handle_revert)
+
+    @callback
+    def _handle_revert(self, _now: Any) -> None:
+        """async_call_later fired — run the async revert."""
+        self._revert_cancel = None
+        self.hass.async_create_task(self._do_revert())
+
+    async def _do_revert(self) -> None:
+        """Revert a forced Charge/Discharge to Stop and stop the heartbeat (#157)."""
+        _LOGGER.info("Forced-dispatch timeout for %s: reverting to Stop", self.device_uuid)
+        stop_option = "Stop"
+        try:
+            await self.control.async_update_parameters(self.device_uuid, {self.param: self.options_map[stop_option]})
+        except PySolarCloudException as err:
+            _LOGGER.warning("Auto-revert to Stop failed for %s: %s", self.device_uuid, err)
+        entry = self.coordinator.config_entry
+        if entry is not None:
+            await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
+        self._revert_deadline = None
+        self._revert_cancel = None
+        self._attr_current_option = stop_option
+        self.async_write_ha_state()
+
+    def _cancel_revert(self) -> None:
+        """Cancel any pending auto-revert."""
+        self._revert_deadline = None
+        if self._revert_cancel is not None:
+            self._revert_cancel()
+            self._revert_cancel = None
