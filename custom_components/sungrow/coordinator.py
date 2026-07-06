@@ -157,6 +157,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._poll_timeout: float = min(scan_seconds, MAX_POLL_TIMEOUT)
         # Monotonic timestamp of the last device-list refresh; None until first poll.
         self._last_device_refresh: float | None = None
+        # Monotonic timestamp of the last plant-detail refresh; None until first poll.
+        self._last_plant_detail_refresh: float | None = None
+        # Plant-detail fields (alarm/fault counts, nameplate power, tariffs, ...) from
+        # getPowerStationDetail, surfaced as plant-level sensors (#178). Empty until the
+        # first successful fetch.
+        self.plant_detail: dict[str, Any] = {}
         # Monotonic timestamp of the last successful realtime poll; drives the
         # availability grace window (#152). None until the first success.
         self._last_successful_update: float | None = None
@@ -211,6 +217,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # picked up at runtime (dynamic-devices) and removed ones can be pruned
         # (stale-devices). Throttled and best-effort: keep the previous list on failure.
         await self._async_maybe_refresh_devices()
+
+        # Refresh the plant-detail fields (alarm/fault counts, nameplate, tariffs) for
+        # the plant-level diagnostic sensors (#178). Throttled and best-effort.
+        await self._async_maybe_refresh_plant_detail()
 
         if self.enable_device_sensors:
             self.device_data = await self._async_fetch_device_data()
@@ -291,6 +301,33 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         # Mutate in place so holders of this list (runtime_data.devices) see updates.
         self.devices[:] = list(devices or [])
+
+    async def _async_maybe_refresh_plant_detail(self) -> None:
+        """Refresh plant-detail fields periodically rather than on every poll (#178).
+
+        The plant-detail payload (nameplate, tariffs, alarm/fault counts) changes slowly,
+        so it's re-fetched on the same cadence as the device list to save quota.
+        """
+        now = self.hass.loop.time()
+        if (
+            self._last_plant_detail_refresh is not None
+            and (now - self._last_plant_detail_refresh) < DEVICE_REFRESH_INTERVAL
+        ):
+            return
+        self._last_plant_detail_refresh = now
+        await self._async_refresh_plant_detail()
+
+    async def _async_refresh_plant_detail(self) -> None:
+        """Re-fetch the plant-detail fields (best effort, non-fatal)."""
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                details = await self.plants_service.async_get_plant_details(self.plant_id)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Could not refresh plant detail for plant %s: %s", self.plant_id, err)
+            return
+        for row in details or []:
+            self.plant_detail = dict(row)
+            return
 
     async def _async_fetch_device_data(self) -> dict[str, dict[str, Any]]:
         """Fetch per-device realtime for each distinct device type (best effort).

@@ -12,7 +12,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sungrow import SungrowData
 from custom_components.sungrow.const import DOMAIN
 from custom_components.sungrow.sensor import (
+    PLANT_DETAIL_SENSORS,
     SungrowDeviceSensor,
+    SungrowPlantDetailSensor,
     SungrowSensor,
     async_setup_entry,
     infer_device_class,
@@ -108,6 +110,46 @@ def test_sensor_stays_on_plant_when_no_device_or_unmapped():
     coord2 = _coord_with_devices([{"uuid": "inv-1", "device_type": DeviceType.INVERTER}])
     load = SungrowSensor(coord2, "load_power", "123", "Plant", {"code": "load_power", "value": "1", "unit": "W"})
     assert load._attr_device_info["identifiers"] == {(DOMAIN, "123")}
+
+
+# ---------------------------------------------------------------------------
+# Plant-detail sensors (#178)
+# ---------------------------------------------------------------------------
+
+
+def test_plant_detail_sensor_values_and_units():
+    """Plant-detail sensors read from coordinator.plant_detail, on the plant device."""
+    coordinator = MagicMock()
+    coordinator.plant_detail = {
+        "alarm_count": 2,
+        "install_power": 3600.0,
+        "power_price_unit": "GBP",
+        "ps_consumption_power_price_kwh": "0.3887",
+    }
+    descs = {d.key: d for d in PLANT_DETAIL_SENSORS}
+
+    alarm = SungrowPlantDetailSensor(coordinator, descs["alarm_count"], "123", "Plant", "http://x")
+    assert alarm.native_value == 2.0
+    assert alarm._attr_unique_id == "123_detail_alarm_count"
+    assert alarm._attr_device_info["identifiers"] == {(DOMAIN, "123")}
+
+    power = SungrowPlantDetailSensor(coordinator, descs["install_power"], "123", "Plant", "http://x")
+    assert power.native_value == 3600.0
+    assert power._attr_native_unit_of_measurement == "W"
+
+    # Tariff sensor takes its unit from the plant's configured currency.
+    price = SungrowPlantDetailSensor(coordinator, descs["ps_consumption_power_price_kwh"], "123", "Plant", "http://x")
+    assert price.native_value == 0.3887
+    assert price._attr_native_unit_of_measurement == "GBP/kWh"
+
+
+def test_plant_detail_sensor_absent_field_is_none():
+    """A field missing from plant_detail yields native_value None (builder skips it)."""
+    coordinator = MagicMock()
+    coordinator.plant_detail = {}
+    desc = next(d for d in PLANT_DETAIL_SENSORS if d.key == "fault_count")
+    sensor = SungrowPlantDetailSensor(coordinator, desc, "123", "Plant", "http://x")
+    assert sensor.native_value is None
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +428,8 @@ def _coordinator_with(plant_id, plant_name, data):
     coordinator.plant_id = plant_id
     coordinator.plant_name = plant_name
     coordinator.data = data
+    coordinator.plant_detail = {}  # #178: _build_sensors reads this
+    coordinator.devices = []
     return coordinator
 
 

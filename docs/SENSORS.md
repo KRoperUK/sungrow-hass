@@ -108,6 +108,18 @@ Alongside the plant sensors, the integration adds **diagnostic** entities that d
 - **Battery / ESS** (hybrid systems): battery level (SOC), state of health, voltage, current, temperature, and total charge/discharge energy. Health-oriented points (voltage, current, temperature, SOH) are marked *Diagnostic*; SOC and charge/discharge energy stay primary sensors for dashboards.
 - **Communication module (WiNet-S):** WLAN signal strength and wireless signal strength.
 
+## Plant health & tariffs
+
+Alongside the realtime measure points, the integration surfaces a few fields from the plant record itself (refreshed periodically, attached to the plant device):
+
+| Sensor | Source | Notes |
+|---|---|---|
+| Alarm Count / Fault Count | `alarm_count` / `fault_count` | Plant-wide counts, *Diagnostic* — a quick "is anything wrong?" at the plant level. |
+| Installed Power | `install_power` | Nameplate power of the plant (W). |
+| Import Price / Export Price | `ps_consumption_power_price_kwh` / `ps_feedin_power_price_kwh` | Your configured tariffs, in the plant's currency per kWh (e.g. `GBP/kWh`) — handy for cost automations. |
+
+Fields your plant doesn't report are simply not created.
+
 ## Dispatch / control entities
 
 If your inverter / ESS supports parameter configuration, the integration also creates **Number** and **Select** entities per plant for dispatch control. The **Battery?** column marks the controls that only appear when the plant actually has a battery/ESS device — on a **PV-only** plant they are hidden (see the warning below):
