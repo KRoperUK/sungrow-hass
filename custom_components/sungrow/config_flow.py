@@ -117,6 +117,10 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         authorization and updates the entry in place (no delete & re-add).
         """
         entry = self._get_reconfigure_entry()
+        # A cloud-free Modbus-only entry has no credentials to change; reconfigure just
+        # updates the WiNet-S host (#159), not the cloud app key/secret/gateway.
+        if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+            return await self.async_step_reconfigure_modbus(user_input)
         self._reauth_entry = entry
         self._is_reconfigure = True
 
@@ -139,6 +143,31 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         list(GATEWAYS.keys())
                     ),
                     vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, "")): str,
+                }
+            ),
+        )
+
+    async def async_step_reconfigure_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Reconfigure a cloud-free Modbus-only entry: update the WiNet-S host (#159).
+
+        No credentials are involved — the only thing worth changing is the local IP, in
+        case the WiNet-S moved to a new DHCP lease and discovery did not re-announce.
+        """
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            # Blank means "leave unchanged" so reconfigure can never accidentally clear
+            # the host (which would take the entry offline).
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip() or entry.data.get(CONF_MODBUS_HOST)
+            return self.async_update_reload_and_abort(
+                entry,
+                data={**entry.data, CONF_MODBUS_HOST: host},
+                reason="reconfigure_successful",
+            )
+        return self.async_show_form(
+            step_id="reconfigure_modbus",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_MODBUS_HOST, default=entry.data.get(CONF_MODBUS_HOST, "")): str,
                 }
             ),
         )

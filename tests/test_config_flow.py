@@ -556,6 +556,78 @@ async def test_reconfigure_shows_form(hass: HomeAssistant, mock_auth):
     assert result["step_id"] == "reconfigure"
 
 
+async def test_reconfigure_modbus_only_edits_host_not_credentials(hass: HomeAssistant):
+    """Reconfiguring a Modbus-only entry edits the WiNet-S host — never cloud credentials (#159).
+
+    Regression: a cloud-free local hub must not present the app key/secret/gateway form.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(return_value={"grid_frequency": {"value": 49.9}})
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+        )
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["step_id"] == "reconfigure_modbus"
+        # Only the local host — none of the cloud credential fields.
+        keys = {str(m.schema) for m in result["data_schema"].schema}
+        assert keys == {CONF_MODBUS_HOST}
+
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_MODBUS_HOST: "192.168.1.55"}
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_MODBUS_HOST] == "192.168.1.55"
+
+
+async def test_reconfigure_modbus_only_blank_keeps_current_host(hass: HomeAssistant):
+    """Submitting a blank host on reconfigure leaves the existing WiNet-S host intact (#159)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(return_value={"grid_frequency": {"value": 49.9}})
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_MODBUS_HOST: "   "}
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert entry.data[CONF_MODBUS_HOST] == "10.0.0.9"
+
+
 async def test_reconfigure_updates_settings_and_reauthorizes(hass: HomeAssistant, mock_auth):
     """Reconfigure changes region/credentials (App ID fixed) and re-authorizes in place (#80)."""
     entry = _hub_entry(hass)  # gateway=Europe, app_id=test_app_id

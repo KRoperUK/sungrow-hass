@@ -41,6 +41,13 @@
       "zeroconf_confirm": {
         "title": "Set up local Sungrow inverter",
         "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up to read data directly over local Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required."
+      },
+      "reconfigure_modbus": {
+        "title": "Reconfigure local Sungrow inverter",
+        "description": "Update the WiNet-S IP address if it changed on your network. This is a local Modbus connection — no iSolarCloud account is involved.",
+        "data": {
+          "modbus_host": "Local Modbus host (WiNet-S IP)"
+        }
       }
     },
     "progress": {
