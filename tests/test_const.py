@@ -70,3 +70,25 @@ def test_meter_device_points_present():
     assert M["8064"] == "meter_frequency"
     assert M["8000"] == "meter_phase_a_voltage"
     assert M["8006"] == "meter_phase_a_current"
+
+
+def test_battery_points_include_cell_health():
+    """The battery map (#180) carries cell/module-level health points, all diagnostic."""
+    from custom_components.sungrow.const import BATTERY_DEVICE_POINTS as P
+    from custom_components.sungrow.const import BATTERY_DIAGNOSTIC_CODES as D
+
+    expected = {
+        "58610": "battery_max_cell_voltage",
+        "58612": "battery_min_cell_voltage",
+        "58614": "battery_max_module_temperature",
+        "58616": "battery_min_module_temperature",
+        "58608": "battery_operation_status",
+        "58635": "battery_dc_contactor_status",
+        "58636": "battery_fault_module_id",
+    }
+    for pid, code in expected.items():
+        assert P[pid] == code
+        assert code in D  # health points are Diagnostic, not primary
+    # The pre-existing primary points (SOC, energy) remain and stay primary.
+    assert P["58604"] == "battery_level"
+    assert "battery_level" not in D
