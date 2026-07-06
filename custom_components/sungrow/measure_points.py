@@ -92,6 +92,23 @@ def _classify_by_unit(unit: str | None) -> _ClassPair | None:
     return _UNIT_CLASS_MAP.get(unit.strip().lower())
 
 
+# iSolarCloud returns some units as single Unicode glyphs — e.g. ``℃`` (U+2103) and
+# ``℉`` (U+2109) — that Home Assistant rejects as invalid for the matching device class
+# ("expected one of ['K', '°F', '°C']"). Normalise them to the canonical HA spelling so
+# the device class stays valid and unit conversion / statistics work.
+_UNIT_ALIASES: dict[str, str] = {
+    "℃": "°C",
+    "℉": "°F",
+}
+
+
+def normalize_unit(unit: str | None) -> str | None:
+    """Return the canonical Home Assistant spelling of an API unit glyph (unchanged if none)."""
+    if not unit:
+        return unit
+    return _UNIT_ALIASES.get(unit.strip(), unit)
+
+
 def resolve_enum_options(point_id: str) -> tuple[str, ...] | None:
     """Return the distinct enum labels for an enum point, else ``None``."""
     mapping = ENUM_MAPS.get(point_id)

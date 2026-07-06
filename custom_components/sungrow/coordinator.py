@@ -203,10 +203,15 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
-            # Surface actionable errors (whitelist, rate limit) as HA Repairs (#153).
-            self._async_manage_repairs(err)
-            # Back off the poll interval while rate-limited so we stop hammering the API (#156).
-            self._adjust_poll_backoff(rate_limited=is_rate_limit_error(err))
+            # Surface actionable errors (whitelist, rate limit) as HA Repairs (#153) and
+            # back off the poll interval while rate-limited (#156). Deliberately raise-only:
+            # a transient error (e.g. a network TimeoutError) that interleaves with an
+            # active rate-limit must NOT dismiss the still-valid Repair or reset the
+            # back-off and resume hammering the API — only a *successful* poll clears the
+            # Repairs and restores the interval.
+            self._async_raise_repair(err)
+            if is_rate_limit_error(err):
+                self._adjust_poll_backoff(rate_limited=True)
             # Transient failure (a timeout arrives here as TimeoutError). Rather than flap
             # every entity to "unavailable" on a brief cloud hiccup, keep serving the
             # last-good data while a recent success is still within the grace window (#152);
@@ -217,7 +222,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A timeout arrives here as TimeoutError and is treated as transient.
             raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
 
-        self._async_manage_repairs(None)
+        # Success: the plant recovered, so clear any Repairs and restore the interval.
+        self._async_clear_repairs()
         self._adjust_poll_backoff(rate_limited=False)
         self._last_successful_update = self.hass.loop.time()
 
@@ -266,28 +272,34 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._base_update_interval,
             )
 
-    def _async_manage_repairs(self, err: Exception | None) -> None:
-        """Raise or clear Repair issues for actionable iSolarCloud errors (#153).
+    def _async_raise_repair(self, err: Exception) -> None:
+        """Raise the Repair matching this error's actionable code, if any (#153).
 
-        Called on every poll: creates the matching Repair when a known actionable code
-        occurs and clears the rest, so a recovered plant automatically dismisses its issue.
+        Only *creates* the matching issue; it never clears others, so a transient error
+        (a plain ``TimeoutError`` has no code) can't dismiss a still-valid rate-limit or
+        whitelist Repair. Repairs are cleared only on a successful poll, via
+        :meth:`_async_clear_repairs`.
         """
         code = err.error if isinstance(err, PySolarCloudException) else None
+        if code is None:
+            return
         for key, codes in _REPAIR_CODES.items():
-            issue_id = f"{key}_{self.plant_id}"
             if code in codes:
                 ir.async_create_issue(
                     self.hass,
                     DOMAIN,
-                    issue_id,
+                    f"{key}_{self.plant_id}",
                     is_fixable=False,
                     severity=ir.IssueSeverity.WARNING,
                     translation_key=key,
                     translation_placeholders={"plant": self.plant_name},
                     learn_more_url=_REPAIR_LEARN_MORE,
                 )
-            else:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    def _async_clear_repairs(self) -> None:
+        """Clear all managed Repair issues — called on a successful poll (#153)."""
+        for key in _REPAIR_CODES:
+            ir.async_delete_issue(self.hass, DOMAIN, f"{key}_{self.plant_id}")
 
     async def _async_maybe_refresh_devices(self) -> None:
         """Refresh the device list periodically rather than on every poll (saves quota).
@@ -385,7 +397,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.enable_device_sensors:
                 extra.update(self.extra_measure_points)
                 if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
-                    extra.update(INVERTER_DIAGNOSTIC_POINTS)
+                    diagnostic = INVERTER_DIAGNOSTIC_POINTS
+                    if type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value:
+                        # An ESS reports operating status on 13146 (already requested above);
+                        # drop the inverter point 29 so the two don't collide on the shared
+                        # "operating_status" code and silently overwrite each other (#182).
+                        diagnostic = {pid: code for pid, code in INVERTER_DIAGNOSTIC_POINTS.items() if pid != "29"}
+                    extra.update(diagnostic)
                 if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
                     extra.update(BATTERY_DEVICE_POINTS)
                 # Communication modules report WLAN/wireless signal strength (#149).
