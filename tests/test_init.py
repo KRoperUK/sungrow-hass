@@ -517,6 +517,26 @@ class TestSungrowAuthCallbackView:
         assert future.done()
         assert future.result() == "auth_code_123"
 
+    async def test_callback_never_logs_the_authorization_code(self, hass: HomeAssistant, caplog):
+        """The authorization code is a credential and must never appear in logs.
+
+        Users are told to enable debug logging when troubleshooting, so a code logged
+        at debug would end up in the logs they share.
+        """
+        import asyncio
+        import logging
+
+        future: asyncio.Future[str] = asyncio.Future()
+        hass.data.setdefault("sungrow", {})["flows"] = {"flow_abc": future}
+        secret_code = "SUPER-SECRET-AUTH-CODE-xyz"
+        mock_request = make_mocked_request("GET", f"/api/sungrow_hass/callback?code={secret_code}&flow_id=flow_abc")
+        mock_request.app["hass"] = hass
+
+        with caplog.at_level(logging.DEBUG, logger="custom_components.sungrow"):
+            await self.view.get(mock_request)
+
+        assert secret_code not in caplog.text
+
     async def test_callback_flow_not_found(self, hass: HomeAssistant):
         """Test callback returns 400 when no pending flow future exists."""
         mock_request = make_mocked_request("GET", "/api/sungrow_hass/callback?code=auth_code&flow_id=bad_flow")

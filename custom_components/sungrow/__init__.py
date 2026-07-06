@@ -506,10 +506,14 @@ class SungrowAuthCallbackView(HomeAssistantView):
         state = params.get("state")
 
         if not code:
-            _LOGGER.warning("Callback received but missing code. Params: %s", params)
+            # Log only the parameter *names* — never their values. An external redirect
+            # could carry sensitive values, and users are told to enable debug logging.
+            _LOGGER.warning("Callback received but missing 'code'. Query params present: %s", list(params))
             return web.Response(text="Missing code parameter. Please try again.", status=400)
 
-        _LOGGER.debug("Callback received with code: %s, flow_id: %s, state: %s", code, flow_id, state)
+        # Never log the authorization code — it's a single-use credential that exchanges
+        # for tokens (mirrors the rule in config_flow.async_step_finish). Presence is implied.
+        _LOGGER.debug("Callback received with an authorization code (flow_id=%s, state=%s)", flow_id, state)
 
         # Signal the waiting future so the config flow's background task can
         # resume the flow cleanly.
