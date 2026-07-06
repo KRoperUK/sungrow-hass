@@ -14,8 +14,9 @@ The integration talks to iSolarCloud's OpenAPI, which requires your own applicat
 1. Go to the **iSolarCloud Developer Portal**
    ([developer-api.isolarcloud.com](https://developer-api.isolarcloud.com/)) and sign in with
    your iSolarCloud account.
-2. Under **Applications**, create a new application. Choose **User-level authorization** (do
-   *not* enable OAuth 2.0 if you're asked — the Home Assistant flow uses the standard redirect).
+2. Under **Applications**, create a new application and **enable OAuth 2.0** — the Home Assistant
+   flow uses the OAuth 2.0 authorization-code grant (browser redirect + code exchange), so
+   authorization fails if OAuth 2.0 is not enabled for the app.
 3. Note the three credentials it issues: **App Key**, **App Secret**, and **App ID**.
 4. Set the application's **redirect / callback URL** to your Home Assistant callback:
 

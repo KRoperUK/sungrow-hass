@@ -12,8 +12,11 @@ Custom component that integrates Sungrow inverters via the iSolarCloud API into 
 - **Cloud Polling** — fetches real-time data from the iSolarCloud API.
 - **Auto-Discovery** — automatically finds all plants linked to your account.
 - **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.) with correct device/state classes for the Energy dashboard.
+- **Device health & diagnostics** — a per-device **Fault** (problem) and **Connectivity** (online/offline) binary sensor, plus device-level diagnostic sensors (inverter temperature, MPPT voltages/currents, grid frequency, WLAN/wireless signal strength). Device cards are enriched with model, serial number and manufacturer; the Connectivity sensor also exposes the commissioning date.
 - **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery charge/discharge power or EV charger values) via the options flow.
-- **Dispatch / control entities** — number and select entities for charge/discharge command, power, SOC limits, and forced charging, with automatic EMS heartbeat when dispatching.
+- **Dispatch / control entities** — number and select entities for charge/discharge command, power, SOC limits, forced charging, and export/active-power limiting, with automatic EMS heartbeat when dispatching. Battery-only controls are hidden on PV-only plants so they can't be triggered on a system without a battery.
+- **Resilient polling** — rides out brief network/API hiccups instead of flapping every entity to *unavailable*, and automatically backs off the polling interval when iSolarCloud rate-limits the account.
+- **Guided repairs** — surfaces iSolarCloud whitelist (E918/E919) and rate-limit (E998/E999) rejections as actionable Home Assistant **Repairs** with fix instructions.
 - **Config Flow** — set up entirely through the Home Assistant UI.
 - **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay available across restarts; if credentials expire you're prompted to re-authorize in place (no delete & re-add).
 - **Configurable polling interval** — tune how often data is fetched via the integration options.
@@ -105,7 +108,8 @@ This is a **cloud-polling** integration — it does not talk to the inverter loc
 
 - **Polling.** Home Assistant polls the iSolarCloud API on a fixed interval using one data update coordinator **per plant**. Every sensor for a plant refreshes together on each poll.
 - **Interval.** The default is **5 minutes**. Change it under **Configure → Polling interval** (minimum 10 seconds). Lower intervals update sooner but use more of your API quota (the free developer plan allows ~2000 calls/hour); enabling per-device sensors adds a call per device type each poll.
-- **Availability.** Entity state reflects the last successful poll. If a poll fails (network/API outage), entities go **unavailable** and Home Assistant retries on the next interval — no restart needed.
+- **Availability.** Entity state reflects the last successful poll. A single failed poll (network/API blip) no longer flips everything to *unavailable* — the integration keeps serving the last-known values through a short grace period (~15 minutes) and retries on the next interval. Only a sustained outage marks entities unavailable; no restart is needed to recover.
+- **Rate limiting.** If iSolarCloud rejects a poll for exceeding the call quota (E998/E999), the integration automatically **backs off** — doubling the effective interval up to a 1-hour cap — and raises a Home Assistant **Repair** suggesting a higher polling interval. It returns to your configured interval once the quota recovers.
 - **Authentication.** Access tokens are refreshed automatically and the rotated tokens are persisted, so entities stay available across restarts. If your credentials are revoked or expire, the integration triggers a **re-authorization** prompt rather than silently failing.
 - **Dispatch controls are write-only.** The dispatch **number**/**select** entities send commands to the inverter; iSolarCloud does not report their current value back, so they act as controls (their state is not polled). While actively charging/discharging, the integration keeps the inverter in External EMS mode via a background heartbeat.
 
@@ -166,7 +170,7 @@ automation:
 
 - **Regions / gateways:** Europe, International, China, and Australia. Pick the one matching the account you registered your developer application under.
 - **Devices:** grid-tied inverters, hybrid inverters, and energy storage systems (ESS / batteries) that appear in your iSolarCloud account. Sensors are created for whatever data points iSolarCloud returns for your plant.
-- **Dispatch / control:** number and select entities (charge/discharge command & power, SOC limits, forced charging) are created for inverter / ESS devices that support External EMS control.
+- **Dispatch / control:** number and select entities are created for inverter / ESS devices that support External EMS control. **Battery** controls (charge/discharge command & power, SOC limits, forced charging, battery-first mode) only appear when the plant actually has a battery/ESS — on a **PV-only** plant they are hidden, since dispatching charge/discharge on a battery-less inverter can force it into External-EMS mode and suppress generation. Non-battery controls (export limiting, active-power limiting) remain available on PV-only plants.
 
 ## Limitations
 

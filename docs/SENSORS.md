@@ -87,22 +87,50 @@ The official iSolarCloud measuring-point catalogs — also served by the [mcp-is
 
 Combiner-box, PCS, CMU/BSC, LC, environment-monitoring and communications catalogs are covered too — browse them via the docs server and add any `point_id=code` pair you need. Point IDs are consistent per device *type* but not guaranteed across every model/firmware, so confirm against your hardware if a point is missing.
 
+## Device-level diagnostic & health entities
+
+Alongside the plant sensors, the integration adds **diagnostic** entities that describe the state of the hardware itself. These are grouped under each device's card (enriched with its **model**, **serial number** and **manufacturer**) and default to the *Diagnostic* entity category. The commissioning date is exposed as an attribute on the device's Connectivity sensor.
+
+**Per-device binary sensors** (created for every discovered device with a UUID):
+
+| Entity | Device class | Meaning |
+|---|---|---|
+| Fault | `problem` | On when the device reports a fault or alarm (`dev_fault_status`); Off when normal. |
+| Connectivity | `connectivity` | On = online, Off = offline (`dev_status`). Exposes the commissioning/grid-connection date as an attribute. |
+
+**Per-device diagnostic sensors** — surfaced when **Create per-device sensors** is enabled (Configure → options), polled per device type from the documented measure-point catalog:
+
+- **Inverter:** operating status, total DC power, internal temperature, grid frequency, array insulation resistance, and MPPT 1–3 voltage/current.
+- **Battery / ESS** (hybrid systems): battery level (SOC), state of health, voltage, current, temperature, and total charge/discharge energy. Health-oriented points (voltage, current, temperature, SOH) are marked *Diagnostic*; SOC and charge/discharge energy stay primary sensors for dashboards.
+- **Communication module (WiNet-S):** WLAN signal strength and wireless signal strength.
+
 ## Dispatch / control entities
 
-If your inverter / ESS supports parameter configuration, the integration also creates **Number** and **Select** entities per plant for dispatch control:
+If your inverter / ESS supports parameter configuration, the integration also creates **Number** and **Select** entities per plant for dispatch control. The **Battery?** column marks the controls that only appear when the plant actually has a battery/ESS device — on a **PV-only** plant they are hidden (see the warning below):
 
-| Entity | Parameter | Range / options |
-|---|---|---|
-| Charge/Discharge Command | `charge_discharge_command` | Stop / Charge / Discharge |
-| Charge/Discharge Power | `charge_discharge_power` | 0–5000 W |
-| SOC Upper Limit | `soc_upper_limit` | 70–100 % |
-| SOC Lower Limit | `soc_lower_limit` | 0–50 % |
-| Forced Charging | `forced_charging` | Disable / Enable |
-| Forced Charge Target SOC | `forced_charging_target_soc_1` | 0–100 % |
+| Entity | Parameter | Range / options | Battery? |
+|---|---|---|---|
+| Charge/Discharge Command | `charge_discharge_command` | Stop / Charge / Discharge | ✅ |
+| Charge/Discharge Power | `charge_discharge_power` | 0 W – device rating (fallback 5000 W) | ✅ |
+| SOC Upper Limit | `soc_upper_limit` | 70–100 % | ✅ |
+| SOC Lower Limit | `soc_lower_limit` | 0–50 % | ✅ |
+| Forced Charging | `forced_charging` | Disable / Enable | ✅ |
+| Forced Charge Target SOC (Window 1) | `forced_charging_target_soc_1` | 0–100 % | ✅ |
+| Forced Charge Target SOC (Window 2) | `forced_charging_target_soc_2` | 0–100 % | ✅ |
+| Battery First Mode | `battery_first` | Disable / Enable | ✅ |
+| Export Limitation | `feed_in_limitation` | Disable / Enable | — |
+| Export Limit (Power) | `feed_in_limitation_value` | 0 W – device rating | — |
+| Export Limit (%) | `feed_in_limitation_ratio` | 0–100 % | — |
+| Active Power Limiting | `limited_power_switch` | Disable / Enable | — |
+| Active Power Limit | `active_power_limit_ratio` | 0–100 % | — |
+
+The power sliders (charge/discharge power, export limit power) are sized to the device's **rated power**, parsed from its model code (e.g. `SG3.6RS` → 3.6 kW), falling back to 5000 W when the rating can't be derived.
 
 When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integration automatically starts sending the External EMS heartbeat (param `10017`) every 60 seconds so the inverter stays in dispatch mode. Selecting **Stop** turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
 
 > Dispatch support requires the correct iSolarCloud API plan and firmware. The integration will only create dispatch entities if it can discover a compatible inverter or ESS device for the plant.
+
+> **⚠️ Battery controls are hidden on PV-only plants.** Charge/discharge, SOC, forced-charging and battery-first controls only appear when the plant has a battery/ESS. Sending a charge/discharge command to a **battery-less** inverter can force it into External-EMS mode and **suppress generation**, so these controls are withheld on PV-only systems. Export- and active-power-limiting controls remain available.
 
 ## EV charger support
 
