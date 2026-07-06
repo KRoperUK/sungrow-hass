@@ -34,6 +34,33 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [3.4.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.3.0...v3.4.0) (2026-07-06)
+
+
+### Features
+
+* acronym names, diagnostic icons & integer counts for device sensors ([bb1a01a](https://github.com/KRoperUK/sungrow-hass/commit/bb1a01a34437ea1fdb4a0c3ca572b982df259f1f))
+* add battery cell/module health sensors ([#180](https://github.com/KRoperUK/sungrow-hass/issues/180)) ([77d976a](https://github.com/KRoperUK/sungrow-hass/commit/77d976ab8f5c70f97f4185f6d192a6fb546d2c69))
+* add per-string DC voltage & current sensors ([#189](https://github.com/KRoperUK/sungrow-hass/issues/189)) ([#192](https://github.com/KRoperUK/sungrow-hass/issues/192)) ([2bf70c2](https://github.com/KRoperUK/sungrow-hass/commit/2bf70c2ad1d58889d7f0ae18e623cb4c7d7861f5))
+* add reactive-power / power-factor dispatch controls ([#181](https://github.com/KRoperUK/sungrow-hass/issues/181)) ([#190](https://github.com/KRoperUK/sungrow-hass/issues/190)) ([3f5e399](https://github.com/KRoperUK/sungrow-hass/commit/3f5e399406554396e934c193f17b38b9c0dc06b4))
+* expand per-device diagnostic sensors (inverter grid health, meter) ([#179](https://github.com/KRoperUK/sungrow-hass/issues/179)) ([6149850](https://github.com/KRoperUK/sungrow-hass/commit/61498500270a5eeb15d7a873081d64126bb1d1e6))
+* icons for plant-detail sensors + power_fraction ([1667654](https://github.com/KRoperUK/sungrow-hass/commit/16676546797fd49463f967c2e5f359cd45690972))
+* model each physical device as a nested HA device ([#158](https://github.com/KRoperUK/sungrow-hass/issues/158)) ([#184](https://github.com/KRoperUK/sungrow-hass/issues/184)) ([e9a0777](https://github.com/KRoperUK/sungrow-hass/commit/e9a07777326ba258f3c4e95d1507ef5843b462fb))
+* signal-strength device class + connectivity icon ([ccf01b6](https://github.com/KRoperUK/sungrow-hass/commit/ccf01b6cd2994ff43cef31c77a6ed0fbd85eccf7))
+* signal-strength device class + connectivity icon ([5f7e526](https://github.com/KRoperUK/sungrow-hass/commit/5f7e526ba9c45bf5b465005033748bf3e19534db))
+* surface operating-status reason on the Fault binary sensor ([#182](https://github.com/KRoperUK/sungrow-hass/issues/182)) ([#201](https://github.com/KRoperUK/sungrow-hass/issues/201)) ([1a83a07](https://github.com/KRoperUK/sungrow-hass/commit/1a83a073f379a2b2e52da10c97a1fb4363ce72a1))
+* surface plant-level diagnostics & tariffs from getPowerStationDetail ([#178](https://github.com/KRoperUK/sungrow-hass/issues/178)) ([#187](https://github.com/KRoperUK/sungrow-hass/issues/187)) ([99a0f61](https://github.com/KRoperUK/sungrow-hass/commit/99a0f612563c8fb75bfcfaa7d74f51c550a2d0b9))
+* time-limited auto-revert for forced dispatch ([#157](https://github.com/KRoperUK/sungrow-hass/issues/157)) ([#191](https://github.com/KRoperUK/sungrow-hass/issues/191)) ([7b14f86](https://github.com/KRoperUK/sungrow-hass/commit/7b14f86cbadb44a8e5c0b37091a3585f3938009c))
+
+
+### Bug Fixes
+
+* bump pysolarcloud to 0.10.1 to restore per-device sensors ([#194](https://github.com/KRoperUK/sungrow-hass/issues/194)) ([aef9643](https://github.com/KRoperUK/sungrow-hass/commit/aef96439bfea342fecb2c22a74ff538f382269cc))
+* bump pysolarcloud to 0.10.2 — restore inverter per-device sensors ([66f0728](https://github.com/KRoperUK/sungrow-hass/commit/66f0728d91ec68321bce91d36648987316084a77))
+* bump pysolarcloud to 0.10.3 — chunk realtime point_id_list (100-point cap) ([1d32f1a](https://github.com/KRoperUK/sungrow-hass/commit/1d32f1ac90ca077e5be677222af30a7d19abca6e))
+* bump pysolarcloud to 0.10.3 — chunk realtime point_id_list (100-point cap) ([1d32f1a](https://github.com/KRoperUK/sungrow-hass/commit/1d32f1ac90ca077e5be677222af30a7d19abca6e))
+* bump pysolarcloud to 0.10.3 — chunk realtime point_id_list (100-point cap) ([6a17c64](https://github.com/KRoperUK/sungrow-hass/commit/6a17c64b60a80cec1abc1e631788125f730e1d28))
+
 ## [3.3.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.2.0...v3.3.0) (2026-07-06)
 
 
