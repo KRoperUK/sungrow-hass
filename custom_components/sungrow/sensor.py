@@ -44,6 +44,10 @@ _DIAGNOSTIC_CODES = (
 # Sentinel unit: tariff sensors take their unit from the plant's currency at runtime.
 _CURRENCY_PER_KWH = "__currency_per_kwh__"
 
+# Per-code icon overrides for otherwise-unclassified plant points that read better with
+# a specific icon than the generic solar-panel fallback.
+_CODE_ICON_OVERRIDES = {"power_fraction": "mdi:gauge"}
+
 
 @dataclass(frozen=True)
 class PlantDetailSensor:
@@ -55,17 +59,31 @@ class PlantDetailSensor:
     state_class: SensorStateClass | None = None
     unit: str | None = None
     diagnostic: bool = True
+    icon: str | None = None
 
 
 # Plant-detail fields worth surfacing as their own sensors on the plant device (#178):
 # operational health (alarm/fault counts), the nameplate power, and the import/export
 # tariffs the plant is configured with. Fields absent from a given plant are skipped.
 PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
-    PlantDetailSensor("alarm_count", "Alarm Count", state_class=SensorStateClass.MEASUREMENT),
-    PlantDetailSensor("fault_count", "Fault Count", state_class=SensorStateClass.MEASUREMENT),
-    PlantDetailSensor("install_power", "Installed Power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, "W"),
-    PlantDetailSensor("ps_consumption_power_price_kwh", "Import Price", unit=_CURRENCY_PER_KWH, diagnostic=False),
-    PlantDetailSensor("ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False),
+    PlantDetailSensor("alarm_count", "Alarm Count", state_class=SensorStateClass.MEASUREMENT, icon="mdi:alert-outline"),
+    PlantDetailSensor(
+        "fault_count", "Fault Count", state_class=SensorStateClass.MEASUREMENT, icon="mdi:alert-circle-outline"
+    ),
+    PlantDetailSensor(
+        "install_power",
+        "Installed Power",
+        SensorDeviceClass.POWER,
+        SensorStateClass.MEASUREMENT,
+        "W",
+        icon="mdi:solar-power",
+    ),
+    PlantDetailSensor(
+        "ps_consumption_power_price_kwh", "Import Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-plus"
+    ),
+    PlantDetailSensor(
+        "ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-minus"
+    ),
 )
 
 
@@ -248,9 +266,12 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             self._attr_native_unit_of_measurement = unit if unit else None
 
         # Let HA pick the icon for classified sensors; a signal icon for signal
-        # strength, and the solar-panel fallback only for unclassified points.
+        # strength, a per-code override where one reads better, and the solar-panel
+        # fallback only for otherwise-unclassified points.
         if device_class == SensorDeviceClass.SIGNAL_STRENGTH:
             self._attr_icon = "mdi:signal"
+        elif point_code in _CODE_ICON_OVERRIDES:
+            self._attr_icon = _CODE_ICON_OVERRIDES[point_code]
         else:
             self._attr_icon = None if device_class else "mdi:solar-power-variant"
 
@@ -354,6 +375,7 @@ class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], Senso
         self._attr_device_info = build_plant_device_info(plant_id, plant_name, console_url)
         self._attr_device_class = desc.device_class
         self._attr_state_class = desc.state_class
+        self._attr_icon = desc.icon
         if desc.diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
         if desc.unit == _CURRENCY_PER_KWH:
