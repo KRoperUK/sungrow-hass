@@ -142,12 +142,16 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self,
         hass: HomeAssistant,
         config_entry: ConfigEntry,
-        plants_service: Plants,
+        plants_service: Plants | None,
         plant_id: str,
         plant_name: str,
         devices: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        ``plants_service`` is ``None`` for a Modbus-only (cloud-free) entry, in which
+        case the realtime data comes entirely from the local Modbus client (#159).
+        """
         scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
@@ -203,8 +207,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
-        """Return a SungrowModbusClient if a Modbus host is configured, else None."""
-        host = config_entry.options.get(CONF_MODBUS_HOST)
+        """Return a SungrowModbusClient if a Modbus host is configured, else None.
+
+        The host lives in options for a cloud entry (opt-in hybrid) or in data for a
+        discovery-created Modbus-only entry (#159).
+        """
+        host = config_entry.options.get(CONF_MODBUS_HOST) or config_entry.data.get(CONF_MODBUS_HOST)
         if not host:
             return None
         from .modbus import SungrowModbusClient
@@ -217,6 +225,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
+        # Cloud-free (Modbus-only) entry: everything comes from the local inverter.
+        if self.plants_service is None:
+            return await self._async_modbus_only_update()
         try:
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
             # { "123": { "code1": {...}, "code2": {...} } }
@@ -289,6 +300,22 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return cloud_data
         return merge_realtime(cloud_data, local)
 
+    async def _async_modbus_only_update(self) -> dict[str, Any]:
+        """Read realtime data from the local Modbus client only (cloud-free entry, #159)."""
+        if self._modbus_client is None:
+            raise UpdateFailed("Modbus-only entry has no Modbus client configured")
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                data = await self._modbus_client.async_read_realtime()
+        except Exception as err:  # pylint: disable=broad-except
+            # Ride out a brief local blip the same way the cloud path does (#152).
+            if self.data is not None and self._within_availability_grace():
+                _LOGGER.debug("Transient Modbus read failure for %s; keeping last-good data: %s", self.plant_name, err)
+                return self.data
+            raise UpdateFailed(f"Local Modbus read failed: {err}") from err
+        self._last_successful_update = self.hass.loop.time()
+        return cast("dict[str, Any]", data)
+
     def _within_availability_grace(self) -> bool:
         """True while the last successful poll is recent enough to keep serving stale data."""
         if self._last_successful_update is None:
@@ -360,6 +387,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_refresh_devices(self) -> None:
         """Re-fetch the plant's device list (best effort, non-fatal)."""
+        assert self.plants_service is not None  # only reached on the cloud path
         try:
             async with asyncio.timeout(self._poll_timeout):
                 devices = await self.plants_service.async_get_plant_devices(self.plant_id)
@@ -386,6 +414,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_refresh_plant_detail(self) -> None:
         """Re-fetch the plant-detail fields (best effort, non-fatal)."""
+        assert self.plants_service is not None  # only reached on the cloud path
         try:
             async with asyncio.timeout(self._poll_timeout):
                 details = await self.plants_service.async_get_plant_details(self.plant_id)
@@ -406,6 +435,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         extra measure points are requested here too, so newly identified charger/meter
         point IDs surface without a code change.
         """
+        assert self.plants_service is not None  # only reached on the cloud path
         merged: dict[str, dict[str, Any]] = {}
         seen_types: set[Any] = set()
         for device in self.devices:

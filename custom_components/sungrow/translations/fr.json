@@ -37,6 +37,10 @@
           "gateway": "Région de la passerelle",
           "redirect_uri": "URI de redirection"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Configurer l'onduleur Sungrow local",
+        "description": "Un Sungrow **{model}** a été découvert sur votre réseau à **{host}** (WiNet-S). Configurez-le pour lire les données directement via Modbus local — rapide, sans quota et hors ligne, sans compte iSolarCloud."
       }
     },
     "progress": {
@@ -54,7 +58,8 @@
       "missing_code": "Le code d'autorisation n'a pas été reçu. Veuillez réessayer.",
       "reauth_successful": "La ré-authentification a réussi",
       "reconfigure_successful": "La reconfiguration a réussi",
-      "wrong_account": "Le compte autorisé ne correspond pas à l'App ID de cette intégration. Utilisez l'application développeur d'origine."
+      "wrong_account": "Le compte autorisé ne correspond pas à l'App ID de cette intégration. Utilisez l'application développeur d'origine.",
+      "not_sungrow_device": "L'appareil découvert n'est pas un onduleur Sungrow pris en charge."
     }
   },
   "options": {

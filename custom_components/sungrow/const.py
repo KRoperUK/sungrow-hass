@@ -24,6 +24,15 @@ CONF_MODBUS_PORT = "modbus_port"
 CONF_MODBUS_UNIT = "modbus_unit"
 DEFAULT_MODBUS_PORT = 502
 DEFAULT_MODBUS_UNIT = 1
+# Entry-data marker for a fully local, cloud-free entry created from zeroconf
+# discovery of a WiNet-S (#159). Such an entry carries no cloud credentials; its
+# realtime data comes entirely from local Modbus.
+CONF_TRANSPORT = "transport"
+TRANSPORT_MODBUS_ONLY = "modbus_only"
+# Discovered WiNet-S identity stored on a Modbus-only entry.
+CONF_MODEL = "model"
+CONF_SERIAL = "serial"
+DEFAULT_MODBUS_SCAN_INTERVAL = 30
 
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",

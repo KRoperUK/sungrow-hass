@@ -27,13 +27,18 @@ from .const import (
     CONF_APP_KEY,
     CONF_APP_SECRET,
     CONF_GATEWAY,
+    CONF_MODBUS_HOST,
+    CONF_MODEL,
     CONF_SCAN_INTERVAL,
+    CONF_SERIAL,
+    CONF_TRANSPORT,
     DEFAULT_CONSOLE_URL,
     DEFAULT_HOST,
     DOMAIN,
     GATEWAY_CONSOLE_URLS,
     GATEWAYS,
     POINT_DEVICE_TYPE,
+    TRANSPORT_MODBUS_ONLY,
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
@@ -56,7 +61,8 @@ class SungrowData:
     """Runtime data stored on the config entry (``entry.runtime_data``)."""
 
     coordinators: list[SungrowPlantCoordinator]
-    control: Control
+    # None for a Modbus-only (cloud-free) entry, which has no dispatch/control (#159).
+    control: Control | None
     devices: dict[str, list[dict[str, Any]]]
     # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
     heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task[None]]] = field(default_factory=dict)
@@ -242,8 +248,46 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
+async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
+    """Set up a cloud-free entry that reads a single inverter over local Modbus (#159).
+
+    Created by zeroconf discovery of a WiNet-S: no credentials, no cloud calls. One
+    coordinator reads the inverter's registers and the sensor platform builds entities
+    from the same measure-point codes the cloud path uses.
+    """
+    serial = str(entry.data.get(CONF_SERIAL) or entry.unique_id or "inverter")
+    model = str(entry.data.get(CONF_MODEL) or "Inverter")
+    plant_name = f"Sungrow {model}"
+    host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "")
+    # One inverter device nested under a service "plant" anchor (mirrors the cloud
+    # topology); distinct identifiers so the plant and inverter don't collide.
+    inverter = {
+        "uuid": f"{serial}_inv",
+        "device_name": plant_name,
+        "device_type": DeviceType.INVERTER,
+        "device_model_code": model,
+        "device_sn": serial,
+        "factory_name": "SUNGROW",
+    }
+    coordinator = SungrowPlantCoordinator(hass, entry, None, serial, plant_name, [inverter])
+    await coordinator.async_config_entry_first_refresh()
+
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={serial: [inverter]})
+    # Pre-create the plant service device (via_device parent) with the WiNet-S web UI
+    # as its configuration URL.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        **build_plant_device_info(serial, plant_name, f"http://{host}" if host else DEFAULT_CONSOLE_URL),
+    )
+    # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
+    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+        return await _async_setup_modbus_only(hass, entry)
     if "tokens" not in entry.data:
         # Nothing to authenticate with — ask the user to re-authorize.
         raise ConfigEntryAuthFailed("No stored tokens; re-authorization required")
@@ -441,7 +485,8 @@ async def async_start_heartbeat(
     heartbeats = data.heartbeats
 
     stop_event = asyncio.Event()
-    control: Control = data.control
+    control = data.control
+    assert control is not None  # the heartbeat is only ever started on a cloud dispatch entry
     # Tracked by the config entry so HA cancels it automatically on unload.
     task = entry.async_create_background_task(
         hass,

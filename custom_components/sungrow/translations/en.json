@@ -37,6 +37,10 @@
           "gateway": "Gateway Region",
           "redirect_uri": "Redirect URI"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Set up local Sungrow inverter",
+        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up to read data directly over local Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required."
       }
     },
     "progress": {
@@ -54,7 +58,8 @@
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
-      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application."
+      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application.",
+      "not_sungrow_device": "The discovered device is not a supported Sungrow inverter."
     }
   },
   "options": {

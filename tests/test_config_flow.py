@@ -7,14 +7,17 @@ before any redirect, which is what fixes the first-install 404.
 """
 
 import asyncio
+from ipaddress import ip_address
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sungrow.config_flow import _parse_winet_properties
 from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
@@ -22,9 +25,14 @@ from custom_components.sungrow.const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
+    CONF_MODEL,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
+    CONF_SERIAL,
+    CONF_TRANSPORT,
+    DEFAULT_MODBUS_SCAN_INTERVAL,
     DOMAIN,
+    TRANSPORT_MODBUS_ONLY,
 )
 
 from .conftest import MOCK_CONFIG_DATA, MOCK_USER_INPUT
@@ -674,3 +682,97 @@ async def test_options_flow_rejects_invalid_extra_measure_points(
 
     assert result2["type"] == data_entry_flow.FlowResultType.FORM
     assert result2["errors"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Zeroconf discovery -> standalone Modbus-only entry (#159)
+# ---------------------------------------------------------------------------
+
+
+def _winet_discovery(host: str = "192.168.1.93", serial: str = "A2340512345", model: str = "SG3.6RS"):
+    """A WiNet-S mDNS discovery advertising one inverter's serial and model."""
+    return ZeroconfServiceInfo(
+        ip_address=ip_address(host),
+        ip_addresses=[ip_address(host)],
+        port=80,
+        hostname=f"SUNGROW{serial}.local.",
+        type="_http._tcp.local.",
+        name="WiNet-WebServer._http._tcp.local.",
+        properties={
+            "board": f"SUNGROW;1;WiNet-S;{serial};1;",
+            "inverter": f"1;9732;{serial};1;516;{model};1;1;",
+        },
+    )
+
+
+def test_parse_winet_properties():
+    """The TXT-record parser extracts the inverter serial and model, or (None, None)."""
+    assert _parse_winet_properties({"inverter": "1;9732;A2340512345;1;516;SG3.6RS;1;1;"}) == (
+        "A2340512345",
+        "SG3.6RS",
+    )
+    # bytes-valued TXT records are decoded.
+    assert _parse_winet_properties({"inverter": b"1;9732;SN9;1;516;SG5.0RS;1;1;"}) == ("SN9", "SG5.0RS")
+    # No inverter record -> nothing to identify.
+    assert _parse_winet_properties({"board": "SUNGROW;1;WiNet-S;SN;1;"}) == (None, None)
+    # Too few fields -> no crash, just None.
+    assert _parse_winet_properties({"inverter": "1;9732"}) == (None, None)
+
+
+async def test_zeroconf_discovery_creates_modbus_entry(hass: HomeAssistant):
+    """Discovering a WiNet-S offers a confirm form, then creates a cloud-free Modbus entry."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery()
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "zeroconf_confirm"
+    assert result["description_placeholders"] == {"model": "SG3.6RS", "host": "192.168.1.93"}
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["title"] == "Sungrow SG3.6RS (local)"
+    assert result2["data"] == {
+        CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+        CONF_SERIAL: "A2340512345",
+        CONF_MODEL: "SG3.6RS",
+        CONF_MODBUS_HOST: "192.168.1.93",
+    }
+    assert result2["options"] == {CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL}
+    assert result2["result"].unique_id == "modbus_A2340512345"
+
+
+async def test_zeroconf_aborts_non_sungrow_device(hass: HomeAssistant):
+    """A discovery with no inverter serial is not a device we can set up."""
+    info = _winet_discovery()
+    info.properties.pop("inverter")
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=info
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "not_sungrow_device"
+
+
+async def test_zeroconf_aborts_when_already_configured_and_updates_host(hass: HomeAssistant):
+    """A re-discovered WiNet-S aborts as already configured and refreshes its stored host."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "A2340512345",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "192.168.1.50",  # old IP
+        },
+        unique_id="modbus_A2340512345",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(host="192.168.1.99")
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    # The WiNet-S moved to a new DHCP lease; the stored host follows it.
+    assert entry.data[CONF_MODBUS_HOST] == "192.168.1.99"

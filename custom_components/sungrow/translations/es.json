@@ -37,6 +37,10 @@
           "gateway": "Región de la pasarela",
           "redirect_uri": "URI de redirección"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Configurar inversor Sungrow local",
+        "description": "Se descubrió un Sungrow **{model}** en su red en **{host}** (WiNet-S). Configúrelo para leer datos directamente por Modbus local — rápido, sin límites y sin conexión, sin necesidad de una cuenta de iSolarCloud."
       }
     },
     "progress": {
@@ -54,7 +58,8 @@
       "missing_code": "No se recibió el código de autorización. Vuelva a intentarlo.",
       "reauth_successful": "La reautenticación se realizó correctamente",
       "reconfigure_successful": "La reconfiguración se realizó correctamente",
-      "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original."
+      "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original.",
+      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible."
     }
   },
   "options": {

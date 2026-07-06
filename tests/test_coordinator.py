@@ -31,9 +31,10 @@ from custom_components.sungrow.coordinator import (
 from .conftest import MOCK_REALTIME_DATA
 
 
-def _make_entry(options=None):
+def _make_entry(options=None, data=None):
     entry = MagicMock()
     entry.options = options or {}
+    entry.data = data or {}
     return entry
 
 
@@ -823,3 +824,61 @@ async def test_apply_modbus_noop_without_client(hass: HomeAssistant):
     assert coordinator._modbus_client is None
     cloud = {"x": {"value": "1"}}
     assert await coordinator._async_apply_modbus(cloud) is cloud
+
+
+# ---------------------------------------------------------------------------
+# Modbus-only transport (cloud-free entry, #159)
+# ---------------------------------------------------------------------------
+
+
+def _modbus_only_coordinator(hass: HomeAssistant) -> SungrowPlantCoordinator:
+    """A coordinator with no cloud service and a stubbed Modbus client."""
+    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN123", "Sungrow SG3.6RS")
+    assert coordinator.plants_service is None
+    coordinator._modbus_client = MagicMock()
+    return coordinator
+
+
+async def test_modbus_only_update_reads_from_modbus(hass: HomeAssistant):
+    """A Modbus-only entry sources all realtime data from the local client."""
+    coordinator = _modbus_only_coordinator(hass)
+    local = {"grid_frequency": {"code": "grid_frequency", "value": 49.9, "unit": "Hz", "source": "modbus"}}
+    coordinator._modbus_client.async_read_realtime = AsyncMock(return_value=local)
+
+    data = await coordinator._async_update_data()
+
+    assert data == local
+    assert coordinator._last_successful_update is not None
+
+
+async def test_modbus_only_update_no_client_raises(hass: HomeAssistant):
+    """A Modbus-only entry with no client configured fails the update (defensive)."""
+    entry = _make_entry()  # no host anywhere -> no client is built
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN123", "Sungrow SG3.6RS")
+    assert coordinator._modbus_client is None
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+
+async def test_modbus_only_update_keeps_last_good_within_grace(hass: HomeAssistant):
+    """A transient Modbus blip keeps serving the last-good data (availability grace)."""
+    coordinator = _modbus_only_coordinator(hass)
+    coordinator.data = {"grid_frequency": {"value": 50.0}}
+    coordinator._last_successful_update = hass.loop.time()  # fresh success
+    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=OSError("connection reset"))
+
+    data = await coordinator._async_update_data()
+
+    assert data == {"grid_frequency": {"value": 50.0}}
+
+
+async def test_modbus_only_update_raises_outside_grace(hass: HomeAssistant):
+    """Once the last-good data is stale, a Modbus failure takes the entry unavailable."""
+    coordinator = _modbus_only_coordinator(hass)
+    coordinator.data = {"grid_frequency": {"value": 50.0}}
+    coordinator._last_successful_update = None  # no recent success -> outside grace
+    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=OSError("connection reset"))
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
