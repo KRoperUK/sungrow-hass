@@ -73,6 +73,13 @@
           "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)",
           "modbus_host": "Gwesteiwr Modbus lleol (IP y WiNet-S) — dewisol; gadewch yn wag ar gyfer cwmwl yn unig"
         }
+      },
+      "modbus_options": {
+        "title": "Opsiynau Modbus Lleol",
+        "description": "Addaswch pa mor aml y mae Home Assistant yn darllen y gwrthdröydd yn uniongyrchol dros Modbus lleol. Nid oes cwota API cwmwl, felly gallwch holi'n aml; yr isafswm yw 10 eiliad.",
+        "data": {
+          "scan_interval": "Cyfwng holi (eiliadau)"
+        }
       }
     }
   },

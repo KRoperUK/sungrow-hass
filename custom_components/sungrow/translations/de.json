@@ -73,6 +73,13 @@
           "enable_device_sensors": "Sensoren pro Gerät erstellen (EV-Ladegeräte, Zähler, zusätzliche Batterien)",
           "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP) — optional; für reinen Cloud-Betrieb leer lassen"
         }
+      },
+      "modbus_options": {
+        "title": "Lokale Modbus-Optionen",
+        "description": "Legen Sie fest, wie oft Home Assistant den Wechselrichter direkt über lokales Modbus ausliest. Es gibt kein Cloud-API-Kontingent, sodass Sie häufig abfragen können; das Minimum beträgt 10 Sekunden.",
+        "data": {
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        }
       }
     }
   },

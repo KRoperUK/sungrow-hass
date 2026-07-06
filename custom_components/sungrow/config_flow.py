@@ -581,6 +581,10 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the integration options."""
+        # A cloud-free Modbus-only entry has none of the cloud settings (API quota,
+        # extra measure points, per-device fetch); show only the local poll interval (#159).
+        if self.config_entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+            return await self.async_step_modbus_options(user_input)
         errors: dict[str, str] = {}
         if user_input is not None:
             # Normalise the free-text mapping into a dict before storing.
@@ -623,4 +627,26 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_modbus_options(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Options for a cloud-free Modbus-only entry: just the local poll interval (#159).
+
+        The cloud settings (API quota, extra measure points, per-device fetch, the
+        optional-Modbus-host toggle) are all meaningless here, so none are shown. The
+        WiNet-S host is managed by discovery, not the options flow.
+        """
+        if user_input is not None:
+            return self.async_create_entry(title="", data={CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL]})
+        current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_MODBUS_SCAN_INTERVAL)
+        return self.async_show_form(
+            step_id="modbus_options",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                    ),
+                }
+            ),
         )

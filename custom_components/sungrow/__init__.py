@@ -43,6 +43,19 @@ from .const import (
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
+# A cloud-free Modbus-only entry has no device status or dispatch, so it sets up only
+# the sensor platform (#159). Setup and unload MUST use the same list — unloading a
+# platform that was never set up fails the unload, which breaks the options-change
+# reload and takes every entity unavailable.
+MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+
+def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
+    """Return the platforms this entry sets up (fewer for a Modbus-only entry, #159)."""
+    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+        return MODBUS_ONLY_PLATFORMS
+    return PLATFORMS
+
 
 # How long to wait for a heartbeat loop to observe its stop event and exit
 # before force-cancelling it.
@@ -280,7 +293,7 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         **build_plant_device_info(serial, plant_name, f"http://{host}" if host else DEFAULT_CONSOLE_URL),
     )
     # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
-    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
     return True
 
 
@@ -382,7 +395,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
         )
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
 
     # Prune devices that drop out of the API after each refresh (stale-devices).
     @callback
@@ -406,7 +419,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     # them up front would strand an active Charge/Discharge dispatch without its keepalive
     # (the inverter times out of External-EMS mode) while the entry stays LOADED on a
     # failed unload.
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, _entry_platforms(entry))
     if unloaded:
         heartbeats = entry.runtime_data.heartbeats
         for heartbeat in list(heartbeats.values()):
