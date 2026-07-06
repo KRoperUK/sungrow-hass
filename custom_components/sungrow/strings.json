@@ -82,6 +82,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "device_connectivity": {
+        "name": "Connectivity"
+      },
       "device_fault": {
         "name": "Fault"
       }

@@ -48,9 +48,31 @@ def fault_is_on(status: Any) -> bool | None:
     return None
 
 
+def connectivity_is_on(status: Any) -> bool | None:
+    """Map a device's ``dev_status`` to online (True) / offline (False), or None if unknown.
+
+    The device list reports ``dev_status`` as "1" (online) / "0" (offline); the int forms
+    are tolerated too.
+    """
+    if status is None:
+        return None
+    text = str(status)
+    if text == "1":
+        return True
+    if text == "0":
+        return False
+    return None
+
+
 def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySensorEntity]:
-    """Build a fault binary sensor for every device the coordinator currently reports."""
-    return [SungrowDeviceFaultBinarySensor(coordinator, device) for device in coordinator.devices if device.get("uuid")]
+    """Build the fault + connectivity binary sensors for every device the plant reports."""
+    sensors: list[BinarySensorEntity] = []
+    for device in coordinator.devices:
+        if not device.get("uuid"):
+            continue
+        sensors.append(SungrowDeviceFaultBinarySensor(coordinator, device))
+        sensors.append(SungrowDeviceConnectivityBinarySensor(coordinator, device))
+    return sensors
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -115,3 +137,42 @@ class SungrowDeviceFaultBinarySensor(CoordinatorEntity[SungrowPlantCoordinator],
         device = self._device() or {}
         status = device.get("dev_fault_status")
         return {"fault_status": str(getattr(status, "name", status)) if status is not None else None}
+
+
+class SungrowDeviceConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):
+    """A ``connectivity`` binary sensor reflecting whether a device is online."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "device_connectivity"
+
+    def __init__(self, coordinator: SungrowPlantCoordinator, device: dict[str, Any]) -> None:
+        """Initialize the connectivity binary sensor for a device."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_online"
+        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+
+    def _device(self) -> dict[str, Any] | None:
+        """Return this sensor's device from the coordinator's live list, if still present."""
+        return next((d for d in self.coordinator.devices if str(d.get("uuid")) == self.device_uuid), None)
+
+    @property
+    def available(self) -> bool:
+        """Unavailable only if the poll failed or the device dropped out of the plant."""
+        return super().available and self._device() is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """True when the device reports itself online (``dev_status``)."""
+        device = self._device()
+        if device is None:
+            return None
+        return connectivity_is_on(device.get("dev_status"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose static device details (commissioning date) for the device page."""
+        device = self._device() or {}
+        return {"commissioning_date": device.get("grid_connection_date")}
