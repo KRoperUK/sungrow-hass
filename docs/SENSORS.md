@@ -104,8 +104,9 @@ Alongside the plant sensors, the integration adds **diagnostic** entities that d
 
 **Per-device diagnostic sensors** — surfaced when **Create per-device sensors** is enabled (Configure → options), polled per device type from the documented measure-point catalog:
 
-- **Inverter:** operating status, total DC power, internal temperature, grid frequency, array insulation resistance, and MPPT 1–3 voltage/current.
+- **Inverter:** operating status, total DC power, internal temperature, grid frequency, array insulation resistance, MPPT 1–3 voltage/current, and grid-side health — **per-phase voltage & current** (A/B/C), reactive & apparent power, power factor, DC bus voltage, on-grid running time, negative-voltage-to-ground and AFCI fault count. (Points a given model doesn't report are simply skipped.)
 - **Battery / ESS** (hybrid systems): battery level (SOC), state of health, voltage, current, temperature, and total charge/discharge energy. Health-oriented points (voltage, current, temperature, SOH) are marked *Diagnostic*; SOC and charge/discharge energy stay primary sensors for dashboards.
+- **Energy meter:** instantaneous active / reactive / apparent power, power factor, grid frequency, per-phase voltage & current, and forward/reverse (import/export) active energy. (A meter that only reports energy — e.g. the SGSmartMeter — surfaces just those.)
 - **Communication module (WiNet-S):** WLAN signal strength and wireless signal strength.
 
 ## Dispatch / control entities

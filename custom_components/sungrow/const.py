@@ -65,6 +65,22 @@ INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
     "8": "mppt2_current",
     "9": "mppt3_voltage",
     "10": "mppt3_current",
+    # Grid-side health (#179). Per-phase voltages/currents, power quality and DC-link
+    # voltage — all live-confirmed on real hardware except the AFCI/insulation extras,
+    # which the per-device builder simply skips when a model doesn't report them.
+    "3": "total_running_time",
+    "18": "phase_a_voltage",
+    "19": "phase_b_voltage",
+    "20": "phase_c_voltage",
+    "21": "phase_a_current",
+    "22": "phase_b_current",
+    "23": "phase_c_current",
+    "25": "reactive_power",
+    "26": "power_factor",
+    "43": "apparent_power",
+    "95": "bus_voltage",
+    "90": "negative_voltage_to_ground",
+    "120": "afci_fault_count",
 }
 
 # Battery/ESS device-level measuring points surfaced as sensors for hybrid users (#154),
@@ -91,6 +107,26 @@ BATTERY_DIAGNOSTIC_CODES = frozenset({"battery_voltage", "battery_current", "bat
 COMM_MODULE_POINTS: dict[str, str] = {
     "23014": "wlan_signal_strength",
     "23001": "wireless_signal_strength",
+}
+
+# Energy-meter (device_type 7) measuring points surfaced as sensors when device sensors
+# are enabled (#179). Instantaneous power/PF/frequency and per-phase V/I/energy that the
+# plant-level realtime aggregate doesn't carry. Model-dependent — a meter that only
+# reports energy simply returns nothing for the power/phase points and they're skipped.
+METER_DEVICE_POINTS: dict[str, str] = {
+    "8018": "meter_active_power",
+    "8022": "meter_reactive_power",
+    "8026": "meter_apparent_power",
+    "8014": "meter_power_factor",
+    "8064": "meter_frequency",
+    "8000": "meter_phase_a_voltage",
+    "8001": "meter_phase_b_voltage",
+    "8002": "meter_phase_c_voltage",
+    "8006": "meter_phase_a_current",
+    "8007": "meter_phase_b_current",
+    "8008": "meter_phase_c_current",
+    "8030": "meter_forward_active_energy",
+    "8031": "meter_reverse_active_energy",
 }
 
 # Physical-device modelling (#158): map a plant realtime point code to the device

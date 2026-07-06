@@ -41,3 +41,32 @@ def test_config_key_names():
     assert CONF_APP_ID == "app_id"
     assert CONF_GATEWAY == "gateway"
     assert CONF_REDIRECT_URI == "redirect_uri"
+
+
+def test_inverter_diagnostic_points_include_grid_health():
+    """The inverter diagnostic map carries the #179 grid-side health points."""
+    from custom_components.sungrow.const import INVERTER_DIAGNOSTIC_POINTS as P
+
+    expected = {
+        "3": "total_running_time",
+        "18": "phase_a_voltage",
+        "21": "phase_a_current",
+        "25": "reactive_power",
+        "26": "power_factor",
+        "95": "bus_voltage",
+    }
+    for pid, code in expected.items():
+        assert P[pid] == code
+    # The pre-existing MPPT/operating-status points remain.
+    assert P["29"] == "operating_status"
+
+
+def test_meter_device_points_present():
+    """The meter map (#179) carries instantaneous power/PF/frequency + per-phase."""
+    from custom_components.sungrow.const import METER_DEVICE_POINTS as M
+
+    assert M["8018"] == "meter_active_power"
+    assert M["8014"] == "meter_power_factor"
+    assert M["8064"] == "meter_frequency"
+    assert M["8000"] == "meter_phase_a_voltage"
+    assert M["8006"] == "meter_phase_a_current"
