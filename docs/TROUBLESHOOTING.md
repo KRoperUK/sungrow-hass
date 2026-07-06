@@ -197,6 +197,54 @@ Non-battery controls — **Export Limitation**, **Export Limit (Power/%)**, and
 
 ---
 
+## Local Modbus (WiNet-S)
+
+These apply to the optional [local Modbus transport](local-modbus.md) (hybrid or Modbus-only
+setups). Cloud-only setups are unaffected.
+
+### The WiNet-S wasn't auto-discovered
+
+Discovery uses **mDNS/zeroconf**, which does **not** cross subnets or VLANs by default.
+
+- Make sure Home Assistant and the WiNet-S are on the **same network segment**. If they're
+  on different VLANs/subnets, the discovery card won't appear.
+- You don't have to wait for discovery: on an existing cloud entry, add the dongle manually
+  via **Configure → Local Modbus host** (hybrid). This talks straight to the dongle's IP and
+  needs no mDNS.
+- If discovery is dismissed, it reappears the next time the dongle is seen; you can also
+  reload the integration or restart Home Assistant to re-trigger it.
+
+### Local reads fail / "Cannot connect" over Modbus
+
+The dongle is reachable for mDNS (port 80) but Modbus reads use **TCP port 502**. If sensors
+are unavailable on a Modbus-only entry, or a hybrid entry keeps falling back to the cloud:
+
+- Confirm the WiNet-S IP is correct and **reachable on port 502** from the Home Assistant
+  host (a firewall/VLAN ACL may block 502 even when the web UI on 80 is reachable).
+- The WiNet-S allows only a **limited number of Modbus TCP clients** — if another tool
+  (another HA integration, a Modbus poller, node-RED) already holds the connection, reads
+  here can fail intermittently. Close the other client.
+- If the dongle's IP changed, a Modbus-only entry updates it automatically on the next
+  discovery; for a hybrid entry, update the **Local Modbus host** field. A **DHCP
+  reservation** for the dongle avoids this.
+
+### `daily_yield` reads higher over Modbus than in the cloud
+
+Known issue on some SG-RS firmware
+([#223](https://github.com/KRoperUK/sungrow-hass/issues/223)) — a scaling/semantics mismatch
+under investigation. **`total_yield` matches the cloud**; only the daily figure diverges. If
+you rely on the daily total, use the cloud value (cloud-only or the cloud sensor on a hybrid
+entry) until it's resolved.
+
+### My inverter model isn't read over Modbus
+
+Local Modbus currently maps only the **SG-RS single-phase string inverters**. Other models
+(SH hybrids, three-phase SG, standalone battery/meter) aren't in the register map yet
+([#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) — use **cloud-only** or
+**hybrid** (the cloud half returns everything) in the meantime.
+
+---
+
 ## Still stuck?
 
 Open a [bug report](https://github.com/KRoperUK/sungrow-hass/issues/new/choose)

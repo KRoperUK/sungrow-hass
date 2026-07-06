@@ -15,7 +15,11 @@ inverters** through the **iSolarCloud** cloud API, using the
 ## Features
 
 - **Cloud polling** — real-time data from the iSolarCloud API (`iot_class: cloud_polling`).
-- **Auto-discovery** — finds every plant linked to your account.
+- **Local Modbus (WiNet-S)** — optionally read the inverter directly over your LAN: as a
+  fast, quota-free overlay on a cloud entry (hybrid), or as a fully cloud-free setup created
+  by auto-discovery. See [Local Modbus](local-modbus.md).
+- **Auto-discovery** — finds every plant linked to your account, and discovers WiNet-S
+  dongles on the network for local Modbus.
 - **Rich sensors** — power, energy, battery SOC, and more, with correct device/state classes so
   they work in the Energy dashboard out of the box.
 - **Device health & diagnostics** — per-device **Fault** and **Connectivity** binary sensors,
@@ -77,7 +81,8 @@ modelled.
   [Installation & Setup](installation.md).
 
 !!! tip "New here?"
-    Start with [Installation & Setup](installation.md). If something goes wrong, the
+    Start with [Installation & Setup](installation.md). Want fast local reads or a cloud-free
+    setup? See [Local Modbus (WiNet-S)](local-modbus.md). If something goes wrong, the
     [Troubleshooting](TROUBLESHOOTING.md) page covers the common auth and "unavailable" issues.
 
 ## Links
