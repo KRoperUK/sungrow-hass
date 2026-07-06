@@ -132,6 +132,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
     """Select entity for a Sungrow dispatch parameter."""
 
     _attr_has_entity_name = True
+    # Write-only: the inverter's current dispatch mode isn't read back from the API, so
+    # the shown option is the last one we commanded — an assumption, not a device reading.
+    _attr_assumed_state = True
 
     def __init__(
         self,
