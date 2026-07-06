@@ -11,3 +11,4 @@ mypy==2.1.0
 
 # Component dependencies
 sungrow-isolarcloud==0.10.3
+pymodbus==3.13.1
