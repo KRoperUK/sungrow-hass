@@ -89,6 +89,14 @@ def test_signal_strength_sensor_gets_db_unit_and_signal_icon():
     assert sensor.native_value == -62.0
 
 
+def test_power_fraction_gets_gauge_icon():
+    """A per-code override gives power_fraction a gauge icon, not the solar fallback."""
+    point = {"code": "power_fraction", "value": "0.83", "unit": ""}
+    coordinator = _coord_with_devices([], data={"power_fraction": point})
+    sensor = SungrowSensor(coordinator, "power_fraction", "123", "Plant", point)
+    assert sensor._attr_icon == "mdi:gauge"
+
+
 def test_sensor_rehomes_to_singular_device():
     """A mapped point re-homes onto the single device of its type; unique_id unchanged."""
     inv = {
@@ -143,15 +151,18 @@ def test_plant_detail_sensor_values_and_units():
     assert alarm.native_value == 2.0
     assert alarm._attr_unique_id == "123_detail_alarm_count"
     assert alarm._attr_device_info["identifiers"] == {(DOMAIN, "123")}
+    assert alarm._attr_icon == "mdi:alert-outline"
 
     power = SungrowPlantDetailSensor(coordinator, descs["install_power"], "123", "Plant", "http://x")
     assert power.native_value == 3600.0
     assert power._attr_native_unit_of_measurement == "W"
+    assert power._attr_icon == "mdi:solar-power"
 
     # Tariff sensor takes its unit from the plant's configured currency.
     price = SungrowPlantDetailSensor(coordinator, descs["ps_consumption_power_price_kwh"], "123", "Plant", "http://x")
     assert price.native_value == 0.3887
     assert price._attr_native_unit_of_measurement == "GBP/kWh"
+    assert price._attr_icon == "mdi:cash-plus"
 
 
 def test_plant_detail_sensor_absent_field_is_none():
