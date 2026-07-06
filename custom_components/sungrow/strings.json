@@ -65,7 +65,8 @@
         "data": {
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)",
-          "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)"
+          "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)",
+          "modbus_host": "Local Modbus host (WiNet-S IP) — optional; leave blank for cloud only"
         }
       }
     }

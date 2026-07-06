@@ -14,6 +14,9 @@ from pysolarcloud.plants import DeviceType
 from custom_components.sungrow.const import (
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
+    CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
+    CONF_MODBUS_UNIT,
     CONF_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
@@ -762,3 +765,61 @@ async def test_plant_detail_best_effort_on_error(hass: HomeAssistant):
     await coordinator._async_update_data()  # must not raise
 
     assert coordinator.plant_detail == {}
+
+
+# ---------------------------------------------------------------------------
+# Local Modbus transport (#159)
+# ---------------------------------------------------------------------------
+
+
+async def test_build_modbus_client_from_options(hass: HomeAssistant):
+    """A configured Modbus host builds a client with the given host/port/unit."""
+    entry = _make_entry({CONF_MODBUS_HOST: "10.0.0.5", CONF_MODBUS_PORT: 1502, CONF_MODBUS_UNIT: 2})
+    client = SungrowPlantCoordinator._build_modbus_client(entry)
+    assert client is not None
+    assert (client.host, client.port, client.unit) == ("10.0.0.5", 1502, 2)
+
+
+def test_no_modbus_client_when_host_blank():
+    """No host (or a blank host) means cloud-only: no Modbus client."""
+    assert SungrowPlantCoordinator._build_modbus_client(_make_entry()) is None
+    assert SungrowPlantCoordinator._build_modbus_client(_make_entry({CONF_MODBUS_HOST: ""})) is None
+
+
+async def test_apply_modbus_merges_over_cloud(hass: HomeAssistant):
+    """Configured Modbus overlays its value over the cloud value and tags provenance."""
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_active_power": {"code": "total_active_power", "value": 256, "unit": "W", "source": "modbus"}
+        }
+    )
+    cloud = {
+        "total_active_power": {"code": "total_active_power", "value": "250", "unit": "W"},
+        "daily_yield": {"code": "daily_yield", "value": "38"},
+    }
+    merged = await coordinator._async_apply_modbus(cloud)
+    assert merged["total_active_power"]["value"] == 256
+    assert merged["total_active_power"]["source"] == "modbus"
+    assert merged["daily_yield"]["source"] == "cloud"
+
+
+async def test_apply_modbus_falls_back_to_cloud_on_error(hass: HomeAssistant):
+    """A Modbus read failure keeps the cloud data untouched (never takes the plant offline)."""
+    from custom_components.sungrow.modbus import SungrowModbusError
+
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("boom"))
+    cloud = {"total_active_power": {"code": "total_active_power", "value": "250"}}
+    merged = await coordinator._async_apply_modbus(cloud)
+    assert merged == cloud  # unchanged; no source tags added
+
+
+async def test_apply_modbus_noop_without_client(hass: HomeAssistant):
+    """Cloud-only (no Modbus host) returns the cloud data unchanged."""
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    assert coordinator._modbus_client is None
+    cloud = {"x": {"value": "1"}}
+    assert await coordinator._async_apply_modbus(cloud) is cloud

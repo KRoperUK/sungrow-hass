@@ -65,7 +65,8 @@
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
           "extra_measure_points": "Pwyntiau mesur ychwanegol (point_id=code, wedi'u gwahanu gan atalnodau)",
-          "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)"
+          "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)",
+          "modbus_host": "Gwesteiwr Modbus lleol (IP y WiNet-S) — dewisol; gadewch yn wag ar gyfer cwmwl yn unig"
         }
       }
     }

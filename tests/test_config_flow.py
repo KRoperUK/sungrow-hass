@@ -21,6 +21,7 @@ from custom_components.sungrow.const import (
     CONF_APP_SECRET,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
+    CONF_MODBUS_HOST,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
     DOMAIN,
@@ -636,6 +637,24 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
         "99999": "battery_charge_power",
         "99998": "battery_discharge_power",
     }
+
+
+async def test_options_flow_stores_and_trims_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """The Modbus host option is stored, whitespace-trimmed; blank means cloud-only (#159)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 30, CONF_MODBUS_HOST: "  192.168.1.93  "},
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MODBUS_HOST] == "192.168.1.93"
 
 
 async def test_options_flow_rejects_invalid_extra_measure_points(

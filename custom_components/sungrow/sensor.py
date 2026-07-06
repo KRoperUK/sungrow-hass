@@ -353,6 +353,18 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # Capacity-factor ratios are reported as a 0–1 fraction but shown as "%".
         return num * 100 if self._scale_to_percent else num
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Expose which transport (``cloud``/``modbus``) provided the current value (#159).
+
+        Only present once a point has been through the Modbus merge — i.e. when local
+        Modbus is configured. Cloud-only points carry no source, so this stays ``None``
+        and the entities keep their attribute-free payload (no recorder bloat).
+        """
+        point = self._current_point()
+        source = point.get("source") if point else None
+        return {"source": source} if source else None
+
 
 class SungrowDeviceSensor(SungrowSensor):
     """A sensor for a specific device (EV charger, meter, extra battery) under a plant.

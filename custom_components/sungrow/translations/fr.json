@@ -65,7 +65,8 @@
         "data": {
           "scan_interval": "Intervalle d'interrogation (secondes)",
           "extra_measure_points": "Points de mesure supplémentaires (point_id=code, séparés par des virgules)",
-          "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)"
+          "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)",
+          "modbus_host": "Hôte Modbus local (IP du WiNet-S) — optionnel ; laisser vide pour le cloud uniquement"
         }
       }
     }

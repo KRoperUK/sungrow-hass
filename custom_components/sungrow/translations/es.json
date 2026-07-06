@@ -65,7 +65,8 @@
         "data": {
           "scan_interval": "Intervalo de sondeo (segundos)",
           "extra_measure_points": "Puntos de medición adicionales (point_id=code, separados por comas)",
-          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)"
+          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)",
+          "modbus_host": "Host Modbus local (IP del WiNet-S) — opcional; déjelo en blanco para usar solo la nube"
         }
       }
     }
