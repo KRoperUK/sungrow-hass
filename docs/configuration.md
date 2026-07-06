@@ -13,8 +13,11 @@ The integration polls the iSolarCloud API on a fixed interval (default: 5 minute
 fresher data or raise it to stay within the API's rate limits.
 
 !!! tip "Rate limits"
-    iSolarCloud enforces hourly and monthly call quotas. If you see the integration retrying with
-    a rate-limit message in the logs, **increase the polling interval** to make fewer calls.
+    iSolarCloud enforces hourly and monthly call quotas. If the quota is exceeded (E998/E999), the
+    integration **automatically backs off** — doubling the effective interval up to a 1-hour cap —
+    and raises a Home Assistant **Repair** (Settings → System → Repairs). To fix the root cause,
+    **increase the polling interval** so fewer calls are made; the integration returns to your
+    configured interval once the quota recovers.
 
 ## Custom measure points
 
@@ -42,15 +45,24 @@ control the battery and dispatch behaviour, such as:
 When you write a dispatch value, the integration automatically sends the required **EMS
 heartbeat** so the setting is applied and maintained.
 
-!!! warning "Battery systems only"
-    Dispatch controls only apply to inverters with an energy-storage system. On a PV-only plant
-    they have no effect.
+!!! warning "Battery controls are hidden on PV-only plants"
+    Battery dispatch controls (charge/discharge command & power, SOC limits, forced charging,
+    battery-first mode) are only created when the plant has a battery/ESS device. On a **PV-only**
+    plant they are **hidden entirely** — commanding charge/discharge on a battery-less inverter can
+    force it into External-EMS mode and suppress generation. Export- and active-power-limiting
+    controls remain available.
 
 ## Per-device sensors
 
 By default, sensors are grouped at the plant level. You can optionally enable **per-device
 sensors** to surface points reported by individual devices (e.g. an EV charger or a second
-battery) under their own device in Home Assistant.
+battery) under their own device in Home Assistant. Enabling this also surfaces the documented
+**diagnostic** points per device type — inverter temperature / MPPT voltages & currents, battery
+health (voltage, current, temperature, SOH), and WiNet-S WLAN/wireless signal strength.
+
+Regardless of this option, every device gets a **Fault** (problem) and **Connectivity**
+(online/offline) binary sensor, and its device card is enriched with model, serial number and
+manufacturer. The Connectivity sensor exposes the commissioning date as an attribute.
 
 ## Energy dashboard
 
