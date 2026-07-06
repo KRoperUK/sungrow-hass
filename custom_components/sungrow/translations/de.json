@@ -70,7 +70,25 @@
       }
     }
   },
+  "issues": {
+    "whitelist_rejection": {
+      "title": "iSolarCloud hat die Anfrage abgelehnt (Whitelist)",
+      "description": "iSolarCloud lehnt API-Anfragen für **{plant}** ab, weil die IP-Adresse dieses Clients oder Ihr Konto nicht in der Whitelist Ihrer API-Anwendung enthalten ist (E918/E919). Fügen Sie sie im iSolarCloud Developer Portal hinzu (oder deaktivieren Sie die Whitelist); die Integration wird automatisch wiederhergestellt, sobald sie akzeptiert wurden."
+    },
+    "rate_limited": {
+      "title": "iSolarCloud-API-Ratenlimit erreicht",
+      "description": "iSolarCloud lehnt Anfragen für **{plant}** ab, weil das API-Aufruflimit erreicht wurde (E998/E999). Erhöhen Sie das Abfrageintervall in den Integrationsoptionen, um weniger Aufrufe zu tätigen; die Verbindung wird wiederhergestellt, sobald das Kontingent zurückgesetzt wird."
+    }
+  },
   "entity": {
+    "binary_sensor": {
+      "device_connectivity": {
+        "name": "Konnektivität"
+      },
+      "device_fault": {
+        "name": "Störung"
+      }
+    },
     "number": {
       "charge_discharge_power": {
         "name": "Lade-/Entladeleistung"
@@ -95,6 +113,15 @@
       },
       "active_power_limit_ratio": {
         "name": "Wirkleistungsbegrenzung"
+      },
+      "q_t": {
+        "name": "Blindleistungsverhältnis Q(t)"
+      },
+      "pf": {
+        "name": "Leistungsfaktor"
+      },
+      "forced_dispatch_duration": {
+        "name": "Dauer der Zwangssteuerung"
       }
     },
     "select": {
@@ -112,6 +139,9 @@
       },
       "battery_first": {
         "name": "Batterie-zuerst-Modus"
+      },
+      "reactive_power_regulation_mode": {
+        "name": "Blindleistungsmodus"
       }
     }
   },

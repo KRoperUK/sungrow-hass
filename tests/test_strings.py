@@ -91,3 +91,27 @@ def test_translations_en_matches_strings(strings_data):
     strings_errors = set(strings_data["config"]["error"].keys())
     en_errors = set(en_data.get("config", {}).get("error", {}).keys())
     assert strings_errors == en_errors, f"Error key mismatch: strings.json={strings_errors}, en.json={en_errors}"
+
+
+def _flatten_keys(data: dict, prefix: str = "") -> set[str]:
+    """Return the set of dotted leaf-key paths in a nested dict."""
+    keys: set[str] = set()
+    for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else key
+        keys |= _flatten_keys(value, path) if isinstance(value, dict) else {path}
+    return keys
+
+
+@pytest.mark.parametrize("lang_file", sorted(TRANSLATIONS_DIR.glob("*.json")), ids=lambda p: p.stem)
+def test_translation_keys_match_strings(strings_data, lang_file):
+    """Every translation file must define exactly the keys in strings.json (no drift).
+
+    Guards against the historical drift where new strings (entity names, repair
+    issues) were added to strings.json/en.json but never propagated to the other
+    languages, leaving them silently untranslated.
+    """
+    lang_data = json.loads(lang_file.read_text())
+    base = _flatten_keys(strings_data)
+    have = _flatten_keys(lang_data)
+    assert not base - have, f"{lang_file.name} is missing keys: {sorted(base - have)}"
+    assert not have - base, f"{lang_file.name} has unexpected keys: {sorted(have - base)}"

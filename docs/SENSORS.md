@@ -99,7 +99,7 @@ Alongside the plant sensors, the integration adds **diagnostic** entities that d
 
 | Entity | Device class | Meaning |
 |---|---|---|
-| Fault | `problem` | On when the device reports a fault or alarm (`dev_fault_status`); Off when normal. |
+| Fault | `problem` | On when the device reports a fault or alarm (`dev_fault_status`); Off when normal. Exposes an `operating_status` attribute with a human-readable reason for inverter/ESS devices (e.g. *Shut down due to faults*, *Low insulation resistance*, *Running with alarm*), so you see *why* — available even without per-device sensors enabled. |
 | Connectivity | `connectivity` | On = online, Off = offline (`dev_status`). Exposes the commissioning/grid-connection date as an attribute. |
 
 **Per-device diagnostic sensors** — surfaced when **Create per-device sensors** is enabled (Configure → options), polled per device type from the documented measure-point catalog:
