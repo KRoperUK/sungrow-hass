@@ -70,17 +70,18 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
     assert diag["options"] == {"scan_interval": 10}
 
     plant = diag["plants"]["123"]
-    assert plant["plant_name"] == "Test Plant"
+    # plant_name and device_name are redacted — they often encode the user's address.
+    assert plant["plant_name"] == "**REDACTED**"
     assert plant["data"]["total_active_power"]["value"] == "1.23"
-    # The dispatch-discovered subset survives, but the device uuid is redacted.
-    assert plant["devices"] == [{"uuid": "**REDACTED**", "device_name": "Inverter"}]
+    # The dispatch-discovered subset survives, but the uuid and name are redacted.
+    assert plant["devices"] == [{"uuid": "**REDACTED**", "device_name": "**REDACTED**"}]
     # The full device list surfaces the unmapped charger with its raw type id, and
     # serialises the known enum device type to a readable "NAME (value)" string.
-    # (Look up by device_name since the uuid is now redacted.)
-    charger = next(d for d in plant["all_devices"] if d["device_name"] == "AC011E")
-    assert charger["device_type"] == 999
+    # (Look up by device_type since the uuid and name are now redacted.)
+    charger = next(d for d in plant["all_devices"] if d["device_type"] == 999)
     assert charger["uuid"] == "**REDACTED**"
-    ess = next(d for d in plant["all_devices"] if d["device_name"] == "Inverter")
+    assert charger["device_name"] == "**REDACTED**"
+    ess = next(d for d in plant["all_devices"] if d["device_type"] == "ENERGY_STORAGE_SYSTEM (14)")
     assert ess["device_type"] == "ENERGY_STORAGE_SYSTEM (14)"
     # Per-device realtime is captured, keyed by device type id; the per-device
     # uuid key is anonymised to a stable device_N placeholder (#122).
@@ -222,6 +223,7 @@ async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
                 "device_sn": "SN123456",
                 "communication_dev_sn": "EXAMPLE-SN-0002",
                 "ps_id": "123",
+                "ps_name": "7 Acacia Avenue",  # address-encoding name must be redacted
             }
         ]
     )
@@ -237,11 +239,14 @@ async def test_diagnostics_redacts_hardware_identifiers(hass: HomeAssistant):
     assert "access_token" not in json.dumps(diag)
 
     device = diag["plants"]["123"]["all_devices"][0]
-    for key in ("uuid", "ps_key", "dev_sn", "sn", "device_sn", "communication_dev_sn"):
+    # Hardware identifiers AND the user-set names (which often encode a home address)
+    # are redacted.
+    for key in ("uuid", "ps_key", "dev_sn", "sn", "device_sn", "communication_dev_sn", "device_name", "ps_name"):
         assert device[key] == "**REDACTED**"
-    # Non-sensitive fields survive: the device name and the plant id (ps_id) are
-    # kept so a support report stays useful.
-    assert device["device_name"] == "Inverter"
+    assert "7 Acacia Avenue" not in json.dumps(diag)
+    assert diag["plants"]["123"]["plant_name"] == "**REDACTED**"
+    # Non-sensitive fields survive so a support report stays useful: the plant id
+    # (ps_id) and the hardware model/type.
     assert device["ps_id"] == "123"
     assert "123" in diag["plants"]  # the plant key itself is preserved
     json.dumps(diag)
