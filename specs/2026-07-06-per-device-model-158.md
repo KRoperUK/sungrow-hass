@@ -4,6 +4,23 @@
 - **Date:** 2026-07-06
 - **Approved decisions:** Full re-home · Non-breaking (keep unique_ids) · Singular-type-only aggregation rule
 
+### Live validation (2026-07-06, plant 5718745)
+
+A raw `getDeviceListByPsId` + `getPowerStationRealTimeData` probe against a real plant
+confirmed:
+
+- **No firmware/version field exists** in the device-list payload (fields: `chnnl_id`,
+  `claim_state`, `communication_dev_sn`, `dev_fault_status`, `dev_status`, `device_code`,
+  `device_model_code`, `device_model_id`, `device_name`, `device_sn`, `device_type`,
+  `factory_name`, `grid_connection_date`, `ps_id`, `ps_key`, `type_name`, `uuid`). So
+  **firmware enrichment is dropped from this spec** (§5) — model/serial/manufacturer stay.
+- The plant is the canonical case: 1 INVERTER (SG3.6RS), 1 METER (SGSmartMeter), 1
+  COMMUNICATION_MODULE (WiNet-S), **no battery device** — so the ~25 battery/ESS codes in
+  the realtime payload correctly stay on the plant (0 matches), exactly as the singular
+  rule intends.
+- The point→device map (§1) is now grounded in the **74 real point codes** the plant
+  returned, not guesswork.
+
 ## Background
 
 Nesting was largely delivered in #149/#162, so this is a smaller change than the
@@ -53,30 +70,52 @@ _BATTERY_TYPES = frozenset({DeviceType.ENERGY_STORAGE_SYSTEM, DeviceType.ENERGY_
                             DeviceType.BATTERY})
 _METER_TYPES   = frozenset({DeviceType.METER, DeviceType.GRID_CONNECTION_POINT})
 
+# Keys are literal plant point codes (CODE_ALIASES is code->display-name, NOT a
+# canonicaliser, so we list each known code directly). Grounded in the 74 real
+# codes from plant 5718745 plus the documented codes in docs/SENSORS.md.
 POINT_DEVICE_TYPE: dict[str, frozenset[DeviceType]] = {
     # PV / inverter
-    "total_active_power": _PV_TYPES, "inverter_ac_power": _PV_TYPES,
-    "total_dc_power": _PV_TYPES, "daily_yield": _PV_TYPES,
-    "inverter_daily_yield": _PV_TYPES, "daily_pv_yield_ems": _PV_TYPES, ...
-    # Battery
-    "total_field_energy_storage_active_power": _BATTERY_TYPES,
+    "total_active_power": _PV_TYPES, "total_active_power_of_pv": _PV_TYPES,
+    "inverter_ac_power": _PV_TYPES, "inverter_ac_power_normalization": _PV_TYPES,
+    "inverter_daily_yield": _PV_TYPES, "inverter_total_yield": _PV_TYPES,
+    "daily_yield": _PV_TYPES, "total_yield": _PV_TYPES, "total_pv_yield": _PV_TYPES,
+    "daily_pv_yield_ems": _PV_TYPES, "pv_active_power_ems": _PV_TYPES,
+    "total_dc_power": _PV_TYPES,
+    # Battery / ESS
     "battery_level_soc": _BATTERY_TYPES, "battery_soc": _BATTERY_TYPES,
     "total_field_soc": _BATTERY_TYPES, "energy_storage_soc_ems": _BATTERY_TYPES,
-    "total_field_maximum_rechargeable_power": _BATTERY_TYPES, ...
+    "total_field_energy_storage_active_power": _BATTERY_TYPES,
+    "total_field_maximum_rechargeable_power": _BATTERY_TYPES,
+    "total_field_maximum_dischargeable_power": _BATTERY_TYPES,
+    "total_field_chargeable_energy": _BATTERY_TYPES,
+    "total_field_dischargeable_energy": _BATTERY_TYPES,
+    "daily_field_charge_capacity": _BATTERY_TYPES,
+    "daily_field_discharge_capacity": _BATTERY_TYPES,
+    "energy_storage_active_power_ems": _BATTERY_TYPES,
+    "battery_charge_power": _BATTERY_TYPES, "battery_discharge_power": _BATTERY_TYPES,
+    "battery_level": _BATTERY_TYPES, "battery_soh": _BATTERY_TYPES, ...
     # Meter / grid
     "grid_active_power": _METER_TYPES, "grid_active_power_ems": _METER_TYPES,
-    "feed_in_energy_today": _METER_TYPES, "energy_purchased_today": _METER_TYPES, ...
+    "meter_ac_power": _METER_TYPES, "meter_active_power": _METER_TYPES,
+    "feed_in_energy_today": _METER_TYPES, "feed_in_energy_total": _METER_TYPES,
+    "daily_feed_in_energy_pv": _METER_TYPES, "energy_purchased_today": _METER_TYPES,
+    "total_purchased_energy": _METER_TYPES,
+    "accumulative_power_consumption_by_meter": _METER_TYPES,
+    "meter_forward_active_energy": _METER_TYPES,
+    "meter_reverse_active_energy": _METER_TYPES, ...
 }
 ```
 
 Rules:
 
-- The initial code list is seeded from `docs/SENSORS.md` "Common dashboard values" +
-  "Battery-specific points", resolved through the existing `CODE_ALIASES` so variant
-  spellings collapse to one key.
-- **Load points** (`load_power`, `total_load_active_power`) and **plant aggregates**
-  (plant power, installed capacity, performance ratio) are deliberately *absent* — a
-  household load is not a device, so those stay on the plant.
+- Keys are **literal point codes** (variant spellings each get their own key — there is
+  no canonicaliser). The full list is enumerated in the plan; the `...` above is
+  illustrative.
+- **Load points** (`load_power`, `total_load_active_power`, `*_load_consumption`),
+  **derived ratios** (`plant_pr`, `meter_pr`, `inverter_pr`), **forecast/environment**
+  (`power_forecast`, `daily_irradiation`, `plant_*`) and generic **plant aggregates**
+  (`power`, `power_fraction`) are deliberately *absent* — a household load is not a
+  device and ratios/forecasts are plant analytics, so those stay on the plant.
 - **Any code not in the map stays on the plant device.** Safe default; adding a code
   later is a one-line map entry.
 
@@ -136,22 +175,21 @@ dr.async_get_or_create(
 The `console_url` derivation (region → `GATEWAY_CONSOLE_URLS`) moves from `sensor.py`
 into `__init__.py` setup; `sensor.py`'s plant fallback reuses it.
 
-### 5. Firmware enrichment (best-effort)
+### 5. Firmware enrichment — DROPPED
 
-`build_device_info` gains `sw_version=device.get(<field>)`. The exact field from
-`getDeviceListByPsId` is **unconfirmed** — first implementation task is to check the
-iSolarCloud docs (MCP `isolarcloud` server) / a live payload. If no firmware field
-exists, `sw_version` is simply omitted — never faked. This sub-item can ship
-independently if the field is absent.
+The live probe confirmed `getDeviceListByPsId` exposes **no firmware/version field**, so
+firmware is out of scope for #158. `build_device_info` is unchanged (model, serial,
+manufacturer only). Surfacing firmware would require an extra per-device detail call,
+which conflicts with the rate-limit ethos — deferred to a later issue if ever wanted.
 
 ## Files changed
 
 | File | Change |
 |---|---|
-| `const.py` | New `POINT_DEVICE_TYPE` map + type-set constants. |
-| `__init__.py` | `resolve_point_device()`; `build_device_info(... sw_version)`; explicit plant-device registration at setup; `_plant_device_info` helper (shared with sensor). |
+| `const.py` | New `POINT_DEVICE_TYPE` map + `_PV_TYPES`/`_BATTERY_TYPES`/`_METER_TYPES` constants. |
+| `__init__.py` | `resolve_point_device()`; explicit plant-device registration at setup; `_plant_device_info` helper (shared with sensor). |
 | `sensor.py` | `SungrowSensor.__init__` selects plant vs device `device_info` via the resolver; unique_id untouched. |
-| `tests/` | Map/resolver unit tests; singular-vs-multi-device re-home; **non-breaking** unique_id + entity_id preservation on device move; firmware passthrough; plant-device anchor exists when all sensors re-home. |
+| `tests/` | Map/resolver unit tests; singular-vs-multi-device re-home; **non-breaking** unique_id + entity_id preservation on device move; plant-device anchor exists when all sensors re-home. |
 
 ## Testing
 
@@ -159,7 +197,6 @@ independently if the field is absent.
   unmapped → plant; hybrid ESS satisfies both PV and battery points.
 - Re-home preserves `unique_id` and `entity_id` (registry assertion) — the crux of the
   non-breaking guarantee.
-- Firmware present → `sw_version` set; absent → omitted.
 - Plant device is registered even when every plant sensor re-homes.
 - Per-device sensors (opt-in) still skip plant-level codes, so no duplicate sensor is
   created on a device that also received a re-homed plant sensor.
@@ -172,11 +209,8 @@ independently if the field is absent.
 
 ## Risks / open questions
 
-1. **Firmware field availability** — resolved during implementation; degrades to
-   "omit" if absent.
-2. **Point-map coverage** — starts with the documented common codes; unmapped codes
-   fall back to the plant device, so under-coverage is harmless (just less re-homing),
-   never wrong.
-3. **Existing installs** — on upgrade, HA moves entities to their new device on first
+1. **Point-map coverage** — grounded in 74 real codes + docs; unmapped codes fall back
+   to the plant device, so under-coverage is harmless (just less re-homing), never wrong.
+2. **Existing installs** — on upgrade, HA moves entities to their new device on first
    reload; the now-emptier plant device persists intentionally (explicitly registered).
    No user action, no history loss.
