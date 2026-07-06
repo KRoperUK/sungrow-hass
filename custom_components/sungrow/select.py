@@ -61,6 +61,18 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
         "entity_category": EntityCategory.CONFIG,
         "battery_only": True,
     },
+    # Reactive power regulation mode (Appendix 10, param 10009). Gates the Q(t) and Power
+    # Factor numbers. Applies to PV and hybrid inverters, so not battery-gated.
+    "reactive_power_regulation_mode": {
+        "options_map": {
+            "Off": "85",
+            "Power Factor": "161",
+            "Reactive Power Ratio Q(t)": "162",
+            "Q(P) Curve": "163",
+            "Q(U) Curve": "164",
+        },
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
 

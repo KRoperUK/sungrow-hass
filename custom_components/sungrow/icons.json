@@ -24,6 +24,12 @@
       },
       "active_power_limit_ratio": {
         "default": "mdi:speedometer"
+      },
+      "q_t": {
+        "default": "mdi:sine-wave"
+      },
+      "pf": {
+        "default": "mdi:angle-acute"
       }
     },
     "select": {
@@ -41,6 +47,9 @@
       },
       "battery_first": {
         "default": "mdi:battery-heart-variant"
+      },
+      "reactive_power_regulation_mode": {
+        "default": "mdi:sine-wave"
       }
     }
   }
