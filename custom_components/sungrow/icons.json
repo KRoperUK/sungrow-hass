@@ -1,5 +1,10 @@
 {
   "entity": {
+    "binary_sensor": {
+      "device_connectivity": {
+        "default": "mdi:connection"
+      }
+    },
     "number": {
       "charge_discharge_power": {
         "default": "mdi:battery-charging"

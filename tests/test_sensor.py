@@ -78,6 +78,17 @@ def _coord_with_devices(devices, data=None):
     return coordinator
 
 
+def test_signal_strength_sensor_gets_db_unit_and_signal_icon():
+    """WLAN/wireless signal strength classifies as SIGNAL_STRENGTH with a dB unit + signal icon."""
+    point = {"code": "wlan_signal_strength", "value": "-62", "unit": ""}
+    coordinator = _coord_with_devices([], data={"wlan_signal_strength": point})
+    sensor = SungrowSensor(coordinator, "wlan_signal_strength", "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.SIGNAL_STRENGTH
+    assert sensor._attr_native_unit_of_measurement == "dB"
+    assert sensor._attr_icon == "mdi:signal"
+    assert sensor.native_value == -62.0
+
+
 def test_sensor_rehomes_to_singular_device():
     """A mapped point re-homes onto the single device of its type; unique_id unchanged."""
     inv = {

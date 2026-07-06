@@ -241,12 +241,18 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             self._attr_native_unit_of_measurement = None
         elif self._scale_to_percent:
             self._attr_native_unit_of_measurement = PERCENTAGE
+        elif device_class == SensorDeviceClass.SIGNAL_STRENGTH:
+            # WLAN/wireless signal strength comes back with no unit; it's decibels.
+            self._attr_native_unit_of_measurement = unit or "dB"
         else:
             self._attr_native_unit_of_measurement = unit if unit else None
 
-        # Let HA choose the icon for sensors with a known device class; fall back to
-        # the solar panel icon only for unclassified sensors.
-        self._attr_icon = None if device_class else "mdi:solar-power-variant"
+        # Let HA pick the icon for classified sensors; a signal icon for signal
+        # strength, and the solar-panel fallback only for unclassified points.
+        if device_class == SensorDeviceClass.SIGNAL_STRENGTH:
+            self._attr_icon = "mdi:signal"
+        else:
+            self._attr_icon = None if device_class else "mdi:solar-power-variant"
 
     def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload for this sensor (plant-level source)."""

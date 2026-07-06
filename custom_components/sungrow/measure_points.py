@@ -155,6 +155,8 @@ def _classify_by_code(code: str) -> _ClassPair | None:
         return (None, _MEASUREMENT)
     if any(h in lowered for h in _SOC_HINTS):
         return (SensorDeviceClass.BATTERY, _MEASUREMENT)
+    if "signal_strength" in lowered or "signal strength" in lowered:
+        return (SensorDeviceClass.SIGNAL_STRENGTH, _MEASUREMENT)
     return None
 
 
@@ -286,7 +288,9 @@ def _classify_point(name: str, unit: str, point_id: str) -> _ClassPair:
         return (SensorDeviceClass.BATTERY, _MEASUREMENT)
     if "power factor" in lowered:
         return (SensorDeviceClass.POWER_FACTOR, _MEASUREMENT)
-    if tokens & _NUMERIC_NAME_TOKENS or "signal strength" in lowered:
+    if "signal strength" in lowered:
+        return (SensorDeviceClass.SIGNAL_STRENGTH, _MEASUREMENT)
+    if tokens & _NUMERIC_NAME_TOKENS:
         return (None, _MEASUREMENT)
     return (None, None)
 
