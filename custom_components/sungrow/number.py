@@ -143,6 +143,27 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
     },
+    # Reactive power ratio Q(t) as a signed percentage (API range -600..600 = -60..60%).
+    # Only takes effect when the Reactive Power Mode select is set to Q(t). Applies to
+    # PV and hybrid inverters, so not battery-gated.
+    "q_t": {
+        "native_unit_of_measurement": "%",
+        "native_min_value": -60,
+        "native_max_value": 60,
+        "native_step": 1,
+        "mode": NumberMode.SLIDER,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Power factor setpoint (API range -1000..1000 = -1..1). Only takes effect when the
+    # Reactive Power Mode select is set to PF.
+    "pf": {
+        "device_class": NumberDeviceClass.POWER_FACTOR,
+        "native_min_value": -1,
+        "native_max_value": 1,
+        "native_step": 0.01,
+        "mode": NumberMode.BOX,
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
 # Watt-valued power parameters whose slider maximum is sized to the device's rating.

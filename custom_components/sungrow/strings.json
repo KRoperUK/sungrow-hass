@@ -113,6 +113,12 @@
       },
       "active_power_limit_ratio": {
         "name": "Active Power Limit"
+      },
+      "q_t": {
+        "name": "Reactive Power Ratio Q(t)"
+      },
+      "pf": {
+        "name": "Power Factor"
       }
     },
     "select": {
@@ -130,6 +136,9 @@
       },
       "battery_first": {
         "name": "Battery First Mode"
+      },
+      "reactive_power_regulation_mode": {
+        "name": "Reactive Power Mode"
       }
     }
   },
