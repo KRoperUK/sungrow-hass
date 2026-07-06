@@ -21,7 +21,12 @@ from .const import (
     COMM_MODULE_POINTS,
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
+    CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
+    CONF_MODBUS_UNIT,
     CONF_SCAN_INTERVAL,
+    DEFAULT_MODBUS_PORT,
+    DEFAULT_MODBUS_UNIT,
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
@@ -190,6 +195,25 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # persist and curtail PV (#157/#148). 0 disables auto-revert (legacy behaviour).
         # Owned by the "Forced Dispatch Duration" number; read by the command select.
         self.forced_dispatch_duration_minutes: float = 0
+        # Optional local Modbus transport (#159): when a WiNet-S host is configured, the
+        # coordinator reads fast local values and merges them over the cloud data
+        # (Modbus preferred). None -> cloud only. Built lazily to avoid importing
+        # pymodbus for cloud-only installs.
+        self._modbus_client = self._build_modbus_client(config_entry)
+
+    @staticmethod
+    def _build_modbus_client(config_entry: ConfigEntry) -> Any:
+        """Return a SungrowModbusClient if a Modbus host is configured, else None."""
+        host = config_entry.options.get(CONF_MODBUS_HOST)
+        if not host:
+            return None
+        from .modbus import SungrowModbusClient
+
+        return SungrowModbusClient(
+            str(host),
+            port=int(config_entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)),
+            unit=int(config_entry.options.get(CONF_MODBUS_UNIT, DEFAULT_MODBUS_UNIT)),
+        )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
@@ -243,7 +267,27 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_data = await self._async_fetch_device_data()
 
         # pysolarcloud is untyped, so the realtime payload is Any.
-        return cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
+        cloud_data = cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
+        # Overlay fast local Modbus values (Modbus preferred) when configured (#159).
+        return await self._async_apply_modbus(cloud_data)
+
+    async def _async_apply_modbus(self, cloud_data: dict[str, Any]) -> dict[str, Any]:
+        """Overlay live Modbus values onto the cloud data (Modbus preferred), if configured.
+
+        Best-effort: any Modbus failure keeps the cloud data, so the local transport can
+        never take the plant offline — it only ever supplies fresher values.
+        """
+        if self._modbus_client is None:
+            return cloud_data
+        from .modbus import merge_realtime
+
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                local = await self._modbus_client.async_read_realtime()
+        except Exception as err:  # pylint: disable=broad-except  (best-effort: fall back to cloud)
+            _LOGGER.debug("Local Modbus read failed for %s; using cloud data: %s", self.plant_name, err)
+            return cloud_data
+        return merge_realtime(cloud_data, local)
 
     def _within_availability_grace(self) -> bool:
         """True while the last successful poll is recent enough to keep serving stale data."""

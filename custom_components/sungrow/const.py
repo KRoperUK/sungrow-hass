@@ -16,6 +16,14 @@ CONF_EXTRA_MEASURE_POINTS = "extra_measure_points"
 # own realtime points and expose them as sensors under that device. Off by default
 # to avoid extra API calls / entity clutter for users who only need plant data.
 CONF_ENABLE_DEVICE_SENSORS = "enable_device_sensors"
+# Opt-in local Modbus transport (#159): the WiNet-S dongle's IP/host. When set, the
+# coordinator reads fast local values over Modbus TCP and merges them over the cloud
+# data (Modbus preferred). Empty -> cloud only (default). Port/unit default to 502/1.
+CONF_MODBUS_HOST = "modbus_host"
+CONF_MODBUS_PORT = "modbus_port"
+CONF_MODBUS_UNIT = "modbus_unit"
+DEFAULT_MODBUS_PORT = 502
+DEFAULT_MODBUS_UNIT = 1
 
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",

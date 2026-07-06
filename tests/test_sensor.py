@@ -99,6 +99,22 @@ def test_power_fraction_gets_gauge_icon():
     assert sensor._attr_icon == "mdi:gauge"
 
 
+def test_sensor_exposes_transport_source_when_present():
+    """A point that went through the Modbus merge exposes its source (#159)."""
+    point = {"code": "total_active_power", "value": "256", "unit": "W", "source": "modbus"}
+    coordinator = _coord_with_devices([], data={"total_active_power": point})
+    sensor = SungrowSensor(coordinator, "total_active_power", "123", "Plant", point)
+    assert sensor.extra_state_attributes == {"source": "modbus"}
+
+
+def test_sensor_no_attributes_without_source():
+    """Cloud-only points carry no source, so no state attributes are emitted (no bloat)."""
+    point = {"code": "total_active_power", "value": "256", "unit": "W"}
+    coordinator = _coord_with_devices([], data={"total_active_power": point})
+    sensor = SungrowSensor(coordinator, "total_active_power", "123", "Plant", point)
+    assert sensor.extra_state_attributes is None
+
+
 def test_temperature_unit_glyph_normalized():
     """The API's ℃ glyph (U+2103) is normalised to HA-valid °C for the temperature class.
 

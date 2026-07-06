@@ -20,6 +20,7 @@ from .const import (
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
+    CONF_MODBUS_HOST,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
@@ -525,11 +526,14 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
                 data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
+                # Normalise the Modbus host; blank/whitespace means "cloud only".
+                data[CONF_MODBUS_HOST] = (user_input.get(CONF_MODBUS_HOST) or "").strip()
                 return self.async_create_entry(title="", data=data)
 
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         current_extras = self.config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {})
         current_device_sensors = self.config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False)
+        current_modbus_host = self.config_entry.options.get(CONF_MODBUS_HOST, "")
         extras_str = ",".join(f"{pid}={code}" for pid, code in current_extras.items())
         return self.async_show_form(
             step_id="init",
@@ -545,6 +549,12 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                         description={"suggested_value": extras_str},
                     ): str,
                     vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
+                    # Optional local Modbus transport (#159): the WiNet-S IP/host. Empty = cloud only.
+                    vol.Optional(
+                        CONF_MODBUS_HOST,
+                        default=current_modbus_host,
+                        description={"suggested_value": current_modbus_host},
+                    ): str,
                 }
             ),
             errors=errors,
