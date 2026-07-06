@@ -18,7 +18,12 @@ from custom_components.sungrow.const import (
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
 )
-from custom_components.sungrow.coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
+from custom_components.sungrow.coordinator import (
+    BACKOFF_MAX_INTERVAL,
+    SungrowPlantCoordinator,
+    describe_api_error,
+    is_auth_error,
+)
 
 from .conftest import MOCK_REALTIME_DATA
 
@@ -172,6 +177,50 @@ async def test_rate_limit_error_raises_its_repair_only(hass: HomeAssistant):
     registry = ir.async_get(hass)
     assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
     assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is None
+
+
+async def test_rate_limit_backs_off_and_recovers(hass: HomeAssistant):
+    """Rate-limit errors widen the poll interval; a success restores it (#156)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException.from_response({"result_code": "E999"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+    base = coordinator.update_interval
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 2
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 4
+
+    # Recover.
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    await coordinator._async_update_data()
+    assert coordinator.update_interval == base
+
+
+async def test_rate_limit_backoff_is_capped(hass: HomeAssistant):
+    """The backed-off interval never exceeds BACKOFF_MAX_INTERVAL (#156)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException.from_response({"result_code": "E998"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+    for _ in range(20):
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+    assert coordinator.update_interval == BACKOFF_MAX_INTERVAL
+
+
+async def test_non_rate_limit_error_does_not_back_off(hass: HomeAssistant):
+    """A plain connection error leaves the poll interval untouched (#156)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=ConnectionError("blip"))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+    base = coordinator.update_interval
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base
 
 
 async def test_transient_failure_keeps_last_good_within_grace(hass: HomeAssistant):

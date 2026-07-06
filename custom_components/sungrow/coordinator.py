@@ -39,6 +39,10 @@ MAX_POLL_TIMEOUT = 60
 # staleness is harmless.
 AVAILABILITY_GRACE_SECONDS = 900
 
+# Ceiling for the backed-off poll interval: each rate-limited poll doubles the interval up
+# to this cap, and a successful poll restores the configured interval (#156).
+BACKOFF_MAX_INTERVAL = timedelta(hours=1)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -47,6 +51,10 @@ _LOGGER = logging.getLogger(__name__)
 # though pysolarcloud >=0.9.0 types E919 as an ``AuthError``. Guarded ahead of the
 # ``isinstance`` check in ``is_auth_error`` so that typing never overrides this.
 WHITELIST_ERRORS = frozenset({"E918", "E919"})
+
+# iSolarCloud quota/throttle codes (E998 monthly, E999 hourly). On these the coordinator
+# backs off its poll interval rather than hammering the API (#156).
+RATE_LIMIT_ERRORS = frozenset({"E998", "E999"})
 
 
 def is_auth_error(err: Exception) -> bool:
@@ -104,12 +112,17 @@ def describe_api_error(err: Exception) -> str | None:
     return None
 
 
+def is_rate_limit_error(err: Exception) -> bool:
+    """Return True if the error is an iSolarCloud quota/throttle rejection (E998/E999)."""
+    return isinstance(err, PySolarCloudException) and err.error in RATE_LIMIT_ERRORS
+
+
 # iSolarCloud error codes that warrant a user-facing Repair (#153). Each maps to a
 # translation key under ``issues.<key>``. Reauth is intentionally absent: HA already opens
 # a reauth flow when the coordinator raises ConfigEntryAuthFailed.
 _REPAIR_CODES: dict[str, frozenset[str]] = {
     "whitelist_rejection": WHITELIST_ERRORS,
-    "rate_limited": frozenset({"E998", "E999"}),
+    "rate_limited": RATE_LIMIT_ERRORS,
 }
 _REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
 
@@ -138,6 +151,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.plants_service = plants_service
         self.plant_id = plant_id
         self.plant_name = plant_name
+        # The user-configured poll interval, restored after a rate-limit back-off (#156).
+        self._base_update_interval = timedelta(seconds=scan_seconds)
         # Cap each poll's requests at the scan interval, never longer than 60 s.
         self._poll_timeout: float = min(scan_seconds, MAX_POLL_TIMEOUT)
         # Monotonic timestamp of the last device-list refresh; None until first poll.
@@ -176,6 +191,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
             # Surface actionable errors (whitelist, rate limit) as HA Repairs (#153).
             self._async_manage_repairs(err)
+            # Back off the poll interval while rate-limited so we stop hammering the API (#156).
+            self._adjust_poll_backoff(rate_limited=is_rate_limit_error(err))
             # Transient failure (a timeout arrives here as TimeoutError). Rather than flap
             # every entity to "unavailable" on a brief cloud hiccup, keep serving the
             # last-good data while a recent success is still within the grace window (#152);
@@ -187,6 +204,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
 
         self._async_manage_repairs(None)
+        self._adjust_poll_backoff(rate_limited=False)
         self._last_successful_update = self.hass.loop.time()
 
         # Refresh the device list so devices added to the plant after setup are
@@ -205,6 +223,27 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._last_successful_update is None:
             return False
         return (self.hass.loop.time() - self._last_successful_update) < AVAILABILITY_GRACE_SECONDS
+
+    def _adjust_poll_backoff(self, *, rate_limited: bool) -> None:
+        """Back off the poll interval on rate-limit errors, restoring it on recovery (#156).
+
+        Each rate-limited poll doubles the interval up to ``BACKOFF_MAX_INTERVAL``, so the
+        integration stops hammering iSolarCloud once it hits the hourly/monthly quota; the
+        next successful poll restores the user's configured interval.
+        """
+        if rate_limited:
+            current = self.update_interval or self._base_update_interval
+            new = min(current * 2, BACKOFF_MAX_INTERVAL)
+            if new != self.update_interval:
+                self.update_interval = new
+                _LOGGER.warning("iSolarCloud rate-limited %s; backing off poll interval to %s", self.plant_name, new)
+        elif self.update_interval != self._base_update_interval:
+            self.update_interval = self._base_update_interval
+            _LOGGER.info(
+                "iSolarCloud recovered for %s; poll interval restored to %s",
+                self.plant_name,
+                self._base_update_interval,
+            )
 
     def _async_manage_repairs(self, err: Exception | None) -> None:
         """Raise or clear Repair issues for actionable iSolarCloud errors (#153).
