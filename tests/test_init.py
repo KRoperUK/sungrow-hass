@@ -21,7 +21,15 @@ from custom_components.sungrow import (
     async_unload_entry,
     resolve_point_device,
 )
-from custom_components.sungrow.const import CONF_SCAN_INTERVAL, DOMAIN
+from custom_components.sungrow.const import (
+    CONF_MODBUS_HOST,
+    CONF_MODEL,
+    CONF_SCAN_INTERVAL,
+    CONF_SERIAL,
+    CONF_TRANSPORT,
+    DOMAIN,
+    TRANSPORT_MODBUS_ONLY,
+)
 
 from .conftest import MOCK_CONFIG_DATA, MOCK_PLANT_LIST, MOCK_REALTIME_DATA
 
@@ -120,6 +128,49 @@ async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_pla
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
+    assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+# ---------------------------------------------------------------------------
+# Modbus-only (cloud-free) setup (#159)
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_modbus_only_entry(hass: HomeAssistant):
+    """A Modbus-only entry sets up cloud-free: one coordinator, no cloud/dispatch, sensors only."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(
+        return_value={"grid_frequency": {"code": "grid_frequency", "value": 49.9, "unit": "Hz", "source": "modbus"}}
+    )
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    data = entry.runtime_data
+    assert len(data.coordinators) == 1
+    # No cloud service and no dispatch controller on a Modbus-only entry.
+    assert data.coordinators[0].plants_service is None
+    assert data.control is None
+    # The local client supplied the realtime data.
+    assert data.coordinators[0].data["grid_frequency"]["value"] == 49.9
+
+    # A Modbus-only entry (no dispatch, no heartbeat) unloads cleanly.
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 

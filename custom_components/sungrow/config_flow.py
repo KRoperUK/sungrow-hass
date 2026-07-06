@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .const import (
     CONF_APP_ID,
@@ -21,13 +22,18 @@ from .const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
+    CONF_MODEL,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
+    CONF_SERIAL,
+    CONF_TRANSPORT,
+    DEFAULT_MODBUS_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GATEWAYS,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
+    TRANSPORT_MODBUS_ONLY,
 )
 
 # Try to import pysolarcloud, handle if missing gracefully for development
@@ -44,6 +50,23 @@ _LOGGER = logging.getLogger(__name__)
 # can be slow — a redirect that lands within this window completes the flow
 # automatically even if the user has already reached the manual-entry form.
 CALLBACK_WAIT_TIMEOUT = 300
+
+
+def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Extract ``(inverter_serial, model)`` from a WiNet-S mDNS TXT-record dict.
+
+    The dongle advertises ``inverter=1;<type_code>;<serial>;1;<x>;<model>;...``. TXT
+    values may arrive as ``bytes``; a missing/short field yields ``None``.
+    """
+    raw: Any = props.get("inverter")
+    if isinstance(raw, bytes):
+        raw = raw.decode(errors="replace")
+    if not raw:
+        return None, None
+    parts = str(raw).split(";")
+    serial = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+    model = parts[5].strip() if len(parts) > 5 and parts[5].strip() else None
+    return serial, model
 
 
 class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -64,6 +87,9 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # OAuth ``state`` token that correlates the callback redirect back to this
         # exact flow (registered in hass.data so the callback view can look it up).
         self._state: str | None = None
+        # Zeroconf-discovered WiNet-S local Modbus host, carried into the confirm step
+        # that creates the cloud-free Modbus-only entry (#159).
+        self._discovered_modbus_host: str | None = None
 
     @staticmethod
     @callback
@@ -115,6 +141,45 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, "")): str,
                 }
             ),
+        )
+
+    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> ConfigFlowResult:
+        """Discover a WiNet-S dongle via mDNS and offer a cloud-free local Modbus setup (#159).
+
+        The dongle advertises ``WiNet-WebServer`` (``_http._tcp``) with TXT records that
+        carry the inverter's serial and model, so we can identify it and pick the register
+        map without connecting or needing any cloud credentials.
+        """
+        host = str(discovery_info.ip_address)
+        serial, model = _parse_winet_properties(discovery_info.properties)
+        if not serial:
+            return self.async_abort(reason="not_sungrow_device")
+        await self.async_set_unique_id(f"modbus_{serial}")
+        # Already set up? Update the host in case the WiNet-S's IP changed, then stop.
+        self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+        self._discovered_modbus_host = host
+        self.init_info = {CONF_SERIAL: serial, CONF_MODEL: model or "Inverter"}
+        self.context["title_placeholders"] = {"name": f"Sungrow {model or 'inverter'}"}
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Confirm setting up the discovered WiNet-S as a local (Modbus-only) integration."""
+        model = self.init_info.get(CONF_MODEL, "Inverter")
+        if user_input is not None:
+            return self.async_create_entry(
+                title=f"Sungrow {model} (local)",
+                data={
+                    CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+                    CONF_SERIAL: self.init_info[CONF_SERIAL],
+                    CONF_MODEL: model,
+                    CONF_MODBUS_HOST: self._discovered_modbus_host,
+                },
+                options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
+            )
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            description_placeholders={"model": model, "host": self._discovered_modbus_host or ""},
         )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

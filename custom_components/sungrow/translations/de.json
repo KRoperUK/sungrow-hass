@@ -37,6 +37,10 @@
           "gateway": "Gateway-Region",
           "redirect_uri": "Weiterleitungs-URI"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Lokalen Sungrow-Wechselrichter einrichten",
+        "description": "Ein Sungrow **{model}** wurde in Ihrem Netzwerk unter **{host}** (WiNet-S) gefunden. Richten Sie ihn ein, um Daten direkt über lokales Modbus zu lesen — schnell, ohne Limit und offline-fähig, ohne iSolarCloud-Konto."
       }
     },
     "progress": {
@@ -54,7 +58,8 @@
       "missing_code": "Der Autorisierungscode wurde nicht empfangen. Bitte versuchen Sie es erneut.",
       "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
       "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
-      "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung."
+      "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung.",
+      "not_sungrow_device": "Das gefundene Gerät ist kein unterstützter Sungrow-Wechselrichter."
     }
   },
   "options": {

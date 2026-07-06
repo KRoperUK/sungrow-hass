@@ -37,6 +37,10 @@
           "gateway": "Gateway Region",
           "redirect_uri": "Redirect URI"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Set up local Sungrow inverter",
+        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up to read data directly over local Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required."
       }
     },
     "progress": {
@@ -50,6 +54,7 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "not_sungrow_device": "The discovered device is not a supported Sungrow inverter.",
       "library_missing": "The pysolarcloud library is not installed. Restart Home Assistant so the integration's requirements are installed, then try again.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful",
