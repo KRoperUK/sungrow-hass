@@ -155,9 +155,10 @@ rules:
     comment: >-
       Developer-Portal whitelist rejections (E918/E919) and API quota/rate-limit
       rejections (E998/E999) surface as actionable Home Assistant Repairs via the
-      coordinator's _async_manage_repairs, and clear automatically once the plant
-      recovers (#153). Invalid/expired credentials are handled separately through
-      the reauthentication flow (ConfigEntryAuthFailed -> async_step_reauth).
+      coordinator's _async_raise_repair, and clear automatically once the plant
+      recovers (_async_clear_repairs on a successful poll) (#153). Invalid/expired
+      credentials are handled separately through the reauthentication flow
+      (ConfigEntryAuthFailed -> async_step_reauth).
   stale-devices:
     status: done
     comment: >-
