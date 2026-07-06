@@ -23,6 +23,7 @@ from .const import (
 from .coordinator import SungrowPlantCoordinator
 from .measure_points import (
     PERCENT_FRACTION_POINT_IDS,
+    normalize_unit,
     resolve_classification,
     resolve_enum_options,
     resolve_enum_value,
@@ -101,15 +102,23 @@ PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
         icon="mdi:solar-power",
     ),
     # Import price is money paid (cash-minus); export price is money earned (cash-plus).
+    # MEASUREMENT so the rate is recorded as long-term statistics — useful for
+    # time-of-use / agile tariffs that change through the day.
     PlantDetailSensor(
         "ps_consumption_power_price_kwh",
         "Import Price",
+        state_class=SensorStateClass.MEASUREMENT,
         unit=_CURRENCY_PER_KWH,
         diagnostic=False,
         icon="mdi:cash-minus",
     ),
     PlantDetailSensor(
-        "ps_feedin_power_price_kwh", "Export Price", unit=_CURRENCY_PER_KWH, diagnostic=False, icon="mdi:cash-plus"
+        "ps_feedin_power_price_kwh",
+        "Export Price",
+        state_class=SensorStateClass.MEASUREMENT,
+        unit=_CURRENCY_PER_KWH,
+        diagnostic=False,
+        icon="mdi:cash-plus",
     ),
 )
 
@@ -270,8 +279,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
         # Infer device class / state class so the Energy dashboard and history graphs
         # work out of the box (issue #19), including the dimensionless points that
-        # report no unit (SOC, SOH, power factor, PR, counts) (issue #105).
-        unit = init_data.get("unit")
+        # report no unit (SOC, SOH, power factor, PR, counts) (issue #105). The API
+        # sometimes reports a unit as a single Unicode glyph (e.g. ``℃``) that HA
+        # rejects for its device class, so normalise it first.
+        unit = normalize_unit(init_data.get("unit"))
         device_class, state_class = resolve_classification(unit, point_code, point_id)
         self._attr_device_class = device_class
         self._attr_state_class = state_class

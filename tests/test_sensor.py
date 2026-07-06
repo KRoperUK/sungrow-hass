@@ -99,6 +99,20 @@ def test_power_fraction_gets_gauge_icon():
     assert sensor._attr_icon == "mdi:gauge"
 
 
+def test_temperature_unit_glyph_normalized():
+    """The API's ℃ glyph (U+2103) is normalised to HA-valid °C for the temperature class.
+
+    HA rejects the single-glyph ℃ as an invalid unit for the temperature device class
+    ("expected one of ['K', '°F', '°C']"), which logged a warning on every inverter.
+    """
+    point = {"id": "4", "code": "internal_temperature", "value": "57.1", "unit": "℃"}
+    coordinator = _coord_with_devices([], data={"internal_temperature": point})
+    sensor = SungrowSensor(coordinator, "internal_temperature", "123", "Plant", point)
+    assert sensor._attr_native_unit_of_measurement == "°C"
+    assert sensor._attr_device_class == SensorDeviceClass.TEMPERATURE
+    assert sensor.native_value == 57.1
+
+
 def test_sensor_rehomes_to_singular_device():
     """A mapped point re-homes onto the single device of its type; unique_id unchanged."""
     inv = {
@@ -169,6 +183,8 @@ def test_plant_detail_sensor_values_and_units():
     assert price.native_value == 0.3887
     assert price._attr_native_unit_of_measurement == "GBP/kWh"
     assert price._attr_icon == "mdi:cash-minus"
+    # Recorded as statistics so time-of-use tariff changes graph over time.
+    assert price._attr_state_class == SensorStateClass.MEASUREMENT
 
 
 def test_plant_detail_sensor_absent_field_is_none():
