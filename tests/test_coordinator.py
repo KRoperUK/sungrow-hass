@@ -882,3 +882,77 @@ async def test_modbus_only_update_raises_outside_grace(hass: HomeAssistant):
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
+
+
+# ---------------------------------------------------------------------------
+# #223 daily_yield diagnostic capture
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_modbus_captures_daily_yield_diagnostic(hass: HomeAssistant):
+    """Each successful Modbus read refreshes coordinator.daily_yield_diagnostic (#223)."""
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
+    )
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(
+        return_value={
+            "start": 4999,
+            "raw": {"5002": 640},
+            "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
+        }
+    )
+    cloud = {"daily_yield": {"code": "daily_yield", "value": "60.0", "unit": "kWh"}}
+    await coordinator._async_apply_modbus(cloud)
+    assert coordinator.daily_yield_diagnostic is not None
+    assert coordinator.daily_yield_diagnostic["raw"]["5002"] == 640
+
+
+async def test_apply_modbus_keeps_previous_diagnostic_on_capture_failure(hass: HomeAssistant):
+    """A Modbus diagnostic-read failure keeps the previous diagnostic in place so a
+    transient blip never clears evidence the user is collecting for #223.
+    """
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
+    )
+    previous = {
+        "start": 4999,
+        "raw": {"5002": 640},
+        "candidates": [],
+        "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
+    }
+    coordinator.daily_yield_diagnostic = previous
+    from custom_components.sungrow.modbus import SungrowModbusError
+
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(side_effect=SungrowModbusError("boom"))
+    await coordinator._async_apply_modbus({})
+    assert coordinator.daily_yield_diagnostic is previous
+
+
+async def test_modbus_only_update_captures_daily_yield_diagnostic(hass: HomeAssistant):
+    """The Modbus-only path also refreshes the diagnostic on every successful poll (#223)."""
+    coordinator = _modbus_only_coordinator(hass)
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
+    )
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(
+        return_value={
+            "start": 4999,
+            "raw": {"5002": 640},
+            "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
+        }
+    )
+    await coordinator._async_update_data()
+    assert coordinator.daily_yield_diagnostic is not None
+    assert coordinator.daily_yield_diagnostic["raw"]["5002"] == 640
+
+
+async def test_capture_daily_yield_diagnostic_noop_without_client(hass: HomeAssistant):
+    """Cloud-only entries never call the diagnostic helper (#223 is a Modbus-only concern)."""
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
+    assert coordinator._modbus_client is None
+    await coordinator._async_capture_daily_yield_diagnostic()
+    assert coordinator.daily_yield_diagnostic is None

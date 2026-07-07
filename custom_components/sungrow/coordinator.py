@@ -204,6 +204,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (Modbus preferred). None -> cloud only. Built lazily to avoid importing
         # pymodbus for cloud-only installs.
         self._modbus_client = self._build_modbus_client(config_entry)
+        # Raw-wire diagnostic for #223 (daily_yield cloud vs. Modbus discrepancy). Populated
+        # on each successful Modbus poll and surfaced on the daily_yield sensor's
+        # ``daily_yield_diagnostic`` attribute, so a daytime re-capture can pick the
+        # right (address, scale) without guessing. None until the first successful read.
+        self.daily_yield_diagnostic: dict[str, Any] | None = None
 
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
@@ -298,6 +303,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # pylint: disable=broad-except  (best-effort: fall back to cloud)
             _LOGGER.debug("Local Modbus read failed for %s; using cloud data: %s", self.plant_name, err)
             return cloud_data
+        await self._async_capture_daily_yield_diagnostic()
         return merge_realtime(cloud_data, local)
 
     async def _async_modbus_only_update(self) -> dict[str, Any]:
@@ -314,7 +320,24 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.data
             raise UpdateFailed(f"Local Modbus read failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
+        await self._async_capture_daily_yield_diagnostic()
         return cast("dict[str, Any]", data)
+
+    async def _async_capture_daily_yield_diagnostic(self) -> None:
+        """Best-effort capture of the #223 daily_yield register window for inspection.
+
+        Runs an extra short Modbus read on the existing persistent connection after each
+        successful realtime poll. Failure is non-fatal: we keep the previous diagnostic
+        in place, so a transient blip never clears evidence the user is collecting for
+        the bug report.
+        """
+        if self._modbus_client is None:
+            return
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                self.daily_yield_diagnostic = await self._modbus_client.async_read_daily_yield_diagnostic()
+        except Exception as err:  # pylint: disable=broad-except  (best-effort diagnostic)
+            _LOGGER.debug("daily_yield diagnostic capture failed for %s: %s", self.plant_name, err)
 
     def _within_availability_grace(self) -> bool:
         """True while the last successful poll is recent enough to keep serving stale data."""

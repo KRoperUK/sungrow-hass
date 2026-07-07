@@ -115,6 +115,37 @@ def test_sensor_no_attributes_without_source():
     assert sensor.extra_state_attributes is None
 
 
+def test_daily_yield_sensor_surfaces_modbus_diagnostic_when_captured():
+    """#223: daily_yield's diagnostic dump rides along on the sensor as an extra attribute."""
+    point = {"code": "daily_yield", "value": "64.0", "unit": "kWh", "source": "modbus"}
+    coordinator = _coord_with_devices([], data={"daily_yield": point})
+    coordinator.daily_yield_diagnostic = {
+        "start": 4999,
+        "raw": {"4999": 9732, "5002": 640, "5003": 6330},
+        "candidates": [{"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh", "value": 64.0}],
+        "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
+    }
+    sensor = SungrowSensor(coordinator, "daily_yield", "123", "Plant", point)
+    attrs = sensor.extra_state_attributes
+    assert attrs is not None
+    assert attrs["source"] == "modbus"
+    assert attrs["daily_yield_diagnostic"]["raw"]["5002"] == 640
+    # The current-mapping entry echoes the existing decode so a user eyeballing the
+    # attribute can verify which (address, scale) their live entity's value came from.
+    assert attrs["daily_yield_diagnostic"]["current_mapping"]["raw"] == 640
+    # And the candidate list lets them spot the off-by-one or wrong-scale option.
+    assert attrs["daily_yield_diagnostic"]["candidates"][0]["value"] == 64.0
+
+
+def test_daily_yield_sensor_no_diagnostic_when_not_captured():
+    """No diagnostic attribute when the coordinator hasn't captured one yet (cloud-only path)."""
+    point = {"code": "daily_yield", "value": "25.2", "unit": "kWh", "source": "cloud"}
+    coordinator = _coord_with_devices([], data={"daily_yield": point})
+    coordinator.daily_yield_diagnostic = None
+    sensor = SungrowSensor(coordinator, "daily_yield", "123", "Plant", point)
+    assert sensor.extra_state_attributes == {"source": "cloud"}
+
+
 def test_temperature_unit_glyph_normalized():
     """The API's ℃ glyph (U+2103) is normalised to HA-valid °C for the temperature class.
 

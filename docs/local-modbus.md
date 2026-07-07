@@ -167,6 +167,9 @@ In **hybrid** mode these overlay the cloud data (Modbus wins where it has a valu
 - **`daily_yield` can read high** versus the cloud on some SG-RS firmware — a scaling/semantics
   mismatch under investigation in
   [#223](https://github.com/KRoperUK/sungrow-hass/issues/223). `total_yield` matches the cloud.
+  The `sensor.sungrow_*_daily_yield` entity carries a `daily_yield_diagnostic` attribute
+  (raw register frame + candidate `(address, scale)` decodings) — attach it to a comment
+  on #223 to help pin the cause down.
 - **One local connection.** The WiNet-S serves a limited number of Modbus TCP clients; if you
   already poll it from another tool, reads here may fail intermittently.
 

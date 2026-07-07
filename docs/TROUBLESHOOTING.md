@@ -236,6 +236,13 @@ under investigation. **`total_yield` matches the cloud**; only the daily figure 
 you rely on the daily total, use the cloud value (cloud-only or the cloud sensor on a hybrid
 entry) until it's resolved.
 
+To help pin the cause down, the `sensor.sungrow_*_daily_yield` entity carries a
+`daily_yield_diagnostic` attribute when a Modbus transport is configured: the raw 16-bit
+register values around the candidate daily_yield positions and every plausible
+`(address, scale)` decoding. If you can, attach that attribute (Dev Tools → States → pick
+the entity → copy `attributes.daily_yield_diagnostic`) to a comment on #223 alongside the
+matching cloud sensor's current value and the local time.
+
 ### My inverter model isn't read over Modbus
 
 Local Modbus currently maps only the **SG-RS single-phase string inverters**. Other models

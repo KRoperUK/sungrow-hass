@@ -110,3 +110,85 @@ def block_bounds(points: tuple[ModbusPoint, ...]) -> tuple[int, int]:
     start = min(p.address for p in points)
     end = max(p.address + p.register_count for p in points)
     return start, end - start
+
+
+# ---------------------------------------------------------------------------
+# #223 diagnostic dump
+# ---------------------------------------------------------------------------
+# Issue #223 reports the locally-read ``daily_yield`` diverging from the cloud value on
+# the SG-RS. The current mapping (``reg 5002 wire, u16, * 0.1 kWh``) is correct against
+# the documented "Daily power yields" register, so a single reading is not enough to
+# tell whether the divergence is a constant scaling factor, an off-by-one register, or a
+# firmware-semantics difference. To make the next daytime re-observation conclusive the
+# integration captures the raw 16-bit values from a small register window around the
+# candidate daily_yield positions and lists the values each hypothesis would produce, so
+# the right mapping can be picked without guessing.
+
+# Wire-register window: device_type_code (4999) .. mppt1_voltage (5010) inclusive.
+# This covers the doc registers 5000..5011 — the area around "Daily power yields"
+# (doc 5003 = wire 5002) and the 32-bit "Total power yields" (doc 5004-5005 = wire
+# 5003-5004), plus a couple of addresses either side to test off-by-one.
+DAILY_YIELD_DIAG_START = 4999
+DAILY_YIELD_DIAG_COUNT = 12  # 4999..5010
+
+# Candidate wire addresses to interpret as the "today" total. The current mapping
+# (``5002``) is the documented "Daily power yields"; ``5000``/``5001`` test an
+# off-by-one; ``5004``/``5005`` test if the firmware moved the daily total into
+# the area the doc reserves for the 32-bit lifetime total.
+DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES: tuple[int, ...] = (5000, 5001, 5002, 5003, 5004, 5005)
+
+# Candidate scaling factors. The doc says 0.1 kWh per LSB, but firmware revisions
+# have used 0.01 kWh and 1 Wh on other models; we surface all three so a daytime
+# capture picks the one matching the entity's reported value.
+DAILY_YIELD_DIAG_SCALES: tuple[tuple[float, str], ...] = (
+    (0.1, "kWh"),
+    (0.01, "kWh"),
+    (1.0, "Wh"),
+    (10.0, "—"),
+)
+
+
+def daily_yield_diagnostic_dump(registers: list[int], block_start: int = DAILY_YIELD_DIAG_START) -> dict[str, Any]:
+    """Build a structured diagnostic for #223 from a raw register block.
+
+    ``registers`` is the raw 16-bit values read starting at ``block_start``
+    (default :data:`DAILY_YIELD_DIAG_START`, so the list aligns directly with the
+    wire-address numbers). A block that doesn't cover the full diagnostic window is
+    accepted and only the addresses present are reported; this lets the function be
+    called with whatever the client has already read so the dump is free on a
+    full-block read.
+
+    The returned dict is the value surfaced on the daily_yield sensor's
+    ``daily_yield_diagnostic`` attribute, and is deliberately compact + JSON-safe so
+    it round-trips through the recorder.
+    """
+    raw: dict[str, int] = {}
+    for offset, value in enumerate(registers):
+        raw[str(block_start + offset)] = int(value)
+    candidates: list[dict[str, Any]] = []
+    for address in DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES:
+        offset = address - block_start
+        if offset < 0 or offset >= len(registers):
+            continue
+        raw_value = int(registers[offset])
+        for scale, unit in DAILY_YIELD_DIAG_SCALES:
+            candidates.append(
+                {
+                    "address": address,
+                    "raw": raw_value,
+                    "scale": scale,
+                    "unit": unit,
+                    "value": round(raw_value * scale, 3),
+                }
+            )
+    return {
+        "start": block_start,
+        "raw": raw,
+        "candidates": candidates,
+        "current_mapping": {
+            "address": 5002,
+            "raw": int(registers[5002 - block_start]) if 5002 - block_start in range(len(registers)) else None,
+            "scale": 0.1,
+            "unit": "kWh",
+        },
+    }
