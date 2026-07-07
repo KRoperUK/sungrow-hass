@@ -6,9 +6,13 @@ import pytest
 
 from custom_components.sungrow.modbus import SungrowModbusClient, SungrowModbusError, merge_realtime
 from custom_components.sungrow.modbus_registers import (
+    DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES,
+    DAILY_YIELD_DIAG_COUNT,
+    DAILY_YIELD_DIAG_START,
     SG_RS_INPUT_POINTS,
     ModbusPoint,
     block_bounds,
+    daily_yield_diagnostic_dump,
     decode_registers,
 )
 
@@ -187,3 +191,73 @@ def test_merge_adds_modbus_only_points():
     merged = merge_realtime({}, {"grid_frequency": {"code": "grid_frequency", "value": 49.9, "source": "modbus"}})
     assert merged["grid_frequency"]["value"] == 49.9
     assert merged["grid_frequency"]["source"] == "modbus"
+
+
+def test_daily_yield_diagnostic_dump_lists_every_candidate_address_and_scale():
+    """The dump enumerates every (candidate address, candidate scale) so a daytime
+    re-capture can pick the right mapping without guessing (#223).
+    """
+    registers = [0] * DAILY_YIELD_DIAG_COUNT
+    registers[5000 - DAILY_YIELD_DIAG_START] = 10  # address 5000
+    registers[5002 - DAILY_YIELD_DIAG_START] = 640  # address 5002 (current mapping)
+    registers[5003 - DAILY_YIELD_DIAG_START] = 6330  # address 5003
+    dump = daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+    assert dump["start"] == DAILY_YIELD_DIAG_START
+    assert dump["raw"]["5002"] == 640
+    assert dump["raw"]["5003"] == 6330
+    # The current mapping is echoed for one-glance comparison with the live entity.
+    assert dump["current_mapping"] == {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"}
+    # Every (address, scale) candidate the diagnostic tracks is present.
+    candidate_pairs = {(c["address"], c["scale"]) for c in dump["candidates"]}
+    for address in DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES:
+        for scale, _ in ((0.1, "kWh"), (0.01, "kWh"), (1.0, "Wh"), (10.0, "—")):
+            assert (address, scale) in candidate_pairs
+
+
+def test_daily_yield_diagnostic_dump_surfaces_current_mapping_match():
+    """When the current mapping matches the live value, the candidate list shows it (#223)."""
+    registers = [0] * DAILY_YIELD_DIAG_COUNT
+    registers[5002 - DAILY_YIELD_DIAG_START] = 640  # 640 * 0.1 = 64.0 kWh (current mapping)
+    dump = daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+    # The 0.1-scale candidate at address 5002 is exactly the value the live entity would show.
+    matching = [c for c in dump["candidates"] if c["address"] == 5002 and c["scale"] == 0.1]
+    assert matching and matching[0]["value"] == 64.0
+
+
+def test_daily_yield_diagnostic_dump_handles_partial_block():
+    """A truncated block is accepted: only the present addresses show up (#223)."""
+    registers = [0, 0, 0]  # 4999..5001 only
+    registers[5001 - DAILY_YIELD_DIAG_START] = 7
+    dump = daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+    assert dump["raw"]["5001"] == 7
+    # No candidates past the block end.
+    assert not any(c["address"] >= 5002 for c in dump["candidates"])
+
+
+async def test_modbus_client_diagnostic_dump_reads_diag_window():
+    """The Modbus client surfaces the diagnostic by reading the dedicated #223 window."""
+    registers = [0] * DAILY_YIELD_DIAG_COUNT
+    registers[5002 - DAILY_YIELD_DIAG_START] = 640
+    cls, inner = _mock_client_cls(registers, connected=True)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1")
+        diag = await client.async_read_daily_yield_diagnostic()
+    # The window the diagnostic cares about was read.
+    inner.read_input_registers.assert_awaited_once()
+    assert inner.read_input_registers.await_args.args[0] == DAILY_YIELD_DIAG_START
+    assert inner.read_input_registers.await_args.kwargs["count"] == DAILY_YIELD_DIAG_COUNT
+    # The current-mapping entry ties the read back to the existing decode.
+    assert diag["current_mapping"] == {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"}
+
+
+async def test_modbus_client_diagnostic_dump_raises_on_read_error():
+    """A Modbus read error surfaces as SungrowModbusError so the caller can keep the
+    previous diagnostic instead of clearing evidence the user is collecting (#223).
+    """
+    cls, inner = _mock_client_cls([0] * DAILY_YIELD_DIAG_COUNT, is_error=True)
+    with (
+        patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls),
+        pytest.raises(SungrowModbusError, match="failed"),
+    ):
+        await SungrowModbusClient("10.0.0.1").async_read_daily_yield_diagnostic()
+    inner.close.assert_called_once()

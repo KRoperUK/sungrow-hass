@@ -16,7 +16,14 @@ from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
 
-from .modbus_registers import REGISTER_MAPS, block_bounds, decode_registers
+from .modbus_registers import (
+    DAILY_YIELD_DIAG_COUNT,
+    DAILY_YIELD_DIAG_START,
+    REGISTER_MAPS,
+    block_bounds,
+    daily_yield_diagnostic_dump,
+    decode_registers,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +92,22 @@ class SungrowModbusClient:
         async with self._lock:
             registers = await self._read_input(start, count)
         return decode_registers(points, start, registers)
+
+    async def async_read_daily_yield_diagnostic(self) -> dict[str, Any]:
+        """Read the wire-register window around the daily_yield register and return a #223 diagnostic.
+
+        Reads only the diagnostic window (4999..5010), so the cost is one extra short
+        Modbus request per poll. The result is the value surfaced on the
+        ``daily_yield`` sensor's ``daily_yield_diagnostic`` attribute and includes the
+        raw 16-bit values plus every plausible ``(address, scale)`` decoding so a
+        daytime re-capture (#223) can pick the right mapping without guessing.
+
+        Raises :class:`SungrowModbusError` on connection/read failure so the caller can
+        simply leave the previous diagnostic in place.
+        """
+        async with self._lock:
+            registers = await self._read_input(DAILY_YIELD_DIAG_START, DAILY_YIELD_DIAG_COUNT)
+        return daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
 
     async def _read_input(self, address: int, count: int) -> list[int]:
         """Read a contiguous input-register block, connecting/reconnecting as needed."""

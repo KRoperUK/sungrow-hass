@@ -360,10 +360,23 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         Only present once a point has been through the Modbus merge — i.e. when local
         Modbus is configured. Cloud-only points carry no source, so this stays ``None``
         and the entities keep their attribute-free payload (no recorder bloat).
+
+        The ``daily_yield`` point additionally carries a ``daily_yield_diagnostic`` field
+        when a Modbus transport is configured (#223): the raw 16-bit register values
+        around the candidate daily_yield positions and every plausible
+        ``(address, scale)`` decoding, so a daytime re-capture can pick the right mapping
+        without guessing.
         """
         point = self._current_point()
         source = point.get("source") if point else None
-        return {"source": source} if source else None
+        attrs: dict[str, Any] = {}
+        if source:
+            attrs["source"] = source
+        if self.point_code == "daily_yield":
+            diag = getattr(self.coordinator, "daily_yield_diagnostic", None)
+            if diag is not None:
+                attrs["daily_yield_diagnostic"] = diag
+        return attrs or None
 
 
 class SungrowDeviceSensor(SungrowSensor):
