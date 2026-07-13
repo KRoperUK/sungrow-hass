@@ -234,6 +234,11 @@ POINT_DEVICE_TYPE: dict[str, frozenset[DeviceType]] = {
     "pv_active_power_ems": _PV_TYPES,
     "total_dc_power": _PV_TYPES,
     "daily_equivalent_hours_of_inverter": _PV_TYPES,
+    "phase_a_voltage": _PV_TYPES,
+    "phase_b_voltage": _PV_TYPES,
+    "phase_c_voltage": _PV_TYPES,
+    "reactive_power": _PV_TYPES,
+    "power_factor": _PV_TYPES,
     # Battery / ESS
     "battery_level_soc": _BATTERY_TYPES,
     "battery_soc": _BATTERY_TYPES,

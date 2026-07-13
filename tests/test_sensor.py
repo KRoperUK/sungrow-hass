@@ -77,6 +77,8 @@ def _coord_with_devices(devices, data=None):
     coordinator.data = data or {}
     coordinator.devices = devices
     coordinator.plant_name = "Plant"
+    coordinator.plants_service = MagicMock()  # cloud-backed coordinator
+    coordinator.via_plant_id = None
     return coordinator
 
 
@@ -372,6 +374,8 @@ class TestSungrowSensor:
         coordinator = MagicMock()
         coordinator.data = data or {}
         coordinator.devices = []  # #158: SungrowSensor reads this to pick its device
+        coordinator.plants_service = MagicMock()  # cloud-backed coordinator
+        coordinator.via_plant_id = None
         return coordinator
 
     def test_sensor_name_from_code(self):

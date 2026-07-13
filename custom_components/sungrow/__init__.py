@@ -11,7 +11,7 @@ from typing import Any
 import voluptuous as vol
 from aiohttp import web
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
@@ -239,6 +239,25 @@ def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
     return None
 
 
+def _remove_synthetic_local_plant_device(hass: HomeAssistant, entry: SungrowConfigEntry, serial: str) -> None:
+    """Remove a stale synthetic local-plant anchor device created before a cloud plant existed.
+
+    When the local Modbus entry sets up before the cloud entry is ready, it creates a
+    synthetic plant service device keyed by the inverter serial. Once the cloud plant
+    appears and we nest under it, that synthetic device is orphaned and should be
+    removed so the UI does not show two plant-level devices for the same inverter.
+    """
+    registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        if device.entry_type != dr.DeviceEntryType.SERVICE:
+            continue
+        for domain_key, ident in device.identifiers:
+            if domain_key == DOMAIN and str(ident) == serial:
+                registry.async_remove_device(device.id)
+                _LOGGER.debug("Removed synthetic local plant device %s for serial %s", device.id, serial)
+                return
+
+
 _HYBRID_OPTION_KEYS = frozenset(
     {
         CONF_MODBUS_HOST,
@@ -432,14 +451,25 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={serial: [inverter]})
-    # Only create a synthetic local plant anchor when there is no cloud plant to nest under.
-    if cloud_plant_id is None:
-        dr.async_get(hass).async_get_or_create(
-            config_entry_id=entry.entry_id,
-            **build_plant_device_info(serial, f"Sungrow {model} (local)", winet_url or DEFAULT_CONSOLE_URL),
-        )
+    # Local Modbus sensors now live on the single inverter device (which is nested under
+    # a matching cloud plant when one exists). Remove any legacy synthetic local plant
+    # anchor left over from earlier builds so the UI does not show two plant devices.
+    _remove_synthetic_local_plant_device(hass, entry, serial)
     # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+
+    # If no cloud plant was found at setup time, the local entry may have set up before
+    # the cloud entry. Listen once for HA startup to finish, then re-check and reload so
+    # the inverter can nest under the cloud plant device when it exists.
+    if cloud_plant_id is None:
+
+        async def _async_recheck_nesting(_: Any) -> None:
+            if find_related_cloud_plant_id(hass, serial):
+                _LOGGER.debug("Cloud plant found after startup for %s; reloading local entry", serial)
+                await hass.config_entries.async_reload(entry.entry_id)
+
+        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_recheck_nesting))
+
     return True
 
 

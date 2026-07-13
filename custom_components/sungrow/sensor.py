@@ -10,6 +10,7 @@ from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pysolarcloud.plants import DeviceType
 
 from . import build_device_info, build_plant_device_info, resolve_point_device
 from .const import (
@@ -250,6 +251,17 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         device = resolve_point_device(point_code, getattr(coordinator, "devices", None) or [])
         via_plant_id = getattr(coordinator, "via_plant_id", None)
         local_url = getattr(coordinator, "local_configuration_url", None)
+
+        # A Modbus-only entry represents a single inverter; plant-level points that are
+        # not otherwise mapped should live on that inverter device so no orphaned local
+        # plant device is needed and nesting under a cloud plant works for every sensor.
+        if device is None and coordinator.plants_service is None:
+            inverters = [
+                d for d in (getattr(coordinator, "devices", None) or []) if d.get("device_type") == DeviceType.INVERTER
+            ]
+            if len(inverters) == 1:
+                device = inverters[0]
+
         if device is not None:
             self._attr_device_info = build_device_info(
                 device,
@@ -259,7 +271,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
                 configuration_url=local_url,
             )
         else:
-            self._attr_device_info = build_plant_device_info(plant_id, plant_name, console_url)
+            self._attr_device_info = build_plant_device_info(via_plant_id or plant_id, plant_name, console_url)
         self._apply_point_metadata(point_code, init_data, plant_name)
 
     def _apply_point_metadata(self, point_code: str, init_data: dict[str, Any], label: str) -> None:
