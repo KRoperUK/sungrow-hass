@@ -2,6 +2,13 @@
   "config": {
     "step": {
       "user": {
+        "title": "Choose Transport Mode",
+        "description": "Select how the integration connects to your Sungrow inverter.",
+        "data": {
+          "transport": "Transport mode"
+        }
+      },
+      "cloud_credentials": {
         "title": "Connect to iSolarCloud",
         "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud]({url})\n\nAfter you submit, the hub is created and Home Assistant will prompt you to authorize it in your browser.",
         "data": {
@@ -15,6 +22,22 @@
           "app_key": "AppKey from iSolarCloud Developer Platform.",
           "app_secret": "AppSecret from iSolarCloud Developer Platform.",
           "app_id": "App ID from iSolarCloud Developer Platform. To find this, go to your application and look for 'id' within the URL like so: {app_id_url}."
+        }
+      },
+      "modbus_host": {
+        "title": "Modbus Host",
+        "description": "Enter the IP address or hostname of your WiNet-S dongle for local Modbus communication.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname"
+        }
+      },
+      "local_setup": {
+        "title": "Local Modbus Setup",
+        "description": "Enter the connection details for your local WiNet-S dongle. No cloud account is required.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname",
+          "serial": "Inverter serial number",
+          "model": "Inverter model"
         }
       },
       "auth_callback": {
@@ -38,6 +61,13 @@
           "redirect_uri": "Redirect URI"
         }
       },
+      "reconfigure_modbus_host": {
+        "title": "Update Modbus Host",
+        "description": "Update the WiNet-S IP address for this hybrid (Cloud + Modbus) entry.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname"
+        }
+      },
       "zeroconf_confirm": {
         "title": "Set up local Sungrow inverter",
         "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
@@ -55,18 +85,19 @@
     },
     "error": {
       "cannot_connect": "Failed to connect",
+      "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
       "invalid_auth": "Invalid authentication",
       "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "not_sungrow_device": "The discovered device is not a supported Sungrow inverter.",
       "library_missing": "The pysolarcloud library is not installed. Restart Home Assistant so the integration's requirements are installed, then try again.",
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
-      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application.",
-      "not_sungrow_device": "The discovered device is not a supported Sungrow inverter."
+      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application."
     }
   },
   "options": {
@@ -77,7 +108,8 @@
         "data": {
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)",
-          "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)"
+          "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)",
+          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
         }
       },
       "modbus_options": {
@@ -98,6 +130,10 @@
     "rate_limited": {
       "title": "iSolarCloud API rate limit reached",
       "description": "iSolarCloud is rejecting requests for **{plant}** because the API call limit was reached (E998/E999). Increase the polling interval in the integration options to make fewer calls; it recovers when the quota resets."
+    },
+    "backfill_partial": {
+      "title": "Historical backfill finished with gaps",
+      "description": "The historical statistics backfill for **{plant}** finished but {failed_chunks} time range(s) could not be imported, so the History and Energy dashboards may have gaps for that period. Re-run **Developer Tools → Actions → Sungrow: Backfill historical statistics** to fill the gaps; the successful hours are already imported and re-running only overwrites them cleanly."
     }
   },
   "entity": {
@@ -168,6 +204,22 @@
   "exceptions": {
     "dispatch_write_failed": {
       "message": "Failed to update {param} on the inverter: {error}"
+    }
+  },
+  "services": {
+    "backfill": {
+      "name": "Backfill historical statistics",
+      "description": "Import historical iSolarCloud data into Home Assistant long-term statistics so the History and Energy dashboards are populated immediately.",
+      "fields": {
+        "config_entry": {
+          "name": "Integration",
+          "description": "The Sungrow (cloud) integration entry to backfill. Leave empty to backfill every loaded cloud entry."
+        },
+        "start_date": {
+          "name": "Start date",
+          "description": "Optional earliest date to import from (interpreted as UTC midnight). Defaults to the configured backfill window."
+        }
+      }
     }
   }
 }

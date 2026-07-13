@@ -33,6 +33,7 @@ from custom_components.sungrow.const import (
     CONF_TRANSPORT,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     DOMAIN,
+    TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
 
@@ -88,43 +89,49 @@ async def _reauth_to_manual(hass: HomeAssistant, entry: MockConfigEntry) -> str:
 
 
 async def test_user_step_shows_form(hass: HomeAssistant):
-    """Test the initial user step shows a form."""
+    """Test the initial user step shows the transport selector form."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["errors"] == {}
-    assert "description_placeholders" in result
-    assert result["description_placeholders"]["url"] == "https://developer-api.isolarcloud.com/#/application"
-    assert "app_id_url" in result["description_placeholders"]
 
 
 async def test_user_step_creates_hub(hass: HomeAssistant, mock_auth):
-    """Submitting credentials creates the hub entry (no tokens yet)."""
+    """Selecting cloud_only transport and submitting credentials creates the hub entry."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
+    # Step 1: Select transport
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY}
+    )
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["step_id"] == "cloud_credentials"
+
+    # Step 2: Submit credentials
     with patch("custom_components.sungrow.async_setup_entry", return_value=True):
-        result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
         await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result2["title"] == f"Sungrow {MOCK_USER_INPUT[CONF_APP_ID]}"
+    assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result3["title"] == f"Sungrow {MOCK_USER_INPUT[CONF_APP_ID]}"
     # The hub is created without tokens — authorization happens afterwards.
-    assert "tokens" not in result2["data"]
-    assert result2["data"][CONF_APP_KEY] == MOCK_USER_INPUT[CONF_APP_KEY]
+    assert "tokens" not in result3["data"]
+    assert result3["data"][CONF_APP_KEY] == MOCK_USER_INPUT[CONF_APP_KEY]
+    assert result3["data"][CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
     # Setting up the hub registered the OAuth callback view (via async_setup),
     # so the redirect endpoint exists before any authorization attempt.
     assert hass.data[DOMAIN]["callback_view_registered"] is True
 
 
 async def test_user_step_aborts_if_already_configured(hass: HomeAssistant, mock_auth):
-    """Adding the same App ID twice aborts as already_configured (at the user step)."""
+    """Adding the same App ID twice aborts as already_configured (at the cloud_credentials step)."""
     _hub_entry(hass)
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY})
+    result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_USER_INPUT)
 
-    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
-    assert result2["reason"] == "already_configured"
+    assert result3["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result3["reason"] == "already_configured"
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +762,7 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
 
 
 async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """Cloud options do not expose or store a Modbus host (local is a separate entry)."""
+    """Cloud options expose an optional modbus_host field for transport switching (#216)."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
@@ -763,8 +770,10 @@ async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_s
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     keys = {str(m.schema) for m in result["data_schema"].schema}
-    assert CONF_MODBUS_HOST not in keys
+    # cloud_only entries now show an optional modbus_host for switching to hybrid.
+    assert CONF_MODBUS_HOST in keys
 
+    # But submitting without a host doesn't store modbus_host in options.
     result2 = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={CONF_SCAN_INTERVAL: 30},

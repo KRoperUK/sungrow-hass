@@ -1,0 +1,11 @@
+backfill:
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: sungrow
+    start_date:
+      required: false
+      selector:
+        date:

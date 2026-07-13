@@ -23,6 +23,7 @@ from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
 from .auth import SungrowAuth
+from .backfill import BackfillManager
 from .const import (
     CONF_APP_ID,
     CONF_APP_KEY,
@@ -39,9 +40,12 @@ from .const import (
     GATEWAY_CONSOLE_URLS,
     GATEWAYS,
     POINT_DEVICE_TYPE,
+    TRANSPORT_CLOUD_MODBUS,
+    TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
+from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 # A cloud-free Modbus-only entry has no cloud device status or dispatch, but it does
@@ -80,6 +84,8 @@ class SungrowData:
     devices: dict[str, list[dict[str, Any]]]
     # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
     heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task[None]]] = field(default_factory=dict)
+    # None for a Modbus-only entry (backfill is cloud-only, Requirement 1.2).
+    backfill: BackfillManager | None = None
 
 
 type SungrowConfigEntry = ConfigEntry[SungrowData]
@@ -278,6 +284,9 @@ def _async_split_legacy_hybrid(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
         return
+    # cloud_modbus entries legitimately carry modbus_host — don't strip it (#216).
+    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_CLOUD_MODBUS:
+        return
     host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "").strip()
     has_hybrid_keys = any(k in entry.options or k in entry.data for k in _HYBRID_OPTION_KEYS)
     if not host and not has_hybrid_keys:
@@ -413,6 +422,17 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         new_options = {**config_entry.options, CONF_SCAN_INTERVAL: old_interval * 60}
         hass.config_entries.async_update_entry(config_entry, options=new_options, version=2)
         _LOGGER.info("Migrated scan_interval from %d minutes to %d seconds", old_interval, old_interval * 60)
+
+    if config_entry.version == 2:
+        # v2→v3: back-fill transport field for existing entries.
+        new_data = dict(config_entry.data)
+        if CONF_TRANSPORT not in new_data:
+            new_data[CONF_TRANSPORT] = TRANSPORT_CLOUD_ONLY
+        hass.config_entries.async_update_entry(config_entry, data=new_data, version=3)
+        _LOGGER.info(
+            "Migrated config entry %s to version 3 (transport=%s)", config_entry.title, new_data[CONF_TRANSPORT]
+        )
+
     return True
 
 
@@ -480,8 +500,22 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
 
 async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
-    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+    transport = entry.data.get(CONF_TRANSPORT)
+
+    if transport is None:
+        _LOGGER.warning("Config entry %s missing CONF_TRANSPORT; defaulting to cloud_only", entry.title)
+        transport = TRANSPORT_CLOUD_ONLY
+
+    if transport == TRANSPORT_MODBUS_ONLY:
         return await _async_setup_modbus_only(hass, entry)
+
+    if transport == TRANSPORT_CLOUD_MODBUS:
+        _LOGGER.info(
+            "Entry %s configured for cloud+modbus; Modbus wiring deferred to #217",
+            entry.title,
+        )
+
+    # cloud_only and cloud_modbus both use the standard cloud coordinator path.
     # Split legacy hybrid cloud+Modbus entries into pure cloud + separate local.
     _async_split_legacy_hybrid(hass, entry)
     if "tokens" not in entry.data:
@@ -593,6 +627,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     # update listener would also fire on every token rotation (a plain ``entry.data``
     # write from ``_save_tokens``), needlessly reloading the whole integration (#110).
 
+    # Backfill is cloud-only (Requirement 1.2): construct the manager and kick off the
+    # automatic run in a background task so it never delays setup or the first realtime
+    # poll (Requirement 1.1). The Modbus-only path never reaches here, so it never gets a
+    # manager. The start is gated on Home Assistant being fully started so the historical
+    # imports never race the recorder starting up (Requirements 5.4, 5.5).
+    manager = BackfillManager(hass, entry)
+    entry.runtime_data.backfill = manager
+
+    # Register the on-demand sungrow.backfill service once (idempotent, Requirement 2.1).
+    async_setup_services(hass)
+
+    async def _async_start_backfill() -> None:
+        if not hass.is_running:
+            started = asyncio.Event()
+
+            @callback
+            def _on_started(_event: Any) -> None:
+                started.set()
+
+            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+            await started.wait()
+        await manager.async_start_automatic()
+
+    entry.async_create_background_task(hass, _async_start_backfill(), name="sungrow-backfill-start")
+
     return True
 
 
@@ -604,6 +663,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     # failed unload.
     unloaded = await hass.config_entries.async_unload_platforms(entry, _entry_platforms(entry))
     if unloaded:
+        # Cancel any in-flight Backfill runs before tearing down (Requirement 1.5). Cloud
+        # entries have a manager; the Modbus-only path leaves ``backfill`` as None.
+        manager = entry.runtime_data.backfill
+        if manager is not None:
+            await manager.async_shutdown()
         heartbeats = entry.runtime_data.heartbeats
         for heartbeat in list(heartbeats.values()):
             await _stop_heartbeat(heartbeat)

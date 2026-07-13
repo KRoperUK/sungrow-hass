@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    ESS_MPPT_DIAGNOSTIC_POINTS,
     ESS_OPERATING_STATUS_POINT,
     INVERTER_DIAGNOSTIC_POINTS,
     INVERTER_OPERATING_STATUS_POINT,
@@ -539,7 +540,18 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         # An ESS reports operating status on 13146 (already requested above);
                         # drop the inverter point 29 so the two don't collide on the shared
                         # "operating_status" code and silently overwrite each other (#182).
-                        diagnostic = {pid: code for pid, code in INVERTER_DIAGNOSTIC_POINTS.items() if pid != "29"}
+                        # ESS also reports MPPT on a separate 13xxx range: drop the
+                        # string-inverter MPPT IDs (5-10) and merge the hybrid MPPT IDs
+                        # instead. Both ranges share the mpptN_* codes, so requesting BOTH
+                        # would map two IDs to one code and silently overwrite each other in
+                        # the per-device merge.
+                        string_inverter_mppt_ids = {"5", "6", "7", "8", "9", "10"}
+                        diagnostic = {
+                            pid: code
+                            for pid, code in INVERTER_DIAGNOSTIC_POINTS.items()
+                            if pid != "29" and pid not in string_inverter_mppt_ids
+                        }
+                        diagnostic = {**diagnostic, **ESS_MPPT_DIAGNOSTIC_POINTS}
                     extra.update(diagnostic)
                 if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
                     extra.update(BATTERY_DEVICE_POINTS)

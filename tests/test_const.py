@@ -75,6 +75,49 @@ def test_inverter_diagnostic_points_include_per_string():
     assert len(string_codes) == 16  # 8 strings x (voltage + current)
 
 
+def test_ess_mppt_diagnostic_points_shape():
+    """The hybrid/ESS MPPT map (this fix) maps the 13xxx IDs to the reused mpptN_* codes.
+
+    SH-family hybrids report MPPT voltage/current on a separate point-ID range than string
+    inverters; the codes are reused so classification/naming/icons stay identical.
+    """
+    from custom_components.sungrow.const import ESS_MPPT_DIAGNOSTIC_POINTS as P
+
+    expected = {
+        "13001": "mppt1_voltage",
+        "13002": "mppt1_current",
+        "13105": "mppt2_voltage",
+        "13106": "mppt2_current",
+        "13107": "mppt3_voltage",
+        "13108": "mppt3_current",
+        "13109": "mppt4_voltage",
+        "13110": "mppt4_current",
+    }
+    assert expected == P
+    # Exactly MPPT1-4 voltage/current (eight points), reusing the string-inverter code names.
+    assert len(P) == 8
+    mppt_codes = [c for c in P.values() if c.startswith("mppt")]
+    assert len(mppt_codes) == 8
+
+
+def test_ess_mppt_codes_reuse_string_inverter_codes():
+    """MPPT1-3 codes are shared with the string-inverter map; only mppt4_* are new.
+
+    Reusing the existing mppt1-3 code names is what keeps the diagnostic classification,
+    naming and icons identical without any extra mapping.
+    """
+    from custom_components.sungrow.const import ESS_MPPT_DIAGNOSTIC_POINTS as ESS
+    from custom_components.sungrow.const import INVERTER_DIAGNOSTIC_POINTS as INV
+
+    inv_codes = set(INV.values())
+    # mppt1-3 codes already exist on the string-inverter map (via "5"-"10").
+    for code in ("mppt1_voltage", "mppt1_current", "mppt2_voltage", "mppt3_current"):
+        assert code in inv_codes
+    # mppt4_* are the only genuinely new code names introduced by this map.
+    new_codes = set(ESS.values()) - inv_codes
+    assert new_codes == {"mppt4_voltage", "mppt4_current"}
+
+
 def test_meter_device_points_present():
     """The meter map (#179) carries instantaneous power/PF/frequency + per-phase."""
     from custom_components.sungrow.const import METER_DEVICE_POINTS as M

@@ -1,6 +1,9 @@
 {
   "domain": "sungrow",
   "name": "Sungrow iSolarCloud",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@KRoperUK"
   ],

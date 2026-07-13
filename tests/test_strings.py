@@ -32,14 +32,23 @@ def test_strings_has_required_steps(strings_data):
     assert "user" in steps, "Missing 'user' step"
     assert "auth_manual" in steps, "Missing 'auth_manual' step"
     assert "auth_callback" in steps, "Missing 'auth_callback' step"
+    assert "cloud_credentials" in steps, "Missing 'cloud_credentials' step"
+    assert "modbus_host" in steps, "Missing 'modbus_host' step"
+    assert "local_setup" in steps, "Missing 'local_setup' step"
 
 
 def test_strings_user_step_has_required_fields(strings_data):
-    """Test the user step defines all form fields used by the config flow."""
+    """Test the user step defines the transport selector field."""
     user_data = strings_data["config"]["step"]["user"]["data"]
+    assert "transport" in user_data, "Missing 'transport' field in user step"
+
+
+def test_strings_cloud_credentials_step_has_required_fields(strings_data):
+    """Test the cloud_credentials step defines all form fields used by the config flow."""
+    creds_data = strings_data["config"]["step"]["cloud_credentials"]["data"]
     required_fields = {"gateway", "app_key", "app_secret", "app_id", "redirect_uri"}
-    assert required_fields.issubset(set(user_data.keys())), (
-        f"Missing form fields: {required_fields - set(user_data.keys())}"
+    assert required_fields.issubset(set(creds_data.keys())), (
+        f"Missing form fields: {required_fields - set(creds_data.keys())}"
     )
 
 

@@ -4,6 +4,7 @@ pytest-homeassistant-custom-component
 pytest-cov
 pytest-sugar
 python-dotenv
+hypothesis
 
 # Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
 ruff==0.15.21
