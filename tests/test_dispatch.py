@@ -515,8 +515,11 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
         await command.async_select_option("Charge")
 
+    # Charge/Discharge must also switch Energy Management Mode to Compulsory (10003=2)
+    # or the inverter accepts 10004/10005 but stays in Self-consumption (#231).
     entry_data.control.async_update_parameters.assert_awaited_once_with(
-        "dev-uuid-1", {"charge_discharge_command": "170"}
+        "dev-uuid-1",
+        {"charge_discharge_command": "170", "energy_management_mode": "2"},
     )
 
 
@@ -525,7 +528,7 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
-    _setup_entry_data(entry, devices)
+    entry_data = _setup_entry_data(entry, devices)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
@@ -536,6 +539,31 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
         await command.async_select_option("Stop")
 
     mock_stop.assert_awaited_once_with(hass, command.coordinator.config_entry, "12345")
+    # Stop restores Self-consumption (10003=0) so forced mode does not persist (#231).
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
+        "dev-uuid-1",
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+    )
+
+
+async def test_select_discharge_switches_to_compulsory_mode(hass: HomeAssistant):
+    """Discharge writes command + Compulsory energy-management mode together (#231)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+
+    with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
+        await command.async_select_option("Discharge")
+
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
+        "dev-uuid-1",
+        {"charge_discharge_command": "187", "energy_management_mode": "2"},
+    )
 
 
 async def test_select_availability_follows_coordinator(hass: HomeAssistant):
@@ -977,7 +1005,10 @@ async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
     with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
         await command._do_revert()
 
-    data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_command": "204"})
+    data.control.async_update_parameters.assert_awaited_with(
+        "ess-1",
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+    )
     mock_stop.assert_awaited_once()
     assert command.current_option == "Stop"
     assert command._revert_deadline is None
@@ -1041,8 +1072,11 @@ async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant
     ):
         await command.async_added_to_hass()
 
-    # Reverted, not resumed: Stop written, heartbeat never started.
-    data.control.async_update_parameters.assert_awaited_with("ess-1", {"charge_discharge_command": "204"})
+    # Reverted, not resumed: Stop + Self-consumption written, heartbeat never started.
+    data.control.async_update_parameters.assert_awaited_with(
+        "ess-1",
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+    )
     mock_start.assert_not_awaited()
     assert command.current_option == "Stop"
 

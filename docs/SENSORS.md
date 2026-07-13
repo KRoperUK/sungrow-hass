@@ -168,7 +168,12 @@ The power sliders (charge/discharge power, export limit power) are sized to the 
 
 The **reactive-power** controls work together: set **Reactive Power Mode** first, then the relevant value — **Power Factor** only takes effect in *Power Factor* mode, and **Reactive Power Ratio Q(t)** only in *Q(t)* mode. These are grid-quality controls and are available on PV-only plants too (they aren't battery-gated).
 
-When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integration automatically starts sending the External EMS heartbeat (param `10017`) every 60 seconds so the inverter stays in dispatch mode. Selecting **Stop** turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
+When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integration:
+
+1. Switches **Energy Management Mode** (param `10003`) to **Compulsory / Forced** — required for the command to take effect (writing charge/discharge alone is accepted by the device but ignored while the plant stays in Self-consumption).
+2. Starts the External EMS heartbeat (param `10017`) every 60 seconds.
+
+Selecting **Stop** restores Self-consumption mode and turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
 
 > **Auto-revert (safety).** Set **Forced Dispatch Duration** to a number of minutes and a forced *Charge*/*Discharge* automatically reverts to **Stop** after that long — so a forced command can't silently persist and curtail your solar (the [#148](https://github.com/KRoperUK/sungrow-hass/issues/148) footgun). The countdown survives a Home Assistant restart (if it expires while HA is down, the command reverts on startup). Leave it at **0** to keep the legacy behaviour (a forced command stays until you change it). It's a local control — it writes nothing to the inverter itself.
 
