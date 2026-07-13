@@ -22,6 +22,9 @@ CONF_ENABLE_DEVICE_SENSORS = "enable_device_sensors"
 CONF_MODBUS_HOST = "modbus_host"
 CONF_MODBUS_PORT = "modbus_port"
 CONF_MODBUS_UNIT = "modbus_unit"
+# Opt-in: expose the raw Modbus register window on the daily_yield sensor as
+# ``daily_yield_diagnostic`` (large attribute; off by default to protect the recorder).
+CONF_MODBUS_DEBUG_DAILY_YIELD = "modbus_debug_daily_yield"
 DEFAULT_MODBUS_PORT = 502
 DEFAULT_MODBUS_UNIT = 1
 # Entry-data marker for a fully local, cloud-free entry created from zeroconf

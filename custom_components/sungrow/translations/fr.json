@@ -52,6 +52,13 @@
       "attach_modbus": {
         "title": "Ajouter Modbus local à votre onduleur Sungrow",
         "description": "Un Sungrow **{model}** a été découvert à **{host}** (WiNet-S), et il est déjà configuré via iSolarCloud (**{cloud}**). Ajoutez le Modbus local rapide à cette entrée — ses données proviendront d'abord de la connexion locale (Modbus préféré) et basculeront vers le cloud — sans créer de doublon."
+      },
+      "merge_local_modbus": {
+        "title": "Use your existing local Modbus connection?",
+        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
+        "data": {
+          "merge_local": "Attach local Modbus and remove the standalone local entry"
+        }
       }
     },
     "progress": {
@@ -83,14 +90,16 @@
           "scan_interval": "Intervalle d'interrogation (secondes)",
           "extra_measure_points": "Points de mesure supplémentaires (point_id=code, séparés par des virgules)",
           "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)",
-          "modbus_host": "Hôte Modbus local (IP du WiNet-S) — optionnel ; laisser vide pour le cloud uniquement"
+          "modbus_host": "Hôte Modbus local (IP du WiNet-S) — optionnel ; laisser vide pour le cloud uniquement",
+          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
         }
       },
       "modbus_options": {
         "title": "Options Modbus locales",
         "description": "Ajustez la fréquence à laquelle Home Assistant lit l'onduleur directement via Modbus local. Il n'y a pas de quota d'API cloud, vous pouvez donc interroger fréquemment ; le minimum est de 10 secondes.",
         "data": {
-          "scan_interval": "Intervalle d'interrogation (secondes)"
+          "scan_interval": "Intervalle d'interrogation (secondes)",
+          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
         }
       }
     }

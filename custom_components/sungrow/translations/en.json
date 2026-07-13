@@ -52,6 +52,13 @@
       "attach_modbus": {
         "title": "Add local Modbus to your Sungrow inverter",
         "description": "A Sungrow **{model}** was discovered at **{host}** (WiNet-S), and it is already set up via iSolarCloud (**{cloud}**). Add fast local Modbus to that entry — its data will come from the local connection first (Modbus preferred) and fall back to the cloud — without creating a duplicate device."
+      },
+      "merge_local_modbus": {
+        "title": "Use your existing local Modbus connection?",
+        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
+        "data": {
+          "merge_local": "Attach local Modbus and remove the standalone local entry"
+        }
       }
     },
     "progress": {
@@ -83,14 +90,16 @@
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)",
           "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)",
-          "modbus_host": "Local Modbus host (WiNet-S IP) — optional; leave blank for cloud only"
+          "modbus_host": "Local Modbus host (WiNet-S IP) — optional; leave blank for cloud only",
+          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
         }
       },
       "modbus_options": {
         "title": "Local Modbus Options",
         "description": "Adjust how often Home Assistant reads the inverter directly over local Modbus. There is no cloud API quota, so you can poll frequently; the minimum is 10 seconds.",
         "data": {
-          "scan_interval": "Polling interval (seconds)"
+          "scan_interval": "Polling interval (seconds)",
+          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
         }
       }
     }
