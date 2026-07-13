@@ -12,6 +12,8 @@ from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType
 
 from custom_components.sungrow.const import (
+    BATTERY_DEVICE_POINTS,
+    COMM_MODULE_POINTS,
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
@@ -22,6 +24,10 @@ from custom_components.sungrow.const import (
     CONF_TRANSPORT,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    ESS_OPERATING_STATUS_POINT,
+    INVERTER_DIAGNOSTIC_POINTS,
+    INVERTER_OPERATING_STATUS_POINT,
+    METER_DEVICE_POINTS,
     TRANSPORT_MODBUS_ONLY,
 )
 from custom_components.sungrow.coordinator import (
@@ -970,3 +976,245 @@ async def test_capture_daily_yield_diagnostic_noop_without_client(hass: HomeAssi
     assert coordinator._modbus_client is None
     await coordinator._async_capture_daily_yield_diagnostic()
     assert coordinator.daily_yield_diagnostic is None
+
+
+# ---------------------------------------------------------------------------
+# Bug condition exploration (hybrid MPPT / string sensors) — Property 1
+#
+# These tests encode the EXPECTED (fixed) behavior for SH-family hybrids reported
+# as DeviceType.ENERGY_STORAGE_SYSTEM. They MUST FAIL on the unfixed code: the ESS
+# branch currently reuses INVERTER_DIAGNOSTIC_POINTS, which requests the string-
+# inverter MPPT IDs ("5"-"10") and never the hybrid 13xxx MPPT IDs. Failure here
+# confirms the bug exists (root cause #1). Validates: Requirements 2.1
+# ---------------------------------------------------------------------------
+
+# The hybrid MPPT point IDs an ESS/hybrid must request (MPPT1-4 voltage/current).
+HYBRID_MPPT_POINT_IDS = {
+    "13001",
+    "13002",
+    "13105",
+    "13106",
+    "13107",
+    "13108",
+    "13109",
+    "13110",
+}
+# The string-inverter MPPT IDs that must NOT be requested for an ESS (they share the
+# mpptN_* codes with the 13xxx IDs, so requesting both collides in the per-device merge).
+STRING_INVERTER_MPPT_POINT_IDS = {"5", "6", "7", "8", "9", "10"}
+
+
+async def test_ess_requests_hybrid_mppt_points(hass: HomeAssistant):
+    """Bug condition (Property 1): an ESS with device sensors ON requests the hybrid MPPT IDs.
+
+    Mirrors test_ess_operating_status_avoids_point29_collision. On the UNFIXED code the ESS
+    branch reuses INVERTER_DIAGNOSTIC_POINTS and never requests the 13xxx MPPT IDs, so this
+    subset assertion FAILS — which is the intended proof that the bug exists.
+
+    Validates: Requirements 2.1
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "ps_key": "12345_14_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    # Assertion A: the eight hybrid MPPT IDs are requested for the ESS device.
+    missing = HYBRID_MPPT_POINT_IDS - set(extra)
+    assert not missing, f"ESS extra_measure_points is missing hybrid MPPT IDs: {sorted(missing)}"
+
+
+async def test_ess_drops_string_inverter_mppt_points(hass: HomeAssistant):
+    """Bug condition (Property 1 / Property 2 final clause): ESS omits the string-inverter MPPT IDs.
+
+    Because "5"-"10" and the 13xxx IDs both map to the mpptN_* codes, requesting both for a single
+    ESS device would silently overwrite one another in the per-device merge. On the UNFIXED code
+    "5"-"10" are present, so this assertion FAILS — the collision source is confirmed.
+
+    Validates: Requirements 2.1
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "ps_key": "12345_14_1_1"}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    # Assertion B: the string-inverter MPPT IDs are absent from the ESS extra.
+    present = STRING_INVERTER_MPPT_POINT_IDS & set(extra)
+    assert not present, f"ESS extra_measure_points still contains string-inverter MPPT IDs: {sorted(present)}"
+
+
+# ---------------------------------------------------------------------------
+# Preservation (hybrid MPPT / string sensors) — Property 2
+#
+# These tests capture the BASELINE behavior of every non-buggy device/config path
+# so the upcoming fix can be proven to leave it byte-for-byte identical. They are
+# written observation-first and MUST PASS on the unfixed code. The ESS-with-sensors-ON
+# path is the buggy combination and is therefore NOT asserted for full equality here;
+# only its operating-status handling (13146 requested, 29 dropped) is preserved.
+# Validates: Requirements 3.1, 3.2, 3.3, 3.4
+# ---------------------------------------------------------------------------
+
+# Sentinel: the coordinator skips the per-device fetch entirely (no diagnostic set to
+# request), so async_get_device_realtime is never awaited for that combination.
+_DEVICE_REALTIME_NOT_CALLED = object()
+
+# The string-inverter per-string DC voltage/current IDs that INVERTER must keep requesting.
+_STRING_INVERTER_STRING_POINT_IDS = {
+    "96",
+    "70",
+    "97",
+    "71",
+    "98",
+    "72",
+    "99",
+    "73",
+    "100",
+    "74",
+    "101",
+    "75",
+    "102",
+    "76",
+    "103",
+    "77",
+}
+
+
+async def _capture_device_extra(hass, device_type, *, enable_device_sensors):
+    """Run a single-device update and return the captured extra_measure_points.
+
+    Mirrors test_ess_operating_status_avoids_point29_collision: a MagicMock plants
+    service captures the extra_measure_points kwarg passed to async_get_device_realtime.
+    Returns _DEVICE_REALTIME_NOT_CALLED when the coordinator skips the per-device fetch.
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "dev-1", "device_type": device_type, "ps_key": "12345_1_1_1"}]
+    options = {CONF_ENABLE_DEVICE_SENSORS: True} if enable_device_sensors else {}
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(options), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    if plants.async_get_device_realtime.await_args is None:
+        return _DEVICE_REALTIME_NOT_CALLED
+    return plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+
+
+def _golden_preservation_cases():
+    """Golden (device_type, enable_device_sensors) -> expected extra for every non-buggy path.
+
+    Composed from the const point maps exactly as the coordinator selects them, which is the
+    unchanged baseline for these paths. ESS + sensors ON is intentionally excluded — it is the
+    buggy combination the fix will change and is covered by dedicated preservation assertions.
+    """
+    return [
+        # String inverter: full diagnostic set (MPPT "5"-"10" + per-string + grid health).
+        pytest.param(DeviceType.INVERTER, True, dict(INVERTER_DIAGNOSTIC_POINTS), id="inverter-on"),
+        # Sensors off: only the single operating-status point, no heavy diagnostic set.
+        pytest.param(DeviceType.INVERTER, False, dict(INVERTER_OPERATING_STATUS_POINT), id="inverter-off"),
+        pytest.param(DeviceType.ENERGY_STORAGE_SYSTEM, False, dict(ESS_OPERATING_STATUS_POINT), id="ess-off"),
+        # Battery / meter / comm each request their existing point set unchanged.
+        pytest.param(DeviceType.BATTERY, True, dict(BATTERY_DEVICE_POINTS), id="battery-on"),
+        pytest.param(DeviceType.METER, True, dict(METER_DEVICE_POINTS), id="meter-on"),
+        pytest.param(DeviceType.COMMUNICATION_MODULE, True, dict(COMM_MODULE_POINTS), id="comm-on"),
+        # Unmapped type with sensors on: no diagnostic set -> extra collapses to None.
+        pytest.param(999, True, None, id="unmapped-on"),
+        # Sensors off + no operating-status point -> the per-device fetch is skipped entirely.
+        pytest.param(DeviceType.BATTERY, False, _DEVICE_REALTIME_NOT_CALLED, id="battery-off"),
+        pytest.param(DeviceType.METER, False, _DEVICE_REALTIME_NOT_CALLED, id="meter-off"),
+        pytest.param(DeviceType.COMMUNICATION_MODULE, False, _DEVICE_REALTIME_NOT_CALLED, id="comm-off"),
+        pytest.param(999, False, _DEVICE_REALTIME_NOT_CALLED, id="unmapped-off"),
+    ]
+
+
+@pytest.mark.parametrize(("device_type", "enable_device_sensors", "expected"), _golden_preservation_cases())
+async def test_non_buggy_device_config_extra_measure_points_preserved(
+    hass: HomeAssistant, device_type, enable_device_sensors, expected
+):
+    """Property 2: every non-buggy device/config requests exactly its golden point set.
+
+    Generated over device type x enable_device_sensors; for each combination the captured
+    extra_measure_points must equal the observed baseline. Passing on the unfixed code fixes
+    the behavior the upcoming fix must preserve byte-for-byte.
+
+    Validates: Requirements 3.1, 3.3, 3.4
+    """
+    captured = await _capture_device_extra(hass, device_type, enable_device_sensors=enable_device_sensors)
+
+    assert captured == expected
+
+
+async def test_inverter_mppt_and_string_points_preserved(hass: HomeAssistant):
+    """Property 2: INVERTER + sensors on keeps its MPPT ("5"-"10") and per-string IDs.
+
+    Validates: Requirement 3.1
+    """
+    extra = await _capture_device_extra(hass, DeviceType.INVERTER, enable_device_sensors=True)
+
+    assert set(extra) >= STRING_INVERTER_MPPT_POINT_IDS  # "5"-"10" still requested
+    assert set(extra) >= _STRING_INVERTER_STRING_POINT_IDS  # "96"/"70" .. "103"/"77" still requested
+
+
+async def test_ess_operating_status_handling_preserved(hass: HomeAssistant):
+    """Property 2: ESS + sensors on still requests 13146 for operating status and drops 29.
+
+    This is the one aspect of the (otherwise buggy) ESS-with-sensors-on path that the fix
+    must preserve exactly: the 13146/29 operating-status collision handling (#182).
+
+    Validates: Requirement 3.2
+    """
+    extra = await _capture_device_extra(hass, DeviceType.ENERGY_STORAGE_SYSTEM, enable_device_sensors=True)
+
+    assert extra["13146"] == "operating_status"
+    assert "29" not in extra
+
+
+# ---------------------------------------------------------------------------
+# Fix Checking / Preservation Checking (hybrid MPPT / string sensors)
+#
+# FOR ALL X WHERE isBugCondition(X): the fixed ESS branch requests the 13xxx IDs and
+# drops "5"-"10" (covered above by test_ess_requests_hybrid_mppt_points /
+# test_ess_drops_string_inverter_mppt_points, which now PASS on the fixed code).
+#
+# Preservation Checking (Property 2 final clause): for an ESS device the requested IDs
+# must never contain both a "5"-"10" ID and its 13xxx counterpart, so no two point IDs
+# map to the same mpptN_* code and silently overwrite each other in the per-device merge.
+# Validates: Requirements 2.1, 3.1, 3.2
+# ---------------------------------------------------------------------------
+
+
+async def test_ess_mppt_ids_have_no_code_collision(hass: HomeAssistant):
+    """Property 2: no two requested ESS IDs map to the same mpptN_* code.
+
+    Because "5" and "13001" both resolve to mppt1_voltage (and so on), requesting both
+    for one ESS device would let one silently overwrite the other in the per-device merge.
+    The fix swaps "5"-"10" for the 13xxx IDs, so each mpptN_* code is requested exactly once.
+
+    Validates: Requirements 2.1, 3.1, 3.2
+    """
+    extra = await _capture_device_extra(hass, DeviceType.ENERGY_STORAGE_SYSTEM, enable_device_sensors=True)
+
+    # Group the requested point IDs by the mpptN_* code they resolve to.
+    ids_by_mppt_code: dict[str, list[str]] = {}
+    for pid, code in extra.items():
+        if code.startswith("mppt"):
+            ids_by_mppt_code.setdefault(code, []).append(pid)
+
+    collisions = {code: pids for code, pids in ids_by_mppt_code.items() if len(pids) > 1}
+    assert not collisions, f"mpptN_* codes requested via more than one point ID for ESS: {collisions}"
+
+    # And concretely: the string-inverter and hybrid MPPT ID ranges are disjoint in the request.
+    requested = set(extra)
+    assert not (STRING_INVERTER_MPPT_POINT_IDS & requested & HYBRID_MPPT_POINT_IDS)
+    assert not (STRING_INVERTER_MPPT_POINT_IDS & requested)  # "5"-"10" fully dropped for ESS

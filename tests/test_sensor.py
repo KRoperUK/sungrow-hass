@@ -899,3 +899,106 @@ async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):
     assert not any(isinstance(e, SungrowDeviceSensor) for e in added)
     # Plant sensors are still created.
     assert any(isinstance(e, SungrowSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# Bug condition exploration (hybrid MPPT / string sensors) — Property 1
+#
+# The hybrid MPPT codes reuse the string-inverter mpptN_* code names. mppt1-3 are
+# already in _DIAGNOSTIC_CODES via INVERTER_DIAGNOSTIC_POINTS ("5"-"10"), but mppt4_*
+# are NEW code names not present in that map, so on the UNFIXED code they are NOT in
+# _DIAGNOSTIC_CODES and this test FAILS — confirming the classification gap.
+# Validates: Requirements 2.2
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("code", ["mppt4_voltage", "mppt4_current"])
+def test_hybrid_mppt4_codes_are_diagnostic(code):
+    """Hybrid MPPT4 voltage/current codes must be classified diagnostic (Property 1).
+
+    On the UNFIXED code _DIAGNOSTIC_CODES is derived only from INVERTER_DIAGNOSTIC_POINTS
+    (mppt1-3) plus battery/comm codes, so mppt4_voltage/mppt4_current are absent and this
+    assertion FAILS — which is the intended proof that hybrid MPPT4 sensors would land in
+    the main sensors instead of the Diagnostic section.
+
+    Validates: Requirements 2.2
+    """
+    from custom_components.sungrow.sensor import _DIAGNOSTIC_CODES
+
+    assert code in _DIAGNOSTIC_CODES, f"{code} is not classified as diagnostic (not in _DIAGNOSTIC_CODES)"
+
+
+# ---------------------------------------------------------------------------
+# Preservation (hybrid MPPT / string sensors) — Property 2
+#
+# The upcoming fix unions ESS_MPPT_DIAGNOSTIC_POINTS.values() into _DIAGNOSTIC_CODES.
+# The union is additive, so every existing string-inverter diagnostic code must remain
+# classified as diagnostic afterwards. This baseline check passes on the unfixed code.
+# Validates: Requirement 3.5
+# ---------------------------------------------------------------------------
+
+
+def test_inverter_diagnostic_codes_stay_diagnostic():
+    """Every existing INVERTER_DIAGNOSTIC_POINTS code remains a member of _DIAGNOSTIC_CODES.
+
+    Guards the diagnostic classification of string-inverter MPPT/string/grid-health codes
+    against regression when the hybrid MPPT codes are later unioned in.
+
+    Validates: Requirement 3.5
+    """
+    from custom_components.sungrow.const import INVERTER_DIAGNOSTIC_POINTS
+    from custom_components.sungrow.sensor import _DIAGNOSTIC_CODES
+
+    missing = set(INVERTER_DIAGNOSTIC_POINTS.values()) - _DIAGNOSTIC_CODES
+    assert not missing, f"string-inverter diagnostic codes dropped from _DIAGNOSTIC_CODES: {sorted(missing)}"
+
+
+# ---------------------------------------------------------------------------
+# Fix Checking (hybrid MPPT / string sensors) — Property 1, Requirement 2.3
+#
+# Integration-style: an ESS device whose realtime response reports only MPPT1/MPPT2
+# produces exactly those diagnostic sensors; MPPT3/MPPT4 are silently skipped (no
+# sensor created), consistent with the string-inverter builder behavior.
+# ---------------------------------------------------------------------------
+
+
+async def test_ess_partial_mppt_only_reported_sensors_created(hass: HomeAssistant):
+    """Property 1 (Req 2.3): only the MPPTs the ESS actually reports become sensors.
+
+    The per-device builder skips points a model does not report, so a hybrid with only
+    MPPT1/MPPT2 wired produces mppt1/mppt2 voltage+current sensors and no mppt3/mppt4.
+    Mirrors test_battery_device_sensor_categories.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = True
+    coordinator.devices = [{"uuid": "ess-1", "device_name": "Hybrid1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM}]
+    # The cloud returns only MPPT1/MPPT2 for this hybrid; MPPT3/MPPT4 are unreported.
+    coordinator.device_data = {
+        "ess-1": {
+            "mppt1_voltage": {"id": "13001", "code": "mppt1_voltage", "value": "410.5", "unit": "V"},
+            "mppt1_current": {"id": "13002", "code": "mppt1_current", "value": "8.1", "unit": "A"},
+            "mppt2_voltage": {"id": "13105", "code": "mppt2_voltage", "value": "395.2", "unit": "V"},
+            "mppt2_current": {"id": "13106", "code": "mppt2_current", "value": "7.4", "unit": "A"},
+        }
+    }
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator], control=MagicMock(), devices={"12345": coordinator.devices}
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    by_code = {e.point_code: e for e in added if isinstance(e, SungrowDeviceSensor)}
+    # Only the reported MPPT1/MPPT2 sensors exist.
+    assert set(by_code) == {"mppt1_voltage", "mppt1_current", "mppt2_voltage", "mppt2_current"}
+    # MPPT3/MPPT4 are silently skipped (never reported -> no sensor).
+    for code in ("mppt3_voltage", "mppt3_current", "mppt4_voltage", "mppt4_current"):
+        assert code not in by_code
+    # The reported MPPT sensors land in the Diagnostic section with the right classes.
+    assert by_code["mppt1_voltage"].entity_category == EntityCategory.DIAGNOSTIC
+    assert by_code["mppt1_voltage"].device_class == SensorDeviceClass.VOLTAGE
+    assert by_code["mppt2_current"].entity_category == EntityCategory.DIAGNOSTIC
+    assert by_code["mppt2_current"].device_class == SensorDeviceClass.CURRENT

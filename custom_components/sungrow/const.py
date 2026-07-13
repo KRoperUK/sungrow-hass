@@ -1,5 +1,7 @@
 """Constants for the Sungrow iSolarCloud integration."""
 
+from datetime import timedelta
+
 from pysolarcloud.plants import DeviceType
 
 DOMAIN = "sungrow"
@@ -32,11 +34,30 @@ DEFAULT_MODBUS_UNIT = 1
 # discovery of a WiNet-S (#159). Such an entry carries no cloud credentials; its
 # realtime data comes entirely from local Modbus.
 CONF_TRANSPORT = "transport"
+TRANSPORT_CLOUD_ONLY = "cloud_only"
+TRANSPORT_CLOUD_MODBUS = "cloud_modbus"
 TRANSPORT_MODBUS_ONLY = "modbus_only"
 # Discovered WiNet-S identity stored on a Modbus-only entry.
 CONF_MODEL = "model"
 CONF_SERIAL = "serial"
 DEFAULT_MODBUS_SCAN_INTERVAL = 30
+
+# Backfill historical statistics (see specs/backfill-historical-statistics).
+# The History_Window defaults to 30 days back from now, is user-configurable via the
+# CONF_BACKFILL_DAYS option, and is clamped to [1, 365] days so a run can never request
+# an unbounded range.
+CONF_BACKFILL_DAYS = "backfill_days"
+DEFAULT_BACKFILL_DAYS = 30
+MAX_BACKFILL_DAYS = 365
+# The historical endpoint returns ~5-minute cadence rows; request that interval and
+# split the window into 3-hour Time_Chunks to stay within the per-call query window.
+BACKFILL_INTERVAL = timedelta(minutes=5)
+BACKFILL_CHUNK_WINDOW = timedelta(hours=3)
+# At most 50 Backfill_Points per Historical_Data_API call (endpoint per-call point cap).
+MAX_POINTS_PER_CALL = 50
+# Minimum seconds between historical calls (throttle) and the transient-error retry cap.
+BACKFILL_MIN_CALL_INTERVAL = 1.0
+BACKFILL_MAX_RETRIES = 3
 
 GATEWAYS = {
     "Europe": "https://gateway.isolarcloud.eu",
@@ -129,6 +150,22 @@ INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
     "76": "string_7_current",
     "103": "string_8_voltage",
     "77": "string_8_current",
+}
+
+# SH-family hybrids/ESS report MPPT voltage/current on a separate point-ID range
+# than string inverters (#189 follow-up). Reuse the same mpptN_* code names so the
+# existing classification/naming/icon path treats them identically; only the point
+# IDs differ. These are already in the measure-point catalog (units V/A), so they
+# classify by unit automatically.
+ESS_MPPT_DIAGNOSTIC_POINTS: dict[str, str] = {
+    "13001": "mppt1_voltage",
+    "13002": "mppt1_current",
+    "13105": "mppt2_voltage",
+    "13106": "mppt2_current",
+    "13107": "mppt3_voltage",
+    "13108": "mppt3_current",
+    "13109": "mppt4_voltage",
+    "13110": "mppt4_current",
 }
 
 # Battery/ESS device-level measuring points surfaced as sensors for hybrid users (#154),

@@ -18,6 +18,7 @@ from .const import (
     COMM_MODULE_POINTS,
     CONF_GATEWAY,
     DEFAULT_CONSOLE_URL,
+    ESS_MPPT_DIAGNOSTIC_POINTS,
     GATEWAY_CONSOLE_URLS,
     INVERTER_DIAGNOSTIC_POINTS,
 )
@@ -40,7 +41,10 @@ _LOGGER = logging.getLogger(__name__)
 # Inverter + battery-health point codes get the DIAGNOSTIC entity category so they land
 # in the device page's Diagnostic section instead of cluttering the main sensors (#149/#154).
 _DIAGNOSTIC_CODES = (
-    frozenset(INVERTER_DIAGNOSTIC_POINTS.values()) | BATTERY_DIAGNOSTIC_CODES | frozenset(COMM_MODULE_POINTS.values())
+    frozenset(INVERTER_DIAGNOSTIC_POINTS.values())
+    | frozenset(ESS_MPPT_DIAGNOSTIC_POINTS.values())
+    | BATTERY_DIAGNOSTIC_CODES
+    | frozenset(COMM_MODULE_POINTS.values())
 )
 
 # Sentinel unit: tariff sensors take their unit from the plant's currency at runtime.

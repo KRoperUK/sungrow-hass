@@ -5,16 +5,39 @@
         "title": "Conectar con iSolarCloud",
         "description": "Introduzca sus credenciales de la API de iSolarCloud. Puede encontrarlas aquí: [iSolarCloud]({url})\n\nDespués de enviarlas, se crea el concentrador y Home Assistant le pedirá que lo autorice en su navegador.",
         "data": {
-          "gateway": "Región de la pasarela",
+          "transport": "Transport mode"
+        }
+      },
+      "cloud_credentials": {
+        "title": "Connect to iSolarCloud",
+        "description": "Enter your iSolarCloud API credentials. You can find them here: [iSolarCloud]({url})\n\nAfter you submit, the hub is created and Home Assistant will prompt you to authorize it in your browser.",
+        "data": {
+          "gateway": "Gateway Region",
           "app_key": "AppKey",
           "app_secret": "App Secret",
           "app_id": "App ID",
-          "redirect_uri": "URI de redirección"
+          "redirect_uri": "Redirect URI"
         },
         "data_description": {
-          "app_key": "AppKey de la plataforma para desarrolladores de iSolarCloud.",
-          "app_secret": "AppSecret de la plataforma para desarrolladores de iSolarCloud.",
-          "app_id": "App ID de la plataforma para desarrolladores de iSolarCloud. Para encontrarlo, vaya a su aplicación y busque «id» dentro de la URL, de esta forma: {app_id_url}."
+          "app_key": "AppKey from iSolarCloud Developer Platform.",
+          "app_secret": "AppSecret from iSolarCloud Developer Platform.",
+          "app_id": "App ID from iSolarCloud Developer Platform. To find this, go to your application and look for 'id' within the URL like so: {app_id_url}."
+        }
+      },
+      "modbus_host": {
+        "title": "Modbus Host",
+        "description": "Enter the IP address or hostname of your WiNet-S dongle for local Modbus communication.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname"
+        }
+      },
+      "local_setup": {
+        "title": "Local Modbus Setup",
+        "description": "Enter the connection details for your local WiNet-S dongle. No cloud account is required.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname",
+          "serial": "Inverter serial number",
+          "model": "Inverter model"
         }
       },
       "auth_callback": {
@@ -38,6 +61,13 @@
           "redirect_uri": "URI de redirección"
         }
       },
+      "reconfigure_modbus_host": {
+        "title": "Update Modbus Host",
+        "description": "Update the WiNet-S IP address for this hybrid (Cloud + Modbus) entry.",
+        "data": {
+          "modbus_host": "WiNet-S IP / hostname"
+        }
+      },
       "zeroconf_confirm": {
         "title": "Configurar inversor Sungrow local",
         "description": "Se ha descubierto un inversor Sungrow **{model}** en su red en **{host}** (WiNet-S). Configúrelo como una **entrada local separada** que lee el inversor a través de Modbus: rápido, sin límites de consumo y capaz de funcionar sin conexión, sin necesidad de cuenta de iSolarCloud. Si también tiene una entrada en la nube para el mismo inversor, ambas permanecen independientes (el dispositivo local se vincula bajo la planta en la nube cuando los números de serie coinciden)."
@@ -55,18 +85,19 @@
     },
     "error": {
       "cannot_connect": "No se pudo conectar",
+      "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
       "invalid_auth": "Autenticación no válida",
       "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
       "unknown": "Error inesperado"
     },
     "abort": {
       "already_configured": "El dispositivo ya está configurado",
+      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible.",
       "library_missing": "La biblioteca pysolarcloud no está instalada. Reinicie Home Assistant para que se instalen las dependencias de la integración y vuelva a intentarlo.",
       "missing_code": "No se recibió el código de autorización. Vuelva a intentarlo.",
       "reauth_successful": "La reautenticación se realizó correctamente",
       "reconfigure_successful": "La reconfiguración se realizó correctamente",
-      "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original.",
-      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible."
+      "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original."
     }
   },
   "options": {
@@ -77,7 +108,8 @@
         "data": {
           "scan_interval": "Intervalo de sondeo (segundos)",
           "extra_measure_points": "Puntos de medición adicionales (point_id=code, separados por comas)",
-          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)"
+          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)",
+          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
         }
       },
       "modbus_options": {
@@ -98,6 +130,10 @@
     "rate_limited": {
       "title": "Límite de peticiones de la API de iSolarCloud alcanzado",
       "description": "iSolarCloud está rechazando las peticiones de **{plant}** porque se alcanzó el límite de llamadas a la API (E998/E999). Aumente el intervalo de sondeo en las opciones de la integración para hacer menos llamadas; se recupera cuando se restablece la cuota."
+    },
+    "backfill_partial": {
+      "title": "El relleno histórico terminó con huecos",
+      "description": "El relleno de estadísticas históricas para **{plant}** terminó, pero no se pudieron importar {failed_chunks} rango(s) de tiempo, por lo que los paneles de Historial y Energía pueden tener huecos en ese periodo. Vuelva a ejecutar **Herramientas para desarrolladores → Acciones → Sungrow: Rellenar estadísticas históricas** para completar los huecos; las horas correctas ya están importadas y volver a ejecutarlo solo las sobrescribe de forma limpia."
     }
   },
   "entity": {
@@ -168,6 +204,22 @@
   "exceptions": {
     "dispatch_write_failed": {
       "message": "No se pudo actualizar {param} en el inversor: {error}"
+    }
+  },
+  "services": {
+    "backfill": {
+      "name": "Rellenar estadísticas históricas",
+      "description": "Importa datos históricos de iSolarCloud a las estadísticas de largo plazo de Home Assistant para que los paneles de Historial y Energía se rellenen de inmediato.",
+      "fields": {
+        "config_entry": {
+          "name": "Integración",
+          "description": "La entrada de integración de Sungrow (nube) que se rellenará. Déjelo vacío para rellenar todas las entradas de nube cargadas."
+        },
+        "start_date": {
+          "name": "Fecha de inicio",
+          "description": "Fecha más temprana opcional desde la que importar (interpretada como medianoche UTC). Por defecto usa la ventana de relleno configurada."
+        }
+      }
     }
   }
 }

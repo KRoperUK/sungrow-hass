@@ -34,6 +34,8 @@ from .const import (
     GATEWAYS,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
+    TRANSPORT_CLOUD_MODBUS,
+    TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
 
@@ -73,7 +75,7 @@ def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | No
 class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Sungrow iSolarCloud."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -91,6 +93,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Zeroconf-discovered WiNet-S local Modbus host, carried into the confirm step
         # that creates the cloud-free Modbus-only entry (#159).
         self._discovered_modbus_host: str | None = None
+        # Transport mode selected in the transport step (#216).
+        self._transport: str | None = None
 
     @staticmethod
     @callback
@@ -118,12 +122,14 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         authorization and updates the entry in place (no delete & re-add).
         """
         entry = self._get_reconfigure_entry()
+        transport = entry.data.get(CONF_TRANSPORT)
         # A cloud-free Modbus-only entry has no credentials to change; reconfigure just
         # updates the WiNet-S host (#159), not the cloud app key/secret/gateway.
-        if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+        if transport == TRANSPORT_MODBUS_ONLY:
             return await self.async_step_reconfigure_modbus(user_input)
         self._reauth_entry = entry
         self._is_reconfigure = True
+        self._transport = transport
 
         if user_input is not None:
             # Preserve the App ID (identity) and drop stale tokens — we re-authorize.
@@ -131,6 +137,9 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.init_info.pop("tokens", None)
             # Start a fresh Auth client for the (possibly changed) credentials.
             self.auth_client = None
+            # For cloud_modbus: collect an updated modbus host before re-authorizing.
+            if transport == TRANSPORT_CLOUD_MODBUS:
+                return await self.async_step_reconfigure_modbus_host()
             return await self.async_step_auth()
 
         current = entry.data
@@ -146,6 +155,32 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, "")): str,
                 }
             ),
+        )
+
+    async def async_step_reconfigure_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Collect updated Modbus host during reconfigure of a cloud_modbus entry (#216)."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
+            from .helpers import async_test_modbus_host
+
+            if await async_test_modbus_host(host):
+                # Store host in init_info so the auth step includes it in the updated entry.
+                self.init_info[CONF_MODBUS_HOST] = host
+                return await self.async_step_auth()
+            errors["base"] = "host_unreachable"
+
+        current_host = entry.data.get(CONF_MODBUS_HOST, "")
+        return self.async_show_form(
+            step_id="reconfigure_modbus_host",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_MODBUS_HOST, default=current_host): str,
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_reconfigure_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -241,25 +276,55 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the initial step."""
-        # Do not log user_input — it contains the app secret.
-        _LOGGER.debug("async_step_user called (user_input provided: %s)", user_input is not None)
+        """Present the transport-mode selector as the first step (#216)."""
+        if user_input is not None:
+            transport = user_input[CONF_TRANSPORT]
+            self._transport = transport
+            if transport == TRANSPORT_MODBUS_ONLY:
+                return await self.async_step_local_setup()
+            # cloud_only or cloud_modbus → cloud credentials
+            return await self.async_step_cloud_credentials()
+
+        from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig
+
+        transport_options = [
+            SelectOptionDict(value=TRANSPORT_CLOUD_ONLY, label="Cloud Only"),
+            SelectOptionDict(value=TRANSPORT_CLOUD_MODBUS, label="Cloud + Modbus"),
+            SelectOptionDict(value=TRANSPORT_MODBUS_ONLY, label="Modbus Only"),
+        ]
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_TRANSPORT, default=TRANSPORT_CLOUD_ONLY): SelectSelector(
+                        SelectSelectorConfig(options=transport_options, translation_key="transport")
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_cloud_credentials(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Collect iSolarCloud API credentials (formerly async_step_user)."""
+        _LOGGER.debug("async_step_cloud_credentials called (user_input provided: %s)", user_input is not None)
         errors: dict[str, str] = {}
 
         if user_input is not None:
             self.init_info = user_input
             await self.async_set_unique_id(str(user_input[CONF_APP_ID]))
             self._abort_if_unique_id_configured()
+
+            # If hybrid mode, collect the Modbus host next.
+            if self._transport == TRANSPORT_CLOUD_MODBUS:
+                return await self.async_step_modbus_host()
+
             # Create the hub immediately, before authorizing. Setting up this
             # token-less entry runs async_setup — which registers the OAuth
             # callback view — and then raises ConfigEntryAuthFailed, so Home
-            # Assistant starts a reauth flow to finish authorization. This
-            # guarantees the callback endpoint exists before the OAuth redirect
-            # (fixing the first-install 404), and lets the user complete auth
-            # automatically via the redirect or manually by pasting the code/URL.
+            # Assistant starts a reauth flow to finish authorization.
+            data = {**user_input, CONF_TRANSPORT: self._transport or TRANSPORT_CLOUD_ONLY}
             return self.async_create_entry(
                 title=f"Sungrow {user_input[CONF_APP_ID]}",
-                data=user_input,
+                data=data,
             )
 
         # Attempt to automatically detect the callback URL
@@ -270,9 +335,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         default_redirect = f"{base_url}/api/sungrow_hass/callback"
 
-        self.context["title_placeholders"] = {
-            "app_id": user_input.get(CONF_APP_ID, "YourAppID") if user_input else "YourAppID"
-        }
+        self.context["title_placeholders"] = {"app_id": "YourAppID"}
 
         description_placeholders = {
             "url": "https://developer-api.isolarcloud.com/#/application",
@@ -280,7 +343,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
         return self.async_show_form(
-            step_id="user",
+            step_id="cloud_credentials",
             description_placeholders=description_placeholders,
             data_schema=vol.Schema(
                 {
@@ -289,6 +352,77 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_APP_ID, default=""): str,
                     vol.Required(CONF_GATEWAY, default="Europe"): vol.In(list(GATEWAYS.keys())),
                     vol.Required(CONF_REDIRECT_URI, default=default_redirect): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Collect the WiNet-S Modbus host for hybrid (Cloud + Modbus) mode (#216)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
+            from .helpers import async_test_modbus_host
+
+            if await async_test_modbus_host(host):
+                # Create the tokenless entry with the modbus host included.
+                data = {
+                    **self.init_info,
+                    CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
+                    CONF_MODBUS_HOST: host,
+                }
+                return self.async_create_entry(
+                    title=f"Sungrow {self.init_info[CONF_APP_ID]}",
+                    data=data,
+                )
+            errors["base"] = "host_unreachable"
+
+        # Pre-fill from zeroconf discovery if available.
+        default_host = self._discovered_modbus_host or ""
+        return self.async_show_form(
+            step_id="modbus_host",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_MODBUS_HOST, default=default_host): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_local_setup(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Collect host, serial, and model for a fully local Modbus Only entry (#216)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
+            serial = (user_input.get(CONF_SERIAL) or "").strip()
+            model = (user_input.get(CONF_MODEL) or "Inverter").strip()
+
+            from .helpers import async_test_modbus_host
+
+            if await async_test_modbus_host(host):
+                await self.async_set_unique_id(f"modbus_{serial}")
+                self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+                return self.async_create_entry(
+                    title=f"Sungrow {model} (local)",
+                    data={
+                        CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+                        CONF_SERIAL: serial,
+                        CONF_MODEL: model,
+                        CONF_MODBUS_HOST: host,
+                    },
+                    options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
+                )
+            errors["base"] = "host_unreachable"
+
+        return self.async_show_form(
+            step_id="local_setup",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_MODBUS_HOST): str,
+                    vol.Required(CONF_SERIAL): str,
+                    vol.Required(CONF_MODEL, default="Inverter"): str,
                 }
             ),
             errors=errors,
@@ -641,10 +775,13 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the integration options."""
+        transport = self.config_entry.data.get(CONF_TRANSPORT)
+
         # A cloud-free Modbus-only entry has none of the cloud settings (API quota,
         # extra measure points, per-device fetch); show only the local poll interval (#159).
-        if self.config_entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+        if transport == TRANSPORT_MODBUS_ONLY:
             return await self.async_step_modbus_options(user_input)
+
         errors: dict[str, str] = {}
         if user_input is not None:
             # Normalise the free-text mapping into a dict before storing.
@@ -654,32 +791,63 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = "invalid_extra_measure_points"
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
+                modbus_host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
                 data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
-                # Cloud options never carry Modbus — local is a separate entry.
                 data.pop(CONF_MODBUS_HOST, None)
                 data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
-                return self.async_create_entry(title="", data=data)
+
+                # Transport switching: cloud_only + host → cloud_modbus
+                if transport == TRANSPORT_CLOUD_ONLY and modbus_host:
+                    from .helpers import async_test_modbus_host
+
+                    if await async_test_modbus_host(modbus_host):
+                        new_data = {
+                            **self.config_entry.data,
+                            CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
+                            CONF_MODBUS_HOST: modbus_host,
+                        }
+                        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+                    else:
+                        errors["base"] = "host_unreachable"
+
+                # Transport switching: cloud_modbus + cleared host → cloud_only
+                elif transport == TRANSPORT_CLOUD_MODBUS and not modbus_host:
+                    new_data = {k: v for k, v in self.config_entry.data.items() if k != CONF_MODBUS_HOST}
+                    new_data[CONF_TRANSPORT] = TRANSPORT_CLOUD_ONLY
+                    self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+
+                if not errors:
+                    return self.async_create_entry(title="", data=data)
 
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         current_extras = self.config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {})
         current_device_sensors = self.config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False)
         extras_str = ",".join(f"{pid}={code}" for pid, code in current_extras.items())
+
+        schema_fields: dict[Any, Any] = {
+            vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+            ),
+            vol.Optional(
+                CONF_EXTRA_MEASURE_POINTS,
+                default=extras_str,
+                description={"suggested_value": extras_str},
+            ): str,
+            vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
+        }
+
+        # For cloud_only: show optional modbus_host field to allow switching to hybrid.
+        # For cloud_modbus: show current host (user can clear to switch back to cloud_only).
+        if transport == TRANSPORT_CLOUD_ONLY:
+            schema_fields[vol.Optional(CONF_MODBUS_HOST, default="")] = str
+        elif transport == TRANSPORT_CLOUD_MODBUS:
+            current_host = self.config_entry.data.get(CONF_MODBUS_HOST, "")
+            schema_fields[vol.Optional(CONF_MODBUS_HOST, default=current_host)] = str
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
-                    ),
-                    vol.Optional(
-                        CONF_EXTRA_MEASURE_POINTS,
-                        default=extras_str,
-                        description={"suggested_value": extras_str},
-                    ): str,
-                    vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
             errors=errors,
         )
 
