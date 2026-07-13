@@ -40,24 +40,13 @@
       },
       "zeroconf_confirm": {
         "title": "Configurar inversor Sungrow local",
-        "description": "Se descubrió un Sungrow **{model}** en su red en **{host}** (WiNet-S). Configúrelo para leer datos directamente por Modbus local — rápido, sin límites y sin conexión, sin necesidad de una cuenta de iSolarCloud."
+        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
       },
       "reconfigure_modbus": {
         "title": "Reconfigurar inversor Sungrow local",
         "description": "Actualice la dirección IP del WiNet-S si ha cambiado en su red. Esta es una conexión Modbus local — no interviene ninguna cuenta de iSolarCloud.",
         "data": {
           "modbus_host": "Host Modbus local (IP del WiNet-S)"
-        }
-      },
-      "attach_modbus": {
-        "title": "Añadir Modbus local a su inversor Sungrow",
-        "description": "Se detectó un Sungrow **{model}** en **{host}** (WiNet-S), y ya está configurado a través de iSolarCloud (**{cloud}**). Añada Modbus local rápido a esa entrada — sus datos provendrán primero de la conexión local (Modbus preferido) y recurrirán a la nube — sin crear un dispositivo duplicado."
-      },
-      "merge_local_modbus": {
-        "title": "Use your existing local Modbus connection?",
-        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
-        "data": {
-          "merge_local": "Attach local Modbus and remove the standalone local entry"
         }
       }
     },
@@ -77,8 +66,7 @@
       "reauth_successful": "La reautenticación se realizó correctamente",
       "reconfigure_successful": "La reconfiguración se realizó correctamente",
       "wrong_account": "La cuenta autorizada no coincide con el App ID de esta integración. Use la aplicación de desarrollador original.",
-      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible.",
-      "modbus_enabled_on_cloud": "Se habilitó Modbus local en su entrada de iSolarCloud existente para este inversor."
+      "not_sungrow_device": "El dispositivo descubierto no es un inversor Sungrow compatible."
     }
   },
   "options": {
@@ -89,9 +77,7 @@
         "data": {
           "scan_interval": "Intervalo de sondeo (segundos)",
           "extra_measure_points": "Puntos de medición adicionales (point_id=code, separados por comas)",
-          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)",
-          "modbus_host": "Host Modbus local (IP del WiNet-S) — opcional; déjelo en blanco para usar solo la nube",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)"
         }
       },
       "modbus_options": {

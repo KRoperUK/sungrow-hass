@@ -40,24 +40,13 @@
       },
       "zeroconf_confirm": {
         "title": "Lokalen Sungrow-Wechselrichter einrichten",
-        "description": "Ein Sungrow **{model}** wurde in Ihrem Netzwerk unter **{host}** (WiNet-S) gefunden. Richten Sie ihn ein, um Daten direkt über lokales Modbus zu lesen — schnell, ohne Limit und offline-fähig, ohne iSolarCloud-Konto."
+        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
       },
       "reconfigure_modbus": {
         "title": "Lokalen Sungrow-Wechselrichter neu konfigurieren",
         "description": "Aktualisieren Sie die WiNet-S-IP-Adresse, falls sie sich in Ihrem Netzwerk geändert hat. Dies ist eine lokale Modbus-Verbindung — es ist kein iSolarCloud-Konto beteiligt.",
         "data": {
           "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP)"
-        }
-      },
-      "attach_modbus": {
-        "title": "Lokales Modbus zu Ihrem Sungrow-Wechselrichter hinzufügen",
-        "description": "Ein Sungrow **{model}** wurde unter **{host}** (WiNet-S) erkannt und ist bereits über iSolarCloud (**{cloud}**) eingerichtet. Fügen Sie diesem Eintrag schnelles lokales Modbus hinzu — die Daten kommen zuerst aus der lokalen Verbindung (Modbus bevorzugt) und fallen auf die Cloud zurück — ohne ein doppeltes Gerät zu erstellen."
-      },
-      "merge_local_modbus": {
-        "title": "Use your existing local Modbus connection?",
-        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
-        "data": {
-          "merge_local": "Attach local Modbus and remove the standalone local entry"
         }
       }
     },
@@ -77,8 +66,7 @@
       "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
       "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
       "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung.",
-      "not_sungrow_device": "Das gefundene Gerät ist kein unterstützter Sungrow-Wechselrichter.",
-      "modbus_enabled_on_cloud": "Lokales Modbus wurde für diesen Wechselrichter in Ihrem vorhandenen iSolarCloud-Eintrag aktiviert."
+      "not_sungrow_device": "Das gefundene Gerät ist kein unterstützter Sungrow-Wechselrichter."
     }
   },
   "options": {
@@ -89,9 +77,7 @@
         "data": {
           "scan_interval": "Abfrageintervall (Sekunden)",
           "extra_measure_points": "Zusätzliche Messpunkte (point_id=code, durch Kommata getrennt)",
-          "enable_device_sensors": "Sensoren pro Gerät erstellen (EV-Ladegeräte, Zähler, zusätzliche Batterien)",
-          "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP) — optional; für reinen Cloud-Betrieb leer lassen",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "enable_device_sensors": "Sensoren pro Gerät erstellen (EV-Ladegeräte, Zähler, zusätzliche Batterien)"
         }
       },
       "modbus_options": {

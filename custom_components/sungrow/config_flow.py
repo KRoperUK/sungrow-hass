@@ -10,7 +10,6 @@ from aiohttp import ClientError
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -92,13 +91,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Zeroconf-discovered WiNet-S local Modbus host, carried into the confirm step
         # that creates the cloud-free Modbus-only entry (#159).
         self._discovered_modbus_host: str | None = None
-        # Entry id of an existing cloud entry that already monitors the discovered
-        # inverter, when discovery offers to add local Modbus to it (hybrid, #218).
-        self._cloud_entry_id: str | None = None
-        # After OAuth succeeds, hold the cloud entry data while we offer to adopt an
-        # existing Modbus-only entry (local-first → hybrid reverse of #218).
-        self._pending_cloud_data: dict[str, Any] | None = None
-        self._modbus_only_entry_id: str | None = None
 
     @staticmethod
     @callback
@@ -198,58 +190,34 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_modbus_host = host
         self.init_info = {CONF_SERIAL: serial, CONF_MODEL: model or "Inverter"}
         self.context["title_placeholders"] = {"name": f"Sungrow {model or 'inverter'}"}
-        # If this inverter is already set up via the cloud, offer to add fast local Modbus
-        # to that entry (hybrid) rather than creating a duplicate device (#218).
-        cloud_entry = self._find_cloud_entry_for_serial(serial)
-        if cloud_entry is not None:
-            self._cloud_entry_id = cloud_entry.entry_id
-            return await self.async_step_attach_modbus()
+        # Always a standalone local entry — never mash Modbus into the cloud entry.
+        # If a cloud plant already owns this serial, setup nests the local inverter under
+        # that plant via device registry (soft link only).
         return await self.async_step_zeroconf_confirm()
 
-    def _find_cloud_entry_for_serial(self, serial: str) -> ConfigEntry | None:
-        """Return a cloud entry that already monitors this inverter serial, else None (#218).
-
-        Matches on the device-registry ``serial_number`` (set from the cloud ``device_sn``),
-        which equals the WiNet-S-advertised serial for the same physical inverter. Cloud
-        entries that already have a Modbus host are skipped — they are hybrid already.
-        """
-        registry = dr.async_get(self.hass)
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
-                continue
-            if entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST):
-                continue
-            for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
-                if device.serial_number and device.serial_number == serial:
-                    return entry
-        return None
-
-    async def async_step_attach_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Offer to enable local Modbus on the existing cloud entry for this inverter (#218).
-
-        Confirming writes the discovered host into the cloud entry's options and reloads it,
-        so the Phase 2 hybrid overlay serves Modbus-preferred values with cloud fallback —
-        one device, no duplicate.
-        """
-        cloud_entry = self.hass.config_entries.async_get_entry(self._cloud_entry_id or "")
-        if cloud_entry is None:
-            # The cloud entry vanished between steps; fall back to a standalone local entry.
-            return await self.async_step_zeroconf_confirm()
-        if user_input is not None:
-            self.hass.config_entries.async_update_entry(
-                cloud_entry,
-                options={**cloud_entry.options, CONF_MODBUS_HOST: self._discovered_modbus_host},
-            )
-            self.hass.async_create_task(self.hass.config_entries.async_reload(cloud_entry.entry_id))
-            return self.async_abort(reason="modbus_enabled_on_cloud")
-        self._set_confirm_only()
-        return self.async_show_form(
-            step_id="attach_modbus",
-            description_placeholders={
-                "model": self.init_info.get(CONF_MODEL, "Inverter"),
-                "host": self._discovered_modbus_host or "",
-                "cloud": cloud_entry.title,
+    async def async_step_import(self, user_input: dict[str, Any]) -> ConfigFlowResult:
+        """Import a Modbus-only entry (legacy hybrid split / programmatic setup)."""
+        serial = str(user_input.get(CONF_SERIAL) or "").strip()
+        host = str(user_input.get(CONF_MODBUS_HOST) or "").strip()
+        if not serial or not host:
+            return self.async_abort(reason="not_sungrow_device")
+        model = str(user_input.get(CONF_MODEL) or "Inverter")
+        await self.async_set_unique_id(f"modbus_{serial}")
+        self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+        options: dict[str, Any] = {
+            CONF_SCAN_INTERVAL: int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_MODBUS_SCAN_INTERVAL)),
+        }
+        if user_input.get(CONF_MODBUS_DEBUG_DAILY_YIELD):
+            options[CONF_MODBUS_DEBUG_DAILY_YIELD] = True
+        return self.async_create_entry(
+            title=f"Sungrow {model} (local)",
+            data={
+                CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+                CONF_SERIAL: serial,
+                CONF_MODEL: model,
+                CONF_MODBUS_HOST: host,
             },
+            options=options,
         )
 
     async def async_step_zeroconf_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -622,13 +590,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
             self._abort_if_unique_id_configured()
-            # Local-first users often already have a Modbus-only entry for the same
-            # inverter. Offer to attach that host and remove the duplicate (#218 reverse).
-            local = self._find_modbus_only_entry()
-            if local is not None:
-                self._pending_cloud_data = data
-                self._modbus_only_entry_id = local.entry_id
-                return await self.async_step_merge_local_modbus()
+            # Cloud and local stay separate: if a Modbus-only entry already exists it is
+            # left alone (soft-linked by serial at device setup, never merged).
             return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=data)
 
         except data_entry_flow.AbortFlow:
@@ -639,54 +602,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception in async_step_finish: %s", e)
             return self._finish_error_result("unknown")
-
-    def _find_modbus_only_entry(self) -> ConfigEntry | None:
-        """Return the first Modbus-only entry that still has a host, if any."""
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY:
-                continue
-            if entry.data.get(CONF_MODBUS_HOST) or entry.options.get(CONF_MODBUS_HOST):
-                return entry
-        return None
-
-    async def async_step_merge_local_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Offer to adopt an existing Modbus-only entry when finishing cloud OAuth.
-
-        Confirming creates the cloud entry with that host in options (hybrid) and removes
-        the standalone local entry so the user is not left with duplicate devices.
-        Declining creates a cloud-only entry and leaves the local entry alone.
-        """
-        local = self.hass.config_entries.async_get_entry(self._modbus_only_entry_id or "")
-        data = self._pending_cloud_data
-        if data is None:
-            return self.async_abort(reason="missing_code")
-        if local is None:
-            return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=data)
-
-        host = str(local.data.get(CONF_MODBUS_HOST) or local.options.get(CONF_MODBUS_HOST) or "")
-        if user_input is not None:
-            options: dict[str, Any] = {}
-            if user_input.get("merge_local", True) and host:
-                options[CONF_MODBUS_HOST] = host
-                # Keep the snappy local poll interval the user already chose.
-                if CONF_SCAN_INTERVAL in local.options:
-                    options[CONF_SCAN_INTERVAL] = local.options[CONF_SCAN_INTERVAL]
-                self.hass.async_create_task(self.hass.config_entries.async_remove(local.entry_id))
-            return self.async_create_entry(
-                title=f"Sungrow {self.init_info[CONF_APP_ID]}",
-                data=data,
-                options=options,
-            )
-
-        return self.async_show_form(
-            step_id="merge_local_modbus",
-            data_schema=vol.Schema({vol.Required("merge_local", default=True): bool}),
-            description_placeholders={
-                "host": host,
-                "local_title": local.title,
-                "model": str(local.data.get(CONF_MODEL) or "inverter"),
-            },
-        )
 
 
 def _parse_extra_measure_points(raw: str | None) -> dict[str, str]:
@@ -740,16 +655,14 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
                 data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
-                # Normalise the Modbus host; blank/whitespace means "cloud only".
-                data[CONF_MODBUS_HOST] = (user_input.get(CONF_MODBUS_HOST) or "").strip()
-                data[CONF_MODBUS_DEBUG_DAILY_YIELD] = bool(user_input.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False))
+                # Cloud options never carry Modbus — local is a separate entry.
+                data.pop(CONF_MODBUS_HOST, None)
+                data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
                 return self.async_create_entry(title="", data=data)
 
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         current_extras = self.config_entry.options.get(CONF_EXTRA_MEASURE_POINTS, {})
         current_device_sensors = self.config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False)
-        current_modbus_host = self.config_entry.options.get(CONF_MODBUS_HOST, "")
-        current_debug_daily = bool(self.config_entry.options.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False))
         extras_str = ",".join(f"{pid}={code}" for pid, code in current_extras.items())
         return self.async_show_form(
             step_id="init",
@@ -765,13 +678,6 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                         description={"suggested_value": extras_str},
                     ): str,
                     vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
-                    # Optional local Modbus transport (#159): the WiNet-S IP/host. Empty = cloud only.
-                    vol.Optional(
-                        CONF_MODBUS_HOST,
-                        default=current_modbus_host,
-                        description={"suggested_value": current_modbus_host},
-                    ): str,
-                    vol.Optional(CONF_MODBUS_DEBUG_DAILY_YIELD, default=current_debug_daily): bool,
                 }
             ),
             errors=errors,

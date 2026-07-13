@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.sungrow.modbus import SungrowModbusClient, SungrowModbusError, merge_realtime
+from custom_components.sungrow.modbus import SungrowModbusClient, SungrowModbusError
 from custom_components.sungrow.modbus_registers import (
     DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES,
     DAILY_YIELD_DIAG_COUNT,
@@ -162,35 +162,6 @@ async def test_read_passes_configured_unit_as_device_id():
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
         await SungrowModbusClient("10.0.0.1", unit=3).async_read_realtime()
     assert inner.read_input_registers.await_args.kwargs["device_id"] == 3
-
-
-# ---------------------------------------------------------------------------
-# merge_realtime (cloud + modbus, Modbus preferred, provenance)
-# ---------------------------------------------------------------------------
-
-
-def test_merge_prefers_modbus_and_tags_provenance():
-    """Shared codes take the Modbus value/unit; every point carries its source."""
-    cloud = {
-        "total_active_power": {"code": "total_active_power", "value": "250", "unit": "W", "id": "5031", "name": "AC"},
-        "daily_yield": {"code": "daily_yield", "value": "38.0", "unit": "kWh"},
-    }
-    modbus = {"total_active_power": {"code": "total_active_power", "value": 256, "unit": "W", "source": "modbus"}}
-    merged = merge_realtime(cloud, modbus)
-    # Modbus value wins for the shared code, and cloud metadata (id/name) is kept.
-    assert merged["total_active_power"]["value"] == 256
-    assert merged["total_active_power"]["source"] == "modbus"
-    assert merged["total_active_power"]["id"] == "5031"
-    # Cloud-only point is retained and tagged cloud.
-    assert merged["daily_yield"]["value"] == "38.0"
-    assert merged["daily_yield"]["source"] == "cloud"
-
-
-def test_merge_adds_modbus_only_points():
-    """A point only Modbus exposes is added to the merged result."""
-    merged = merge_realtime({}, {"grid_frequency": {"code": "grid_frequency", "value": 49.9, "source": "modbus"}})
-    assert merged["grid_frequency"]["value"] == 49.9
-    assert merged["grid_frequency"]["source"] == "modbus"
 
 
 def test_daily_yield_diagnostic_dump_lists_every_candidate_address_and_scale():

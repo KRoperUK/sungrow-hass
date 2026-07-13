@@ -9,10 +9,9 @@ network** using the **WiNet-S** dongle's Modbus TCP interface. Local reads are f
 don't count against any API quota, and keep working even when the internet (or
 iSolarCloud) is down.
 
-You can use local Modbus in two ways: **on its own** (a fully cloud-free setup, created by
-auto-discovery) or **alongside the cloud** (a hybrid entry that reads locally first and
-falls back to the cloud). The [transport modes](#transport-modes) section explains when to
-pick each.
+**Cloud and local are separate config entries.** They never mash values onto the same
+sensors. If both exist for the same inverter serial, the local device is nested under
+the cloud plant in the device registry (`via_device`) — a soft “related to” link only.
 
 !!! info "What's supported today"
     Local Modbus currently maps the **SG-RS single-phase string inverters** (e.g. SG3.6RS)
@@ -26,169 +25,85 @@ pick each.
 - A **WiNet-S** communication dongle on the **same LAN** as Home Assistant.
 - The dongle reachable on **TCP port 502** (Modbus TCP) from Home Assistant — the default
   Modbus port and unit ID (`1`) are used automatically.
-- **No iSolarCloud account** for a Modbus-only setup. (The hybrid mode still needs the cloud
-  account for its cloud half.)
+- **No iSolarCloud account** for a Modbus-only setup. (A cloud entry is independent and
+  still needs credentials for its own sensors and dispatch.)
 - A supported inverter — **SG-RS** today (see [limitations](#current-limitations)).
 
 !!! tip "mDNS discovery must be able to reach Home Assistant"
     The dongle is found via **mDNS/zeroconf**, which doesn't cross subnets or VLANs by
     default. If Home Assistant and the WiNet-S are on different network segments, discovery
-    won't fire — add Modbus manually instead (see
-    [Add local Modbus to a cloud entry](#hybrid-add-local-modbus-to-a-cloud-entry)).
+    won't fire — add the local entry manually when that path is available, or ensure mDNS
+    can cross the boundary.
 
 ## Transport modes
 
-The integration supports three "transport" modes. They differ in where readings come from
-and whether a cloud account is involved:
-
 | Mode | Data source | Cloud account | Control (dispatch) | Best for |
 | --- | --- | --- | --- | --- |
-| **Cloud-only** *(default)* | iSolarCloud API | Required | ✅ Yes | The standard setup — full sensor set and battery/dispatch controls. |
-| **Cloud + Modbus** *(hybrid)* | Local Modbus **first**, cloud fallback | Required | ✅ Yes (via cloud) | Fast, unmetered local reads **plus** the cloud's full sensor and control set. |
-| **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ❌ Read-only | Offline / privacy-first setups, or where you don't have working cloud credentials. |
+| **Cloud-only** | iSolarCloud API | Required | ✅ Yes | Full plant sensors and battery/dispatch controls. |
+| **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ❌ Read-only | Fast local metrics, offline / privacy-first. |
+| **Both** *(two entries)* | Each entry its own source | Cloud entry only | Via **cloud** entry | Compare or use cloud + local side by side. |
 
 ```mermaid
 flowchart LR
     subgraph HA["🏠 Home Assistant"]
         direction TB
-        CO["Cloud-only entry"]
-        HY["Hybrid entry"]
-        LO["Modbus-only entry"]
+        CO["Cloud entry"]
+        LO["Local entry"]
     end
     CO -->|"poll"| API["☁️ iSolarCloud OpenAPI"]
-    HY -->|"prefer"| WN["🔌 WiNet-S<br/>Modbus TCP :502"]
-    HY -.->|"fall back"| API
-    LO -->|"only"| WN
+    LO -->|"poll"| WN["🔌 WiNet-S<br/>Modbus TCP :502"]
     API --> INV["Inverter"]
     WN --> INV
+    LO -.->|"via_device when serial matches"| CO
 ```
 
 **Which should I choose?**
 
-- **Just getting started, or you want battery/dispatch control** → **Cloud-only**. Start
-  from [Installation & Setup](installation.md).
-- **You already run cloud and want faster, quota-free local reads** → **Hybrid**. Keep your
-  cloud entry and [add a Modbus host](#hybrid-add-local-modbus-to-a-cloud-entry) to it.
-- **No cloud account (or it isn't working) and you only need read-only sensors** →
-  **Modbus-only**, via [auto-discovery](#modbus-only-set-up-from-auto-discovery).
+- **Battery/dispatch control or full plant metrics** → **Cloud** entry from
+  [Installation & Setup](installation.md).
+- **Fast local power / yield without API quota** → **Local** via
+  [auto-discovery](#modbus-only-set-up-from-auto-discovery).
+- **Both** → set up each entry independently. Pick which entities to use in Energy /
+  automations deliberately (e.g. cloud daily vs local derived daily).
 
 ## Modbus-only: set up from auto-discovery
 
-When a WiNet-S dongle appears on your network, Home Assistant discovers it automatically and
-offers a **cloud-free** local setup.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant WN as WiNet-S
-    participant HA as Home Assistant
-    actor You
-    WN-->>HA: mDNS advert (serial + model)
-    HA-->>You: "Discovered: Sungrow <model>"
-    You->>HA: Set up
-    HA->>WN: Read inverter over Modbus TCP :502
-    HA->>HA: Create local entry + sensors
-```
+When a WiNet-S dongle appears on your network, Home Assistant discovers it and offers a
+**standalone local** setup.
 
 1. Go to **Settings → Devices & Services**. A **Discovered** card reading **Sungrow
-   *&lt;model&gt;*** appears (identified from the dongle's advertised serial and model).
-2. Click **Set up**. A confirmation screen explains it will read the inverter directly over
-   local Modbus — no iSolarCloud account required.
-3. Confirm. Home Assistant creates an entry titled **"Sungrow *&lt;model&gt;* (local)"** and
-   its sensors. Polling defaults to **30 seconds** (there's no cloud quota, so you can poll
-   frequently — the minimum is 10 seconds).
+   *&lt;model&gt;*** appears (from the dongle's advertised serial and model).
+2. Click **Set up** and confirm. Home Assistant creates **"Sungrow *&lt;model&gt;* (local)"**.
+3. Polling defaults to **30 seconds** (no cloud quota; minimum 10 seconds).
 
-!!! note "Already set up via the cloud?"
-    If this same inverter is **already configured through iSolarCloud**, discovery detects
-    that (by matching the serial number) and instead offers to **add local Modbus to your
-    existing entry** — see below. This avoids creating a duplicate device.
+If the same inverter is already on a **cloud** entry (matched by serial), the local
+inverter device is placed **under that cloud plant** in the UI. Entities stay separate —
+nothing is merged.
 
-### If the inverter is already on the cloud (attach prompt)
+### Reconfigure / IP change
 
-When discovery finds a dongle for an inverter you already monitor via iSolarCloud, it shows
-an **"Add local Modbus to your Sungrow inverter"** prompt naming the discovered model, its
-host, and the matching cloud entry. Confirming enables **hybrid** mode on that existing cloud
-entry — local reads with cloud fallback, **one device, no duplicate**. To keep things
-cloud-only instead, simply ignore the discovery card.
+- **Options** on the local entry: poll interval and optional daily-yield register debug.
+- **Reconfigure** (or rediscovery): update the WiNet-S host if DHCP moved the dongle.
 
-## Hybrid: add local Modbus to a cloud entry
+## Upgrading from hybrid (old “Modbus host on cloud”)
 
-You can also enable Modbus on an existing cloud entry manually, at any time:
+Earlier builds allowed putting a WiNet-S IP on the **cloud** entry and merging Modbus
+values over cloud sensors. That mashup is removed:
 
-**Settings → Devices & Services → Sungrow iSolarCloud → Configure → Local Modbus host.**
+1. On load, any leftover `modbus_host` is **stripped** from the cloud entry.
+2. When the inverter serial is already in the device registry, a **separate local entry**
+   is created automatically with that host.
+3. If no serial is known yet, set up local Modbus via discovery once more.
 
-Enter the WiNet-S IP address and save. The entry reloads and starts serving **Modbus-preferred**
-values: each reading comes from the local dongle when available and **falls back to the cloud**
-otherwise, so you keep the full cloud sensor set and all dispatch/control entities while the
-common metrics update quickly and without using API quota. **Leave the field blank** to stay
-cloud-only.
+## Daily yield (local)
 
-!!! tip "Assign the dongle a static IP"
-    A hybrid or Modbus-only entry addresses the dongle by IP. Give the WiNet-S a **DHCP
-    reservation / static lease** on your router so the address doesn't change. If it does
-    change, discovery updates a Modbus-only entry automatically; for a hybrid entry, update
-    the **Local Modbus host** field, or use **Reconfigure** on a Modbus-only entry.
-
-## Options and reconfigure
-
-**Modbus-only entry — options** (**Configure**): only the **polling interval** (default 30 s,
-minimum 10 s). There are no cloud-specific options because no cloud account is involved.
-
-**Modbus-only entry — reconfigure**: updates the **WiNet-S IP address** if it changed on your
-network. It does **not** ask for any iSolarCloud credentials.
-
-**Hybrid (cloud) entry — options**: the usual cloud options (polling interval, custom measure
-points, per-device sensors) **plus** the **Local Modbus host** field. Clear the host to drop
-back to cloud-only.
-
-## What you get over Modbus
-
-The SG-RS register map exposes the inverter's core generation metrics directly, including:
-
-- **Total** and **daily** energy yield
-- **AC** (total active) and **DC** power
-- **MPPT** string voltages and currents
-- **Grid frequency** and AC voltage
-- **Internal temperature**
-
-In **hybrid** mode these overlay the cloud data (Modbus wins where it has a value); in
-**Modbus-only** mode they're the full sensor set for the entry.
+On some SG-RS + WiNet-S firmwares the “daily” register never resets at midnight. The local
+entry **derives** calendar-day yield from lifetime `total_yield` (baseline stored in HA).
+Cloud daily yield remains whatever iSolarCloud reports — they can differ; that is expected
+with two independent sources.
 
 ## Current limitations
 
-- **SG-RS inverters only.** The bundled register map covers the SG-RS single-phase string
-  inverters. SH hybrids, three-phase SG, and standalone battery/meter maps are tracked in
-  [#219](https://github.com/KRoperUK/sungrow-hass/issues/219). On other models, use
-  **cloud-only** or **hybrid** (the cloud half still returns everything).
-- **Read-only.** Local Modbus reads sensors; it does not yet write. Battery/dispatch control
-  still goes through the cloud, so use **hybrid** if you want both fast local reads and
-  control. Local write support is tracked in
-  [#220](https://github.com/KRoperUK/sungrow-hass/issues/220).
-- **`daily_yield` is derived from `total_yield`.** On observed SG-RS + WiNet-S firmware the
-  documented "Daily power yields" register (wire 5002) **never resets at midnight** — it
-  climbs with lifetime energy (see [#223](https://github.com/KRoperUK/sungrow-hass/issues/223)).
-  Lifetime `total_yield` matches the cloud, so the integration computes
-  `daily_yield = total_yield − total_at_start_of_local_day` and persists the baseline across
-  restarts. The sensor `source` is `modbus_derived`. An optional
-  **Expose raw Modbus daily_yield register dump** option attaches a
-  `daily_yield_diagnostic` attribute for register debugging (off by default — it is large).
-
-## Local-first, then add cloud (hybrid)
-
-If you started with **Modbus-only** (zeroconf) and later add iSolarCloud:
-
-1. Start **Add integration → Sungrow iSolarCloud** and complete OAuth as usual.
-2. When a standalone local entry already exists, the flow offers **Use your existing local
-   Modbus connection?** — confirm to attach that WiNet-S host to the new cloud entry and
-   remove the duplicate local entry.
-3. Or, after cloud is set up: **Configure** the cloud entry → set **Local Modbus host** to the
-   WiNet-S IP, then remove the old Modbus-only entry manually.
-
-Hybrid behaviour: plant/grid/tariff points from the cloud; overlapping inverter metrics from
-Modbus when available (`source` attribute: `cloud` / `modbus` / `modbus_derived`). Energy
-points reported in Wh are normalised to **kWh** so plant and inverter totals stay comparable.
-- **One local connection.** The WiNet-S serves a limited number of Modbus TCP clients; if you
-  already poll it from another tool, reads here may fail intermittently.
-
-See [Troubleshooting → Local Modbus](TROUBLESHOOTING.md#local-modbus-winet-s) if discovery
-doesn't appear or local reads fail.
+- **SG-RS register map** only (see issues above for other models).
+- **Read-only** — charge/dispatch stays on the cloud API when you have a cloud entry.
+- Local and cloud **do not share** entities; configure Energy/dashboards explicitly.

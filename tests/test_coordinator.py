@@ -19,8 +19,10 @@ from custom_components.sungrow.const import (
     CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
     CONF_SCAN_INTERVAL,
+    CONF_TRANSPORT,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    TRANSPORT_MODBUS_ONLY,
 )
 from custom_components.sungrow.coordinator import (
     BACKOFF_MAX_INTERVAL,
@@ -774,43 +776,38 @@ async def test_plant_detail_best_effort_on_error(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_build_modbus_client_from_options(hass: HomeAssistant):
-    """A configured Modbus host builds a client with the given host/port/unit."""
-    entry = _make_entry({CONF_MODBUS_HOST: "10.0.0.5", CONF_MODBUS_PORT: 1502, CONF_MODBUS_UNIT: 2})
-    client = SungrowPlantCoordinator._build_modbus_client(entry)
+async def test_build_modbus_client_only_for_modbus_only_entry(hass: HomeAssistant):
+    """Modbus client is built for transport=modbus_only with a host, never for cloud entries."""
+    local = _make_entry(
+        options={CONF_MODBUS_PORT: 1502, CONF_MODBUS_UNIT: 2},
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_MODBUS_HOST: "10.0.0.5",
+        },
+    )
+    client = SungrowPlantCoordinator._build_modbus_client(local)
     assert client is not None
     assert (client.host, client.port, client.unit) == ("10.0.0.5", 1502, 2)
 
+    # Cloud entry with leftover hybrid host must NOT get a client.
+    hybrid_leftover = _make_entry({CONF_MODBUS_HOST: "10.0.0.5"})
+    assert SungrowPlantCoordinator._build_modbus_client(hybrid_leftover) is None
+
 
 def test_no_modbus_client_when_host_blank():
-    """No host (or a blank host) means cloud-only: no Modbus client."""
+    """No host (or a blank host) means no Modbus client on a local entry."""
     assert SungrowPlantCoordinator._build_modbus_client(_make_entry()) is None
-    assert SungrowPlantCoordinator._build_modbus_client(_make_entry({CONF_MODBUS_HOST: ""})) is None
-
-
-async def test_apply_modbus_merges_over_cloud(hass: HomeAssistant):
-    """Configured Modbus overlays its value over the cloud value and tags provenance."""
-    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
-    coordinator._modbus_client = MagicMock()
-    coordinator._modbus_client.async_read_realtime = AsyncMock(
-        return_value={
-            "total_active_power": {"code": "total_active_power", "value": 256, "unit": "W", "source": "modbus"}
-        }
+    assert (
+        SungrowPlantCoordinator._build_modbus_client(
+            _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: ""})
+        )
+        is None
     )
-    cloud = {
-        "total_active_power": {"code": "total_active_power", "value": "250", "unit": "W", "source": "cloud"},
-        "daily_yield": {"code": "daily_yield", "value": "38", "source": "cloud"},
-    }
-    merged = await coordinator._async_apply_modbus(cloud)
-    assert merged["total_active_power"]["value"] == 256
-    assert merged["total_active_power"]["source"] == "modbus"
-    # No total_yield in this payload → derived daily is not applied; cloud daily kept.
-    assert merged["daily_yield"]["source"] == "cloud"
 
 
 async def test_modbus_debug_daily_yield_gated(hass: HomeAssistant):
     """Raw daily_yield register dump is only captured when the debug option is on."""
-    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN", "SG")
     coordinator._modbus_client = MagicMock()
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value={"raw": {"5002": 1}})
@@ -833,7 +830,7 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
 
     from custom_components.sungrow.daily_yield import DailyYieldBaseline
 
-    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
     coordinator._modbus_client = MagicMock()
     coordinator._modbus_client.async_read_realtime = AsyncMock(
@@ -862,26 +859,6 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     coordinator._daily_yield_store.async_save.assert_awaited()
 
 
-async def test_apply_modbus_falls_back_to_cloud_on_error(hass: HomeAssistant):
-    """A Modbus read failure keeps the cloud data untouched (never takes the plant offline)."""
-    from custom_components.sungrow.modbus import SungrowModbusError
-
-    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
-    coordinator._modbus_client = MagicMock()
-    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("boom"))
-    cloud = {"total_active_power": {"code": "total_active_power", "value": "250"}}
-    merged = await coordinator._async_apply_modbus(cloud)
-    assert merged == cloud  # unchanged; no source tags added
-
-
-async def test_apply_modbus_noop_without_client(hass: HomeAssistant):
-    """Cloud-only (no Modbus host) returns the cloud data unchanged."""
-    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
-    assert coordinator._modbus_client is None
-    cloud = {"x": {"value": "1"}}
-    assert await coordinator._async_apply_modbus(cloud) is cloud
-
-
 # ---------------------------------------------------------------------------
 # Modbus-only transport (cloud-free entry, #159)
 # ---------------------------------------------------------------------------
@@ -889,7 +866,7 @@ async def test_apply_modbus_noop_without_client(hass: HomeAssistant):
 
 def _modbus_only_coordinator(hass: HomeAssistant) -> SungrowPlantCoordinator:
     """A coordinator with no cloud service and a stubbed Modbus client."""
-    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN123", "Sungrow SG3.6RS")
     assert coordinator.plants_service is None
     coordinator._modbus_client = MagicMock()
@@ -945,37 +922,11 @@ async def test_modbus_only_update_raises_outside_grace(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_apply_modbus_captures_daily_yield_diagnostic(hass: HomeAssistant):
-    """Each successful Modbus read refreshes coordinator.daily_yield_diagnostic (#223)."""
-    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
-    coordinator._modbus_client = MagicMock()
-    coordinator._modbus_client.async_read_realtime = AsyncMock(
-        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
-    )
-    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(
-        return_value={
-            "start": 4999,
-            "raw": {"5002": 640},
-            "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
-        }
-    )
-    cloud = {"daily_yield": {"code": "daily_yield", "value": "60.0", "unit": "kWh"}}
-    # Diagnostic capture is opt-in (recorder bloat when off).
-    coordinator.config_entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
-    await coordinator._async_apply_modbus(cloud)
-    assert coordinator.daily_yield_diagnostic is not None
-    assert coordinator.daily_yield_diagnostic["raw"]["5002"] == 640
-
-
-async def test_apply_modbus_keeps_previous_diagnostic_on_capture_failure(hass: HomeAssistant):
+async def test_modbus_only_keeps_previous_diagnostic_on_capture_failure(hass: HomeAssistant):
     """A Modbus diagnostic-read failure keeps the previous diagnostic in place so a
     transient blip never clears evidence the user is collecting for #223.
     """
-    coordinator = SungrowPlantCoordinator(hass, _make_entry(), MagicMock(), "12345", "Test Plant")
-    coordinator._modbus_client = MagicMock()
-    coordinator._modbus_client.async_read_realtime = AsyncMock(
-        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
-    )
+    coordinator = _modbus_only_coordinator(hass)
     previous = {
         "start": 4999,
         "raw": {"5002": 640},
@@ -986,8 +937,11 @@ async def test_apply_modbus_keeps_previous_diagnostic_on_capture_failure(hass: H
     coordinator.config_entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
     from custom_components.sungrow.modbus import SungrowModbusError
 
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
+    )
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(side_effect=SungrowModbusError("boom"))
-    await coordinator._async_apply_modbus({})
+    await coordinator._async_modbus_only_update()
     assert coordinator.daily_yield_diagnostic is previous
 
 
