@@ -34,6 +34,57 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [4.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v3.4.1...v4.0.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* Config entry VERSION bumped from 2 to 3; existing cloud entries are migrated to include an explicit transport field. The config flow now presents a transport-mode choice as the first step.
+* Cloud and local Modbus connections are now configured as separate integration entries. Existing local-mode config entries must be re-added after upgrading. Cloud-only users are unaffected.
+
+### Features
+
+* add Modbus local polling support ([c2b35f9](https://github.com/KRoperUK/sungrow-hass/commit/c2b35f90d69bae66c602f1f1a77532708795bd81))
+* discovery offers to add local Modbus to an existing cloud entry ([#218](https://github.com/KRoperUK/sungrow-hass/issues/218)) ([c3c99d8](https://github.com/KRoperUK/sungrow-hass/commit/c3c99d8690864a90f7596d8a34110baa002c92d3))
+* discovery offers to add local Modbus to an existing cloud entry ([#218](https://github.com/KRoperUK/sungrow-hass/issues/218)) ([c3c99d8](https://github.com/KRoperUK/sungrow-hass/commit/c3c99d8690864a90f7596d8a34110baa002c92d3))
+* discovery offers to add local Modbus to an existing cloud entry ([#218](https://github.com/KRoperUK/sungrow-hass/issues/218)) ([709d315](https://github.com/KRoperUK/sungrow-hass/commit/709d3159b5586a5078e6cea190572c8d817a4358))
+* extend local Modbus support with SH-RT hybrid maps and family auto-detection ([5873f52](https://github.com/KRoperUK/sungrow-hass/commit/5873f52a4ec9b1d8dbc2f94fee20c84b1735c8fe))
+* hybrid local+cloud polish for pre-release testing ([d77e429](https://github.com/KRoperUK/sungrow-hass/commit/d77e429bca831c78c87d5e05df9518d234c00522))
+* local Modbus client + SG-RS register map ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159) phase 1) ([#213](https://github.com/KRoperUK/sungrow-hass/issues/213)) ([c37cb28](https://github.com/KRoperUK/sungrow-hass/commit/c37cb2824d595f8f9ede7aa8c26f19ad227c4bf2))
+* Modbus connectivity sensor, diagnostics, and re-nest improvements ([a2efd0e](https://github.com/KRoperUK/sungrow-hass/commit/a2efd0e38831ae0874574e30783cf36b5abe256b))
+* Modbus connectivity sensor, diagnostics, and re-nest improvements ([93063eb](https://github.com/KRoperUK/sungrow-hass/commit/93063ebd773304c86e85a71ff667d4327e4a0823))
+* **modbus:** surface a daily_yield diagnostic dump on the sensor ([#223](https://github.com/KRoperUK/sungrow-hass/issues/223)) ([a7c2fb0](https://github.com/KRoperUK/sungrow-hass/commit/a7c2fb0d543605a4daab33056dbe61f6c7d122f0))
+* **modbus:** surface a daily_yield diagnostic dump on the sensor ([#223](https://github.com/KRoperUK/sungrow-hass/issues/223)) ([a7c2fb0](https://github.com/KRoperUK/sungrow-hass/commit/a7c2fb0d543605a4daab33056dbe61f6c7d122f0))
+* **modbus:** surface a daily_yield diagnostic dump on the sensor ([#223](https://github.com/KRoperUK/sungrow-hass/issues/223)) ([e3b9855](https://github.com/KRoperUK/sungrow-hass/commit/e3b9855de5edf0fe5fa54625358c78e14d73235a))
+* opt-in local Modbus transport with cloud merge ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159) phase 2) ([22140f9](https://github.com/KRoperUK/sungrow-hass/commit/22140f9ff814b30784cf6a212855f4f7dbeec6ce))
+* transport-mode selector, backfill statistics, hybrid MPPT fix ([#242](https://github.com/KRoperUK/sungrow-hass/issues/242)) ([f8b456b](https://github.com/KRoperUK/sungrow-hass/commit/f8b456be99919ab763cf5a90bb9a02e3016915a1))
+* zeroconf discovery of WiNet-S for cloud-free local Modbus setup ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159) phase 3) ([93727f1](https://github.com/KRoperUK/sungrow-hass/commit/93727f18d6aa8836291d298ccd52778942de1184))
+
+
+### Bug Fixes
+
+* correct Modbus-only entry options + unload ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([6429b73](https://github.com/KRoperUK/sungrow-hass/commit/6429b73ed4a0b0136f7cc062d05ff211dba2f22b))
+* correct Modbus-only entry options + unload ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([6429b73](https://github.com/KRoperUK/sungrow-hass/commit/6429b73ed4a0b0136f7cc062d05ff211dba2f22b))
+* correct Modbus-only entry options + unload ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([79165c3](https://github.com/KRoperUK/sungrow-hass/commit/79165c37eab1933c492d793b5fe08913c1ab88df))
+* default unitless battery SOC sensors to % ([062152f](https://github.com/KRoperUK/sungrow-hass/commit/062152f29c7335b54bd0f75ea6fcc38f269c1a23))
+* default unitless battery SOC sensors to % ([4f7fb63](https://github.com/KRoperUK/sungrow-hass/commit/4f7fb63bd6825318cfe7f0e49d2001773defb506)), closes [#228](https://github.com/KRoperUK/sungrow-hass/issues/228)
+* derive Modbus daily_yield from total_yield since local midnight ([5497cfc](https://github.com/KRoperUK/sungrow-hass/commit/5497cfcc817091dc1fc624d11f79993a004c06ac))
+* hybrid local+cloud — derived daily, merge local-first, units & provenance ([8221653](https://github.com/KRoperUK/sungrow-hass/commit/8221653da4cd21040909f5e4da064b41699d8d34))
+* Modbus-only entry reconfigure edits host, not cloud credentials ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([07b90ad](https://github.com/KRoperUK/sungrow-hass/commit/07b90adb0d068b4585aea0eca81671ac3cabea12))
+* Modbus-only entry reconfigure edits host, not cloud credentials ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([07b90ad](https://github.com/KRoperUK/sungrow-hass/commit/07b90adb0d068b4585aea0eca81671ac3cabea12))
+* Modbus-only entry reconfigure edits host, not cloud credentials ([#159](https://github.com/KRoperUK/sungrow-hass/issues/159)) ([d19138d](https://github.com/KRoperUK/sungrow-hass/commit/d19138dbc0215f47404909eb0ba54923f7782c2b))
+* nest all local Modbus sensors under the inverter and clean up stale plant device ([160388d](https://github.com/KRoperUK/sungrow-hass/commit/160388d0d22b8e262d58bd96d41b4589606813dd))
+* nest all local Modbus sensors under the inverter and clean up stale plant device ([7d9e1b5](https://github.com/KRoperUK/sungrow-hass/commit/7d9e1b50422ad575242612a069261961788350ec))
+* never log the OAuth authorization code or raw callback params ([0a84e8e](https://github.com/KRoperUK/sungrow-hass/commit/0a84e8ec29316f03f78c5327e74a90081fbf6a93))
+* redact plant/device names from diagnostics (leak a home address) ([#210](https://github.com/KRoperUK/sungrow-hass/issues/210)) ([02919cb](https://github.com/KRoperUK/sungrow-hass/commit/02919cb553c0df71e51aae1e614a5e6f0a46f303))
+* remove speculative SG-RS high registers and skip unsupported Modbus blocks ([bf74900](https://github.com/KRoperUK/sungrow-hass/commit/bf749001fc99890e6e7e5c86bdff425eca750714))
+* satisfy mypy on daily_yield unpack and optional config_entry ([6422192](https://github.com/KRoperUK/sungrow-hass/commit/6422192ffdef1e1599f23b2529e6e34f0af726df))
+* skip unsupported Modbus blocks and remove speculative SG-RS high registers ([124ca5c](https://github.com/KRoperUK/sungrow-hass/commit/124ca5cf5bd1b4a8115017a7e34d7c81ebe14eed))
+* switch Energy Management Mode when forcing charge/discharge ([0abc0d9](https://github.com/KRoperUK/sungrow-hass/commit/0abc0d9dbcdf962f5780bd524ed73ffcf3110ae1))
+* switch Energy Management Mode when forcing charge/discharge ([5d8dc84](https://github.com/KRoperUK/sungrow-hass/commit/5d8dc84347357b1e3fd9b25a2bc5ff1cbd97ddd3)), closes [#231](https://github.com/KRoperUK/sungrow-hass/issues/231)
+* translate new local-modbus strings and resolve mypy/ruff lint failures ([8158e5e](https://github.com/KRoperUK/sungrow-hass/commit/8158e5ea54c7fb2d0ebc544c42f73f3cffc4525b))
+* translations, lint and extended Modbus maps for PR [#236](https://github.com/KRoperUK/sungrow-hass/issues/236) follow-up ([ab627da](https://github.com/KRoperUK/sungrow-hass/commit/ab627da00c8209684ea5d91bdfcd69728f867eeb))
+
 ## [3.4.1](https://github.com/KRoperUK/sungrow-hass/compare/v3.4.0...v3.4.1) (2026-07-06)
 
 
