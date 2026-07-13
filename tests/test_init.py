@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pysolarcloud
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -233,6 +233,121 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
         await hass.async_block_till_done()
 
     assert entry.runtime_data.coordinators[0].via_plant_id == "plant-99"
+
+    # No synthetic local plant device is created when nesting under a cloud plant.
+    registry = dr.async_get(hass)
+    assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
+
+
+async def test_setup_modbus_only_cleans_stale_local_plant_when_cloud_present(hass: HomeAssistant):
+    """A stale synthetic local-plant device is removed once a cloud plant is found."""
+    from homeassistant.helpers import device_registry as dr
+
+    cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
+    cloud.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "plant-99")},
+        name="Plant",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        manufacturer="Sungrow",
+    )
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "inv-cloud")},
+        name="Inverter",
+        serial_number="SNLINK",
+        manufacturer="Sungrow",
+        via_device=(DOMAIN, "plant-99"),
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SNLINK",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SNLINK",
+    )
+    entry.add_to_hass(hass)
+
+    # Simulate a previous setup that left a synthetic local plant device behind.
+    stale_plant = registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "SNLINK")},
+        name="Stale local plant",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        manufacturer="Sungrow",
+    )
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(
+        return_value={"grid_frequency": {"code": "grid_frequency", "value": 50.0, "unit": "Hz", "source": "modbus"}}
+    )
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert registry.async_get(stale_plant.id) is None
+
+
+async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(hass: HomeAssistant):
+    """If no cloud plant exists at setup, a startup listener reloads when one appears."""
+    from homeassistant.helpers import device_registry as dr
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SNLINK",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SNLINK",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(
+        return_value={"grid_frequency": {"code": "grid_frequency", "value": 50.0, "unit": "Hz", "source": "modbus"}}
+    )
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    # No cloud plant yet, so no synthetic local plant device is created.
+    registry = dr.async_get(hass)
+    assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
+
+    # Now the cloud entry/device appears before HA finishes startup.
+    cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
+    cloud.add_to_hass(hass)
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "plant-99")},
+        name="Plant",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        manufacturer="Sungrow",
+    )
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "inv-cloud")},
+        name="Inverter",
+        serial_number="SNLINK",
+        manufacturer="Sungrow",
+        via_device=(DOMAIN, "plant-99"),
+    )
+
+    with patch.object(hass.config_entries, "async_reload", new=AsyncMock(return_value=True)) as mock_reload:
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+
+    mock_reload.assert_awaited_once_with(entry.entry_id)
 
 
 async def test_cloud_setup_strips_legacy_hybrid_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
@@ -792,6 +907,13 @@ def test_resolve_point_device_unmapped_and_hybrid():
 def test_resolve_point_device_ignores_uuidless():
     """A device without a uuid can't own a point."""
     assert resolve_point_device("inverter_ac_power", [{"device_type": DeviceType.INVERTER}]) is None
+
+
+def test_resolve_point_device_local_inverter_electrical_points():
+    """Local Modbus electrical points (phase/reactive/power factor) re-home to the inverter."""
+    inv = _dev("inv-1", DeviceType.INVERTER)
+    for code in ("phase_a_voltage", "phase_b_voltage", "phase_c_voltage", "reactive_power", "power_factor"):
+        assert resolve_point_device(code, [inv]) is inv, code
 
 
 async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
