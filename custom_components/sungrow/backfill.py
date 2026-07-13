@@ -156,7 +156,8 @@ class BackfillStore:
     async def async_get_marker(self, plant_id: str) -> dict[str, Any] | None:
         """Return the persisted marker for *plant_id*, or None if absent."""
         data = await self._async_load()
-        return data["plants"].get(plant_id)
+        result: dict[str, Any] | None = data["plants"].get(plant_id)
+        return result
 
     async def async_set_marker(self, plant_id: str, marker: dict[str, Any]) -> None:
         """Persist *marker* for *plant_id* and flush to disk."""
@@ -409,7 +410,7 @@ def build_series_target(
         is_external = True
 
     resolved_unit = unit if unit else _DEFAULT_UNIT[kind]
-    metadata: StatisticMetaData = {
+    metadata: StatisticMetaData = {  # type: ignore[typeddict-item]
         "has_mean": kind == "power",
         "has_sum": kind == "energy",
         "name": None,
@@ -421,7 +422,7 @@ def build_series_target(
         point_code=point_code,
         statistic_id=statistic_id,
         unit=resolved_unit,
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
         is_external=is_external,
         metadata=metadata,
     )
@@ -453,6 +454,7 @@ async def async_resolve_series(hass: HomeAssistant, coordinator: SungrowPlantCoo
     """
     registry = er.async_get(hass)
     plant_id = coordinator.plant_id
+    assert coordinator.plants_service is not None  # Backfill is cloud-only; never called for Modbus entries
     measure_points = coordinator.plants_service.measure_points
 
     targets: list[SeriesTarget] = []
@@ -675,6 +677,7 @@ class BackfillEngine:
                 (start, end), batch = work[cursor]
                 await self._throttle.acquire()
                 try:
+                    assert self._coordinator.plants_service is not None
                     raw = await self._coordinator.plants_service.async_get_historical_data(
                         plant_id,
                         start,
@@ -792,7 +795,8 @@ class BackfillEngine:
         """Aggregate and import one chunk's rows for every series in *batch*."""
         rows_by_code: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            rows_by_code.setdefault(row.get("code"), []).append(row)
+            code = row.get("code") or ""
+            rows_by_code.setdefault(code, []).append(row)
 
         for target in batch:
             minute_rows: list[MinuteRow] = []

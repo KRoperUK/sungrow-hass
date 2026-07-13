@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, time
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
@@ -39,7 +40,7 @@ _SERVICE_SCHEMA = vol.Schema(
 )
 
 
-def _cloud_backfill_entries(hass: HomeAssistant) -> list:
+def _cloud_backfill_entries(hass: HomeAssistant) -> list[Any]:
     """Return every loaded cloud Sungrow config entry (those that own a manager)."""
     return [
         entry
@@ -48,7 +49,7 @@ def _cloud_backfill_entries(hass: HomeAssistant) -> list:
     ]
 
 
-def _resolve_entries(hass: HomeAssistant, entry_id: str | None) -> list:
+def _resolve_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
     """Resolve the addressed cloud entries, defaulting to all loaded cloud entries."""
     if entry_id is None:
         return _cloud_backfill_entries(hass)
