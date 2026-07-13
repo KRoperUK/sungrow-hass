@@ -50,6 +50,17 @@ The integration talks to iSolarCloud's OpenAPI, which requires your own applicat
    `https://github.com/KRoperUK/sungrow-hass` as a custom repository of type *Integration*.)
 3. **Restart Home Assistant**.
 
+### Pre-release / PR builds (optional)
+
+CI publishes **prerelease** GitHub Releases when component-impacting PRs or `main` pushes go green:
+
+| Kind | Tag shape | Install |
+| --- | --- | --- |
+| Main RC | `vX.Y.Z-rc.N` | HACS pre-releases, or download `sungrow.zip` from the release |
+| PR build | `vX.Y.Z-pr.<PR>.<run>` | Same; tag points at a **synthetic commit** that only rewrites `manifest.json` / `const.VERSION` so HACS sorts above the last stable |
+
+Enable **Show beta versions** (pre-releases) for this repository in HACS if you intend to dogfood. Prefer a **specific pre-release tag** over a floating branch tip. PR pre-releases are deleted when the PR closes; do not rely on them long-term.
+
 ## 3. Add and authorize the integration
 
 Setup is two-phase: Home Assistant creates the hub entry first (so the OAuth callback endpoint

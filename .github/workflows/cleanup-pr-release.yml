@@ -13,21 +13,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Delete pre-releases for this branch
+      - name: Delete pre-releases for this PR
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          # Pass the branch name via env — never inline ${{ github.head_ref }}
-          # into the script (shell-injection via a crafted branch name).
+          # Pass via env — never inline ${{ github.head_ref }} into the script
+          # (shell-injection via a crafted branch name).
           BRANCH_RAW: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           BRANCH=$(printf '%s' "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\{2,\}/-/g')
-          # Branch dev tags are dev-v<ver>-<branch>-<run_id>, so the branch is in the
-          # middle — match by regex anchored on the known, sanitised branch name.
-          echo "Deleting dev builds for branch: ${BRANCH}"
+          echo "Deleting PR pre-releases for PR #${PR_NUMBER} (branch ${BRANCH})"
+
+          # Current tags: vX.Y.Z-pr.<PR>.<run_id>
+          # Legacy tags:  dev-vX.Y.Z-<branch>-<run_id>
           gh release list --limit 1000 --json tagName,isPrerelease \
-            --jq ".[] | select(.isPrerelease and (.tagName | test(\"^dev-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+-${BRANCH}-[0-9]+$\"))) | .tagName" \
+            --jq '.[] | select(.isPrerelease) | .tagName' \
           | while read -r tag; do
-              echo "Deleting release and tag: ${tag}"
-              gh release delete "$tag" --yes --cleanup-tag
+              delete=false
+              if printf '%s' "$tag" | grep -Eq "^v[0-9]+\\.[0-9]+\\.[0-9]+-pr\\.${PR_NUMBER}\\."; then
+                delete=true
+              elif printf '%s' "$tag" | grep -Eq "^dev-v[0-9]+\\.[0-9]+\\.[0-9]+-${BRANCH}-[0-9]+$"; then
+                delete=true
+              fi
+              if [ "$delete" = true ]; then
+                echo "Deleting release and tag: ${tag}"
+                gh release delete "$tag" --yes --cleanup-tag
+              fi
             done

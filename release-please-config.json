@@ -4,8 +4,20 @@
     ".": {
       "release-type": "simple",
       "extra-files": [
-        { "type": "json", "path": "custom_components/sungrow/manifest.json", "jsonpath": "$.version" },
-        { "type": "toml", "path": "pyproject.toml", "jsonpath": "$.project.version" }
+        {
+          "type": "json",
+          "path": "custom_components/sungrow/manifest.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "custom_components/sungrow/const.py"
+        },
+        {
+          "type": "toml",
+          "path": "pyproject.toml",
+          "jsonpath": "$.project.version"
+        }
       ]
     }
   }
