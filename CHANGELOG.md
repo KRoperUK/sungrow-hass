@@ -34,12 +34,8 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
-## [5.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v4.0.0...v5.0.0) (2026-07-13)
+## [4.0.1](https://github.com/KRoperUK/sungrow-hass/compare/v4.0.0...v4.0.1) (2026-07-13)
 
-
-### ⚠ BREAKING CHANGES
-
-* **ci:** Config entry VERSION bumped from 2 to 3; existing cloud entries are migrated to include an explicit transport field. The config flow now presents a transport-mode choice as the first step.
 
 ### Bug Fixes
 
