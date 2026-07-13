@@ -1,15 +1,15 @@
 {
   "domain": "sungrow",
   "name": "Sungrow iSolarCloud",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@KRoperUK"
   ],
   "config_flow": true,
   "dependencies": [
     "http"
-  ],
-  "after_dependencies": [
-    "recorder"
   ],
   "documentation": "https://github.com/KRoperUK/sungrow-hass",
   "integration_type": "hub",
