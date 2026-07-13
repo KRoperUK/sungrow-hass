@@ -42,8 +42,10 @@ control the battery and dispatch behaviour, such as:
 - Forced charging schedules
 - Energy-management / external-dispatch mode
 
-When you write a dispatch value, the integration automatically sends the required **EMS
-heartbeat** so the setting is applied and maintained.
+When you set charge/discharge to *Charge* or *Discharge*, the integration switches
+**Energy Management Mode** to Compulsory (Forced) so the inverter actually follows the
+command, and sends the required **EMS heartbeat** so the setting is maintained. *Stop*
+restores Self-consumption mode.
 
 !!! warning "Battery controls are hidden on PV-only plants"
     Battery dispatch controls (charge/discharge command & power, SOC limits, forced charging,

@@ -27,6 +27,16 @@ _LOGGER = logging.getLogger(__name__)
 # Dispatch writes go to a single device via one Control client; serialise them.
 PARALLEL_UPDATES = 1
 
+# Energy Management Mode (param 10003, Appendix 10). Charge/discharge command & power
+# only actuate when the plant is *not* in Self-consumption — writing 10004/10005 alone
+# is accepted by the device but ignored until the mode switches (issue #231).
+# Compulsory (2) is the portal "Forced mode" path confirmed on residential SH hybrids.
+# Write the raw param code so this works even when the installed pysolarcloud build
+# has not yet re-enabled the energy_management_mode name map.
+_EMS_MODE_PARAM = Control.PARAMETER_SPECS["energy_management_mode"]["code"]
+_EMS_MODE_SELF_CONSUMPTION = Control.encode_parameter("energy_management_mode", "self_consumption")
+_EMS_MODE_COMPULSORY = Control.encode_parameter("energy_management_mode", "compulsory")
+
 # Select parameters exposed as HA Select entities.
 DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
     "charge_discharge_command": {
@@ -220,12 +230,30 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         except (TypeError, ValueError):
             return None
 
+    def _command_payload(self, option: str, value: str) -> dict[str, str]:
+        """Build the param write for a charge/discharge command, including EMS mode (#231).
+
+        Without switching Energy Management Mode out of Self-consumption, the inverter
+        accepts 10004/10005 writes but continues normal self-consumption operation.
+        Compulsory mode matches the portal "Forced mode" tile; Stop restores
+        Self-consumption so the plant returns to default behaviour.
+        """
+        payload: dict[str, str] = {self.param: value}
+        if self.param != "charge_discharge_command":
+            return payload
+        if option in {"Charge", "Discharge"}:
+            payload[_EMS_MODE_PARAM] = _EMS_MODE_COMPULSORY
+        elif option == "Stop":
+            payload[_EMS_MODE_PARAM] = _EMS_MODE_SELF_CONSUMPTION
+        return payload
+
     async def async_select_option(self, option: str) -> None:
         """Update the dispatch parameter on the inverter."""
         value = self.options_map[option]
-        _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, value, self.device_uuid)
+        payload = self._command_payload(option, value)
+        _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, payload, self.device_uuid)
         try:
-            await self.control.async_update_parameters(self.device_uuid, {self.param: value})
+            await self.control.async_update_parameters(self.device_uuid, payload)
         except PySolarCloudException as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -305,7 +333,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         _LOGGER.info("Forced-dispatch timeout for %s: reverting to Stop", self.device_uuid)
         stop_option = "Stop"
         try:
-            await self.control.async_update_parameters(self.device_uuid, {self.param: self.options_map[stop_option]})
+            await self.control.async_update_parameters(
+                self.device_uuid,
+                self._command_payload(stop_option, self.options_map[stop_option]),
+            )
         except PySolarCloudException as err:
             _LOGGER.warning("Auto-revert to Stop failed for %s: %s", self.device_uuid, err)
         entry = self.coordinator.config_entry
