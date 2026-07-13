@@ -297,6 +297,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             self._attr_native_unit_of_measurement = None
         elif self._scale_to_percent:
             self._attr_native_unit_of_measurement = PERCENTAGE
+        elif device_class == SensorDeviceClass.BATTERY:
+            # SOC points often arrive with no unit (or "") but HA requires "%" for
+            # device_class battery — otherwise it logs and refuses the entity (#228).
+            self._attr_native_unit_of_measurement = unit or PERCENTAGE
         elif device_class == SensorDeviceClass.SIGNAL_STRENGTH:
             # WLAN/wireless signal strength comes back with no unit; it's decibels.
             self._attr_native_unit_of_measurement = unit or "dB"
