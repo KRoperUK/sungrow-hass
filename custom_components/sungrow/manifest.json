@@ -6,7 +6,8 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "http"
+    "http",
+    "recorder"
   ],
   "documentation": "https://github.com/KRoperUK/sungrow-hass",
   "integration_type": "hub",
