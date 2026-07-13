@@ -21,7 +21,7 @@
     "sungrow-isolarcloud==0.10.4",
     "pymodbus>=3.6.0"
   ],
-  "version": "3.4.1",
+  "version": "3.5.0-pr.237.219c1c6",
   "zeroconf": [
     {
       "type": "_http._tcp.local.",
