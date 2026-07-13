@@ -76,7 +76,18 @@ class SungrowModbusClient:
         out: dict[str, dict[str, Any]] = {}
         async with self._lock:
             for start, count in block_partitions(points):
-                registers = await self._read_input(start, count)
+                try:
+                    registers = await self._read_input(start, count)
+                except SungrowModbusError as err:
+                    # Exception code 2 = Illegal Data Address: the inverter firmware
+                    # does not implement any register in this block (e.g. high energy
+                    # registers on a string inverter). Skip the block rather than fail
+                    # the whole poll; if every block fails the caller still sees an
+                    # empty result and can retry on the next cycle.
+                    if _is_unsupported_address(err):
+                        _LOGGER.debug("Skipping unsupported Modbus block at %s (count %s): %s", start, count, err)
+                        continue
+                    raise
                 out.update(decode_registers(points, start, registers))
         return out
 
@@ -128,3 +139,9 @@ class SungrowModbusClient:
     def close(self) -> None:
         """Close the underlying connection."""
         self._client.close()
+
+
+def _is_unsupported_address(err: SungrowModbusError) -> bool:
+    """Return True when ``err`` is a Modbus 'Illegal Data Address' exception."""
+    # pymodbus renders ExceptionResponse with exception_code=2 in its repr.
+    return "exception_code=2" in str(err)
