@@ -14,6 +14,7 @@ from pysolarcloud.plants import DeviceType
 from custom_components.sungrow.const import (
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
+    CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
@@ -797,13 +798,68 @@ async def test_apply_modbus_merges_over_cloud(hass: HomeAssistant):
         }
     )
     cloud = {
-        "total_active_power": {"code": "total_active_power", "value": "250", "unit": "W"},
-        "daily_yield": {"code": "daily_yield", "value": "38"},
+        "total_active_power": {"code": "total_active_power", "value": "250", "unit": "W", "source": "cloud"},
+        "daily_yield": {"code": "daily_yield", "value": "38", "source": "cloud"},
     }
     merged = await coordinator._async_apply_modbus(cloud)
     assert merged["total_active_power"]["value"] == 256
     assert merged["total_active_power"]["source"] == "modbus"
+    # No total_yield in this payload → derived daily is not applied; cloud daily kept.
     assert merged["daily_yield"]["source"] == "cloud"
+
+
+async def test_modbus_debug_daily_yield_gated(hass: HomeAssistant):
+    """Raw daily_yield register dump is only captured when the debug option is on."""
+    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN", "SG")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value={"raw": {"5002": 1}})
+
+    # Default: off → clear / skip capture.
+    await coordinator._async_capture_daily_yield_diagnostic()
+    assert coordinator.daily_yield_diagnostic is None
+    coordinator._modbus_client.async_read_daily_yield_diagnostic.assert_not_awaited()
+
+    # Opt-in.
+    entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
+    await coordinator._async_capture_daily_yield_diagnostic()
+    assert coordinator.daily_yield_diagnostic == {"raw": {"5002": 1}}
+
+
+async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
+    """When Modbus supplies total_yield, daily_yield is total − start-of-day baseline (#223)."""
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+
+    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_yield": {"code": "total_yield", "value": 6467.0, "unit": "kWh", "source": "modbus"},
+            "daily_yield": {"code": "daily_yield", "value": 201.6, "unit": "kWh", "source": "modbus"},
+        }
+    )
+    # Pretend we already saw 6462 earlier today.
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline(
+        baseline=6462.0, baseline_date=date(2026, 7, 13), last_total=6462.0
+    )
+    # Avoid Store I/O in the unit test.
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 7, 13)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_yield"]["value"] == 5.0
+    assert data["daily_yield"]["source"] == "modbus_derived"
+    assert data["total_yield"]["value"] == 6467.0
+    coordinator._daily_yield_store.async_save.assert_awaited()
 
 
 async def test_apply_modbus_falls_back_to_cloud_on_error(hass: HomeAssistant):
@@ -904,6 +960,8 @@ async def test_apply_modbus_captures_daily_yield_diagnostic(hass: HomeAssistant)
         }
     )
     cloud = {"daily_yield": {"code": "daily_yield", "value": "60.0", "unit": "kWh"}}
+    # Diagnostic capture is opt-in (recorder bloat when off).
+    coordinator.config_entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
     await coordinator._async_apply_modbus(cloud)
     assert coordinator.daily_yield_diagnostic is not None
     assert coordinator.daily_yield_diagnostic["raw"]["5002"] == 640
@@ -925,6 +983,7 @@ async def test_apply_modbus_keeps_previous_diagnostic_on_capture_failure(hass: H
         "current_mapping": {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"},
     }
     coordinator.daily_yield_diagnostic = previous
+    coordinator.config_entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
     from custom_components.sungrow.modbus import SungrowModbusError
 
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(side_effect=SungrowModbusError("boom"))
@@ -933,8 +992,9 @@ async def test_apply_modbus_keeps_previous_diagnostic_on_capture_failure(hass: H
 
 
 async def test_modbus_only_update_captures_daily_yield_diagnostic(hass: HomeAssistant):
-    """The Modbus-only path also refreshes the diagnostic on every successful poll (#223)."""
+    """The Modbus-only path refreshes the diagnostic when the debug option is on."""
     coordinator = _modbus_only_coordinator(hass)
+    coordinator.config_entry.options = {CONF_MODBUS_DEBUG_DAILY_YIELD: True}
     coordinator._modbus_client.async_read_realtime = AsyncMock(
         return_value={"daily_yield": {"code": "daily_yield", "value": 64.0, "unit": "kWh", "source": "modbus"}}
     )

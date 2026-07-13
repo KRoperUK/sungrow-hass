@@ -321,6 +321,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if point_code in _INTEGER_COUNT_CODES:
             self._attr_suggested_display_precision = 0
 
+        # Local Modbus device-type register is useful for map selection, not the main UI.
+        if point_code == "device_type_code":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
     def _current_point(self) -> dict[str, Any] | None:
         """Return the current point payload for this sensor (plant-level source)."""
         data = self.coordinator.data
@@ -359,17 +363,11 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Expose which transport (``cloud``/``modbus``) provided the current value (#159).
+        """Expose transport provenance (``cloud`` / ``modbus`` / ``modbus_derived``).
 
-        Only present once a point has been through the Modbus merge — i.e. when local
-        Modbus is configured. Cloud-only points carry no source, so this stays ``None``
-        and the entities keep their attribute-free payload (no recorder bloat).
-
-        The ``daily_yield`` point additionally carries a ``daily_yield_diagnostic`` field
-        when a Modbus transport is configured (#223): the raw 16-bit register values
-        around the candidate daily_yield positions and every plausible
-        ``(address, scale)`` decoding, so a daytime re-capture can pick the right mapping
-        without guessing.
+        Cloud and Modbus paths both tag ``source`` on the point payload so hybrid setups
+        are debuggable without reading logs. Optional ``daily_yield_diagnostic`` is only
+        present when the Modbus debug option is enabled (gated in the coordinator).
         """
         point = self._current_point()
         source = point.get("source") if point else None
@@ -409,8 +407,8 @@ class SungrowDeviceSensor(SungrowSensor):
         # Enrich the device card with the model/serial the cloud reports.
         self._attr_device_info = build_device_info(device, self.plant_id, fallback_name=coordinator.plant_name)
         self._apply_point_metadata(point_code, init_data, device_name)
-        # Inverter internals (operating status, MPPT, DC power, ...) are diagnostics.
-        if point_code in _DIAGNOSTIC_CODES:
+        # Inverter internals (operating status, MPPT, DC power, device type, ...) are diagnostics.
+        if point_code in _DIAGNOSTIC_CODES or point_code == "device_type_code":
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _current_point(self) -> dict[str, Any] | None:

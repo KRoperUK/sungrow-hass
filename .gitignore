@@ -33,3 +33,4 @@ htmlcov/
 
 # Local-only AI planning artifacts (specs/plans) — kept off the repo and the docs site
 docs/superpowers/
+uv.lock

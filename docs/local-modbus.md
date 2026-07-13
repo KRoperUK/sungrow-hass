@@ -164,12 +164,29 @@ In **hybrid** mode these overlay the cloud data (Modbus wins where it has a valu
   still goes through the cloud, so use **hybrid** if you want both fast local reads and
   control. Local write support is tracked in
   [#220](https://github.com/KRoperUK/sungrow-hass/issues/220).
-- **`daily_yield` can read high** versus the cloud on some SG-RS firmware — a scaling/semantics
-  mismatch under investigation in
-  [#223](https://github.com/KRoperUK/sungrow-hass/issues/223). `total_yield` matches the cloud.
-  The `sensor.sungrow_*_daily_yield` entity carries a `daily_yield_diagnostic` attribute
-  (raw register frame + candidate `(address, scale)` decodings) — attach it to a comment
-  on #223 to help pin the cause down.
+- **`daily_yield` is derived from `total_yield`.** On observed SG-RS + WiNet-S firmware the
+  documented "Daily power yields" register (wire 5002) **never resets at midnight** — it
+  climbs with lifetime energy (see [#223](https://github.com/KRoperUK/sungrow-hass/issues/223)).
+  Lifetime `total_yield` matches the cloud, so the integration computes
+  `daily_yield = total_yield − total_at_start_of_local_day` and persists the baseline across
+  restarts. The sensor `source` is `modbus_derived`. An optional
+  **Expose raw Modbus daily_yield register dump** option attaches a
+  `daily_yield_diagnostic` attribute for register debugging (off by default — it is large).
+
+## Local-first, then add cloud (hybrid)
+
+If you started with **Modbus-only** (zeroconf) and later add iSolarCloud:
+
+1. Start **Add integration → Sungrow iSolarCloud** and complete OAuth as usual.
+2. When a standalone local entry already exists, the flow offers **Use your existing local
+   Modbus connection?** — confirm to attach that WiNet-S host to the new cloud entry and
+   remove the duplicate local entry.
+3. Or, after cloud is set up: **Configure** the cloud entry → set **Local Modbus host** to the
+   WiNet-S IP, then remove the old Modbus-only entry manually.
+
+Hybrid behaviour: plant/grid/tariff points from the cloud; overlapping inverter metrics from
+Modbus when available (`source` attribute: `cloud` / `modbus` / `modbus_derived`). Energy
+points reported in Wh are normalised to **kWh** so plant and inverter totals stay comparable.
 - **One local connection.** The WiNet-S serves a limited number of Modbus TCP clients; if you
   already poll it from another tool, reads here may fail intermittently.
 
