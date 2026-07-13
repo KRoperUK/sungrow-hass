@@ -296,6 +296,46 @@ async def test_finish_step_missing_code(hass: HomeAssistant, mock_auth):
     assert result["reason"] == "missing_code"
 
 
+async def test_finish_offers_merge_when_modbus_only_exists(hass: HomeAssistant, mock_auth):
+    """Cloud OAuth finish offers to adopt an existing Modbus-only entry (local-first hybrid)."""
+    from custom_components.sungrow.const import CONF_MODBUS_HOST, CONF_MODEL, CONF_TRANSPORT, TRANSPORT_MODBUS_ONLY
+
+    local = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="modbus_SN1",
+        title="Sungrow SG3.6RS (local)",
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_MODBUS_HOST: "192.168.1.93",
+            CONF_MODEL: "SG3.6RS",
+            "serial": "SN1",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+    )
+    local.add_to_hass(hass)
+
+    flow = _flow_at_finish(hass)
+    flow._code = "auth-code"
+    mock_auth.tokens = {"access_token": "tok", "refresh_token": "ref"}
+    flow.auth_client = mock_auth
+    flow.auth_client.async_authorize = AsyncMock()
+
+    result = await flow.async_step_finish()
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "merge_local_modbus"
+    assert result["description_placeholders"]["host"] == "192.168.1.93"
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result2 = await flow.async_step_merge_local_modbus({"merge_local": True})
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["options"][CONF_MODBUS_HOST] == "192.168.1.93"
+    assert result2["options"][CONF_SCAN_INTERVAL] == 30
+    # Standalone local entry removed so devices are not duplicated.
+    assert hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "modbus_SN1") is None
+
+
 # ---------------------------------------------------------------------------
 # Phase 2: the automatic OAuth-callback wait
 # ---------------------------------------------------------------------------
@@ -728,11 +768,16 @@ async def test_options_flow_stores_and_trims_modbus_host(hass: HomeAssistant, mo
     await hass.async_block_till_done()
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result2 = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        user_input={CONF_SCAN_INTERVAL: 30, CONF_MODBUS_HOST: "  192.168.1.93  "},
-    )
-    await hass.async_block_till_done()
+    # OptionsFlowWithReload reloads the entry; stub Modbus so the hybrid setup does not open sockets.
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(return_value={})
+    client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={CONF_SCAN_INTERVAL: 30, CONF_MODBUS_HOST: "  192.168.1.93  "},
+        )
+        await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_MODBUS_HOST] == "192.168.1.93"
@@ -766,17 +811,20 @@ async def test_options_flow_modbus_only_hides_cloud_settings(hass: HomeAssistant
         result = await hass.config_entries.options.async_init(entry.entry_id)
         assert result["type"] == data_entry_flow.FlowResultType.FORM
         assert result["step_id"] == "modbus_options"
-        # Only the poll interval — none of the cloud-only settings.
+        # Local poll + optional debug dump — none of the cloud-only settings.
+        from custom_components.sungrow.const import CONF_MODBUS_DEBUG_DAILY_YIELD
+
         keys = {str(m.schema) for m in result["data_schema"].schema}
-        assert keys == {CONF_SCAN_INTERVAL}
+        assert keys == {CONF_SCAN_INTERVAL, CONF_MODBUS_DEBUG_DAILY_YIELD}
 
         result2 = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={CONF_SCAN_INTERVAL: 15}
+            result["flow_id"],
+            user_input={CONF_SCAN_INTERVAL: 15, CONF_MODBUS_DEBUG_DAILY_YIELD: False},
         )
         await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result2["data"] == {CONF_SCAN_INTERVAL: 15}
+    assert result2["data"][CONF_SCAN_INTERVAL] == 15
     assert entry.options[CONF_SCAN_INTERVAL] == 15
 
 

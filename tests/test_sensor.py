@@ -149,8 +149,16 @@ def test_sensor_no_attributes_without_source():
     assert sensor.extra_state_attributes is None
 
 
+def test_device_type_code_is_diagnostic():
+    """device_type_code is a Modbus map selector — keep it out of the main entity list."""
+    point = {"code": "device_type_code", "value": "9732", "unit": None, "source": "modbus"}
+    coordinator = _coord_with_devices([], data={"device_type_code": point})
+    sensor = SungrowSensor(coordinator, "device_type_code", "123", "Plant", point)
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
 def test_daily_yield_sensor_surfaces_modbus_diagnostic_when_captured():
-    """#223: daily_yield's diagnostic dump rides along on the sensor as an extra attribute."""
+    """Opt-in daily_yield diagnostic dump rides along on the sensor as an extra attribute."""
     point = {"code": "daily_yield", "value": "64.0", "unit": "kWh", "source": "modbus"}
     coordinator = _coord_with_devices([], data={"daily_yield": point})
     coordinator.daily_yield_diagnostic = {

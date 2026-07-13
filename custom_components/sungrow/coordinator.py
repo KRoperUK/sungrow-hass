@@ -11,7 +11,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -21,6 +23,7 @@ from .const import (
     COMM_MODULE_POINTS,
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
+    CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
@@ -35,6 +38,7 @@ from .const import (
     INVERTER_OPERATING_STATUS_POINT,
     METER_DEVICE_POINTS,
 )
+from .energy_units import normalize_energy_units, tag_source
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
 # the coordinator indefinitely nor let successive polls pile up.
@@ -204,11 +208,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (Modbus preferred). None -> cloud only. Built lazily to avoid importing
         # pymodbus for cloud-only installs.
         self._modbus_client = self._build_modbus_client(config_entry)
-        # Raw-wire diagnostic for #223 (daily_yield cloud vs. Modbus discrepancy). Populated
-        # on each successful Modbus poll and surfaced on the daily_yield sensor's
-        # ``daily_yield_diagnostic`` attribute, so a daytime re-capture can pick the
-        # right (address, scale) without guessing. None until the first successful read.
+        # Raw-wire diagnostic for #223 (daily_yield register window). Populated on each
+        # successful Modbus poll and surfaced on the daily_yield sensor for inspection.
+        # The *entity value* is no longer taken from that register — see
+        # ``_async_apply_derived_daily_yield`` (SG-RS firmware never resets wire 5002).
         self.daily_yield_diagnostic: dict[str, Any] | None = None
+        # Persisted baseline for deriving daily_yield from total_yield when Modbus is used.
+        self._daily_yield_store: Store[dict[str, Any]] | None = (
+            Store(hass, 1, f"{DOMAIN}.daily_yield_baseline_{self.plant_id}")
+            if self._modbus_client is not None
+            else None
+        )
+        self._daily_yield_baseline_loaded = False
+        # Imported lazily-typed to avoid a circular import at module load; set on first use.
+        self._daily_yield_state: Any = None
 
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
@@ -280,10 +293,14 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # each inverter/ESS device's operating status so the Fault binary sensor can
         # show a human-readable reason (#182). The heavy diagnostic sets are still gated
         # on the option inside the fetch.
-        self.device_data = await self._async_fetch_device_data()
+        raw_devices = await self._async_fetch_device_data()
+        self.device_data = {
+            uuid: normalize_energy_units(tag_source(points, "cloud")) for uuid, points in raw_devices.items()
+        }
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         cloud_data = cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
+        cloud_data = normalize_energy_units(tag_source(cloud_data, "cloud"))
         # Overlay fast local Modbus values (Modbus preferred) when configured (#159).
         return await self._async_apply_modbus(cloud_data)
 
@@ -304,7 +321,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Local Modbus read failed for %s; using cloud data: %s", self.plant_name, err)
             return cloud_data
         await self._async_capture_daily_yield_diagnostic()
-        return merge_realtime(cloud_data, local)
+        local = normalize_energy_units(local)
+        merged = merge_realtime(cloud_data, local)
+        return await self._async_apply_derived_daily_yield(merged)
 
     async def _async_modbus_only_update(self) -> dict[str, Any]:
         """Read realtime data from the local Modbus client only (cloud-free entry, #159)."""
@@ -321,17 +340,49 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Local Modbus read failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
         await self._async_capture_daily_yield_diagnostic()
-        return cast("dict[str, Any]", data)
+        data = normalize_energy_units(cast("dict[str, Any]", data))
+        return await self._async_apply_derived_daily_yield(data)
+
+    async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.
+
+        SG-RS wire 5002 does not reset at midnight on observed firmware; lifetime
+        ``total_yield`` is trustworthy. Baseline is persisted so a restart mid-day
+        keeps counting from the same day start.
+        """
+        from .daily_yield import DailyYieldBaseline, apply_derived_daily_yield
+
+        if self._daily_yield_store is None:
+            return data
+        if not self._daily_yield_baseline_loaded:
+            stored = await self._daily_yield_store.async_load()
+            self._daily_yield_state = DailyYieldBaseline.from_store(stored)
+            self._daily_yield_baseline_loaded = True
+        if self._daily_yield_state is None:
+            self._daily_yield_state = DailyYieldBaseline()
+
+        local_date = dt_util.now().date()
+        data, new_state, daily = apply_derived_daily_yield(data, local_date=local_date, state=self._daily_yield_state)
+        if daily is None:
+            return data
+        if new_state.to_store() != self._daily_yield_state.to_store():
+            self._daily_yield_state = new_state
+            await self._daily_yield_store.async_save(new_state.to_store())
+        else:
+            self._daily_yield_state = new_state
+        return data
 
     async def _async_capture_daily_yield_diagnostic(self) -> None:
-        """Best-effort capture of the #223 daily_yield register window for inspection.
+        """Best-effort capture of the raw daily_yield register window (opt-in).
 
-        Runs an extra short Modbus read on the existing persistent connection after each
-        successful realtime poll. Failure is non-fatal: we keep the previous diagnostic
-        in place, so a transient blip never clears evidence the user is collecting for
-        the bug report.
+        Off by default: the dump is ~2 KB per state write and would bloat the recorder.
+        Enable via options → ``modbus_debug_daily_yield`` when investigating register maps.
         """
         if self._modbus_client is None:
+            return
+        entry = self.config_entry
+        if entry is None or not entry.options.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False):
+            self.daily_yield_diagnostic = None
             return
         try:
             async with asyncio.timeout(self._poll_timeout):
