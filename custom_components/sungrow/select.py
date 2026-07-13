@@ -31,9 +31,8 @@ PARALLEL_UPDATES = 1
 # only actuate when the plant is *not* in Self-consumption — writing 10004/10005 alone
 # is accepted by the device but ignored until the mode switches (issue #231).
 # Compulsory (2) is the portal "Forced mode" path confirmed on residential SH hybrids.
-# Write the raw param code so this works even when the installed pysolarcloud build
-# has not yet re-enabled the energy_management_mode name map.
-_EMS_MODE_PARAM = Control.PARAMETER_SPECS["energy_management_mode"]["code"]
+# Named writes require sungrow-isolarcloud >= 0.10.4 (re-enabled 10003 name map).
+_EMS_MODE_PARAM = "energy_management_mode"
 _EMS_MODE_SELF_CONSUMPTION = Control.encode_parameter("energy_management_mode", "self_consumption")
 _EMS_MODE_COMPULSORY = Control.encode_parameter("energy_management_mode", "compulsory")
 

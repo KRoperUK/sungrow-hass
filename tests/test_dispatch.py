@@ -519,7 +519,7 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     # or the inverter accepts 10004/10005 but stays in Self-consumption (#231).
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
-        {"charge_discharge_command": "170", "10003": "2"},
+        {"charge_discharge_command": "170", "energy_management_mode": "2"},
     )
 
 
@@ -542,7 +542,7 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
     # Stop restores Self-consumption (10003=0) so forced mode does not persist (#231).
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
-        {"charge_discharge_command": "204", "10003": "0"},
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
 
 
@@ -562,7 +562,7 @@ async def test_select_discharge_switches_to_compulsory_mode(hass: HomeAssistant)
 
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
-        {"charge_discharge_command": "187", "10003": "2"},
+        {"charge_discharge_command": "187", "energy_management_mode": "2"},
     )
 
 
@@ -1007,7 +1007,7 @@ async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
 
     data.control.async_update_parameters.assert_awaited_with(
         "ess-1",
-        {"charge_discharge_command": "204", "10003": "0"},
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
     mock_stop.assert_awaited_once()
     assert command.current_option == "Stop"
@@ -1075,7 +1075,7 @@ async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant
     # Reverted, not resumed: Stop + Self-consumption written, heartbeat never started.
     data.control.async_update_parameters.assert_awaited_with(
         "ess-1",
-        {"charge_discharge_command": "204", "10003": "0"},
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
     mock_start.assert_not_awaited()
     assert command.current_option == "Stop"

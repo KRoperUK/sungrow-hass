@@ -10,5 +10,5 @@ ruff==0.15.21
 mypy==2.2.0
 
 # Component dependencies
-sungrow-isolarcloud==0.10.3
+sungrow-isolarcloud==0.10.4
 pymodbus==3.13.1
