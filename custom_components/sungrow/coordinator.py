@@ -219,6 +219,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The *entity value* is no longer taken from that register — see
         # ``_async_apply_derived_daily_yield`` (SG-RS firmware never resets wire 5002).
         self.daily_yield_diagnostic: dict[str, Any] | None = None
+        # Local Modbus diagnostics surfaced in the config-entry diagnostics download:
+        # detected family, unsupported register blocks skipped, and the last error string.
+        self.modbus_diagnostics: dict[str, Any] = {}
         # Persisted baseline for deriving daily_yield from total_yield when Modbus is used.
         self._daily_yield_store: Store[dict[str, Any]] | None = (
             Store(hass, 1, f"{DOMAIN}.daily_yield_baseline_{self.plant_id}")
@@ -324,6 +327,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.data
             raise UpdateFailed(f"Local Modbus read failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
+        self.modbus_diagnostics = dict(self._modbus_client.modbus_diagnostics)
         await self._async_capture_daily_yield_diagnostic()
         data = normalize_energy_units(cast("dict[str, Any]", data))
         return await self._async_apply_derived_daily_yield(data)

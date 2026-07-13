@@ -57,6 +57,11 @@ class SungrowModbusClient:
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
         self._family_detected = False
+        self.modbus_diagnostics: dict[str, Any] = {
+            "device_family": None,
+            "skipped_blocks": [],
+            "last_error": None,
+        }
 
     async def async_read_realtime(self) -> dict[str, dict[str, Any]]:
         """Read and decode the model's realtime input registers.
@@ -69,7 +74,10 @@ class SungrowModbusClient:
         :class:`SungrowModbusError` on connection/read failure so the caller can fall
         back to the cloud transport.
         """
+        self.modbus_diagnostics["skipped_blocks"] = []
+        self.modbus_diagnostics["last_error"] = None
         await self._async_ensure_family()
+        self.modbus_diagnostics["device_family"] = self.model
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")
@@ -79,6 +87,7 @@ class SungrowModbusClient:
                 try:
                     registers = await self._read_input(start, count)
                 except SungrowModbusError as err:
+                    self.modbus_diagnostics["last_error"] = str(err)
                     # Exception code 2 = Illegal Data Address: the inverter firmware
                     # does not implement any register in this block (e.g. high energy
                     # registers on a string inverter). Skip the block rather than fail
@@ -86,6 +95,7 @@ class SungrowModbusClient:
                     # empty result and can retry on the next cycle.
                     if _is_unsupported_address(err):
                         _LOGGER.debug("Skipping unsupported Modbus block at %s (count %s): %s", start, count, err)
+                        self.modbus_diagnostics["skipped_blocks"].append({"start": start, "count": count})
                         continue
                     raise
                 out.update(decode_registers(points, start, registers))

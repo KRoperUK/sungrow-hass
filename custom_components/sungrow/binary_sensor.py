@@ -16,6 +16,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pysolarcloud.plants import DeviceType
 
 from . import build_device_info
 from .coordinator import SungrowPlantCoordinator
@@ -68,6 +69,13 @@ def connectivity_is_on(status: Any) -> bool | None:
 def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySensorEntity]:
     """Build the fault + connectivity binary sensors for every device the plant reports."""
     sensors: list[BinarySensorEntity] = []
+    if coordinator.plants_service is None:
+        # Modbus-only path: the local inverter's connectivity is driven by the last poll.
+        for device in coordinator.devices:
+            if device.get("device_type") == DeviceType.INVERTER and device.get("uuid"):
+                sensors.append(SungrowModbusConnectivityBinarySensor(coordinator, device))
+        return sensors
+
     for device in coordinator.devices:
         if not device.get("uuid"):
             continue
@@ -195,3 +203,42 @@ class SungrowDeviceConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordi
         """Expose static device details (commissioning date) for the device page."""
         device = self._device() or {}
         return {"commissioning_date": device.get("grid_connection_date")}
+
+
+class SungrowModbusConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):
+    """Connectivity sensor for a local Modbus inverter driven by poll success."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: SungrowPlantCoordinator, device: dict[str, Any]) -> None:
+        """Initialize the Modbus connectivity sensor for a local inverter."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_online"
+        self._attr_device_info = build_device_info(
+            device,
+            coordinator.plant_id,
+            fallback_name=coordinator.plant_name,
+            via_plant_id=getattr(coordinator, "via_plant_id", None),
+            configuration_url=getattr(coordinator, "local_configuration_url", None),
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """True when the last Modbus poll succeeded."""
+        return self.coordinator.last_update_success
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose Modbus diagnostics (skipped blocks, last error) for troubleshooting."""
+        diag = getattr(self.coordinator, "modbus_diagnostics", {}) or {}
+        attrs: dict[str, Any] = {}
+        if diag.get("device_family"):
+            attrs["device_family"] = diag["device_family"]
+        if diag.get("skipped_blocks"):
+            attrs["skipped_blocks"] = diag["skipped_blocks"]
+        if diag.get("last_error"):
+            attrs["last_error"] = diag["last_error"]
+        return attrs
