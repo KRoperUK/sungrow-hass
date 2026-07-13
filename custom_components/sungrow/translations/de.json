@@ -40,7 +40,7 @@
       },
       "zeroconf_confirm": {
         "title": "Lokalen Sungrow-Wechselrichter einrichten",
-        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
+        "description": "Ein Sungrow **{model}** wurde in Ihrem Netzwerk unter **{host}** (WiNet-S) gefunden. Richten Sie ihn als **separaten lokalen Eintrag** ein, der den Wechselrichter über Modbus ausliest — schnell, unbegrenzt und offline-fähig, ohne iSolarCloud-Konto. Wenn Sie auch einen Cloud-Eintrag für denselben Wechselrichter haben, bleiben beide unabhängig (das lokale Gerät wird unter der Cloud-Anlage verknüpft, wenn die Seriennummern übereinstimmen)."
       },
       "reconfigure_modbus": {
         "title": "Lokalen Sungrow-Wechselrichter neu konfigurieren",
@@ -85,7 +85,7 @@
         "description": "Legen Sie fest, wie oft Home Assistant den Wechselrichter direkt über lokales Modbus ausliest. Es gibt kein Cloud-API-Kontingent, sodass Sie häufig abfragen können; das Minimum beträgt 10 Sekunden.",
         "data": {
           "scan_interval": "Abfrageintervall (Sekunden)",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "modbus_debug_daily_yield": "Rohdaten-Dump des Modbus-daily_yield-Registers auf dem Sensor anzeigen (nur Debug)"
         }
       }
     }

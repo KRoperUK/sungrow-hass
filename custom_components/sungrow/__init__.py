@@ -195,17 +195,17 @@ def build_device_info(
     ``via_plant_id`` overrides the parent plant identifier (used by a local Modbus
     inverter that nests under a matching cloud plant without merging data).
     """
-    kwargs: dict[str, Any] = {
-        "identifiers": {(DOMAIN, str(device["uuid"]))},
-        "name": device.get("device_name") or device.get("device_model_name") or fallback_name,
-        "manufacturer": device.get("factory_name") or "Sungrow",
-        "model": device.get("device_model_code") or device.get("device_model_name"),
-        "serial_number": device.get("device_sn"),
-        "via_device": (DOMAIN, via_plant_id or plant_id),
-    }
+    info = DeviceInfo(
+        identifiers={(DOMAIN, str(device["uuid"]))},
+        name=device.get("device_name") or device.get("device_model_name") or fallback_name,
+        manufacturer=device.get("factory_name") or "Sungrow",
+        model=device.get("device_model_code") or device.get("device_model_name"),
+        serial_number=device.get("device_sn"),
+        via_device=(DOMAIN, via_plant_id or plant_id),
+    )
     if configuration_url:
-        kwargs["configuration_url"] = configuration_url
-    return DeviceInfo(**kwargs)
+        info["configuration_url"] = configuration_url
+    return info
 
 
 def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
@@ -436,9 +436,7 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     if cloud_plant_id is None:
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id,
-            **build_plant_device_info(
-                serial, f"Sungrow {model} (local)", winet_url or DEFAULT_CONSOLE_URL
-            ),
+            **build_plant_device_info(serial, f"Sungrow {model} (local)", winet_url or DEFAULT_CONSOLE_URL),
         )
     # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))

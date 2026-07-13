@@ -40,7 +40,7 @@
       },
       "zeroconf_confirm": {
         "title": "Configurer l'onduleur Sungrow local",
-        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
+        "description": "Un onduleur Sungrow **{model}** a été découvert sur votre réseau à **{host}** (WiNet-S). Configurez-le comme une **entrée locale séparée** qui lit l'onduleur via Modbus — rapide, sans limite de consommation et fonctionnant hors ligne, sans compte iSolarCloud requis. Si vous avez également une entrée cloud pour le même onduleur, les deux restent indépendantes (le dispositif local est lié sous la centrale cloud lorsque les numéros de série correspondent)."
       },
       "reconfigure_modbus": {
         "title": "Reconfigurer l'onduleur Sungrow local",
@@ -85,7 +85,7 @@
         "description": "Ajustez la fréquence à laquelle Home Assistant lit l'onduleur directement via Modbus local. Il n'y a pas de quota d'API cloud, vous pouvez donc interroger fréquemment ; le minimum est de 10 secondes.",
         "data": {
           "scan_interval": "Intervalle d'interrogation (secondes)",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "modbus_debug_daily_yield": "Exposer le dump brut du registre daily_yield Modbus sur le capteur (débogage uniquement)"
         }
       }
     }

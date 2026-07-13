@@ -40,7 +40,7 @@
       },
       "zeroconf_confirm": {
         "title": "Gosod gwrthdröydd Sungrow lleol",
-        "description": "A Sungrow **{model}** was discovered on your network at **{host}** (WiNet-S). Set it up as a **separate local entry** that reads the inverter over Modbus — fast, unmetered and offline-capable, with no iSolarCloud account required. If you also have a cloud entry for the same inverter, both stay independent (the local device is linked under the cloud plant when serials match)."
+        "description": "Canfuwyd **{model}** Sungrow ar eich rhwydwaith yn **{host}** (WiNet-S). Crëwch ef fel **cofnod lleol ar wahân** sy'n darllen y gwrthdröydd dros Modbus — cyflym, heb fesur ac yn gweithio all-lein, heb angen cyfrif iSolarCloud. Os oes gennych chi hefyd gofnod cwmwl ar gyfer yr un gwrthdröydd, mae'r ddau'n aros annibynnol (mae'r ddyfais leol yn gysylltiedig o dan y planhigyn cwmwl pan mae'r rhifau serial yn cyfateb)."
       },
       "reconfigure_modbus": {
         "title": "Ailgyflunio gwrthdröydd Sungrow lleol",
@@ -85,7 +85,7 @@
         "description": "Addaswch pa mor aml y mae Home Assistant yn darllen y gwrthdröydd yn uniongyrchol dros Modbus lleol. Nid oes cwota API cwmwl, felly gallwch holi'n aml; yr isafswm yw 10 eiliad.",
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "modbus_debug_daily_yield": "Datgelu dump cofrestr daily_yield Modbus crai ar y synhwyrydd (debug yn unig)"
         }
       }
     }
