@@ -91,6 +91,40 @@ def test_signal_strength_sensor_gets_db_unit_and_signal_icon():
     assert sensor.native_value == -62.0
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        "battery_soc",
+        "battery_level_soc",
+        "battery_level",
+        "battery_state_of_charge",
+        "total_field_soc",
+        "energy_storage_soc_ems",
+    ],
+)
+def test_battery_soc_unitless_gets_percent_unit(code):
+    """Unitless SOC points still get device_class battery with unit % (#228).
+
+    The API often omits the unit for charge-level points; classification still
+    marks them BATTERY from the code, but HA rejects battery without '%'.
+    """
+    point = {"code": code, "value": "72", "unit": None}
+    coordinator = _coord_with_devices([], data={code: point})
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.BATTERY
+    assert sensor._attr_native_unit_of_measurement == "%"
+    assert sensor.native_value == 72.0
+
+
+def test_battery_soc_empty_string_unit_gets_percent():
+    """An empty-string unit from the API is treated like missing (#228)."""
+    point = {"code": "battery_soc", "value": "55", "unit": ""}
+    coordinator = _coord_with_devices([], data={"battery_soc": point})
+    sensor = SungrowSensor(coordinator, "battery_soc", "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.BATTERY
+    assert sensor._attr_native_unit_of_measurement == "%"
+
+
 def test_power_fraction_gets_gauge_icon():
     """A per-code override gives power_fraction a gauge icon, not the solar fallback."""
     point = {"code": "power_fraction", "value": "0.83", "unit": ""}
