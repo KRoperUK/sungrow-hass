@@ -20,9 +20,10 @@ from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
     REGISTER_MAPS,
-    block_bounds,
+    block_partitions,
     daily_yield_diagnostic_dump,
     decode_registers,
+    family_for_device_type_code,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,21 +56,29 @@ class SungrowModbusClient:
         self._client = AsyncModbusTcpClient(host, port=port, timeout=CONNECT_TIMEOUT)
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
+        self._family_detected = False
 
     async def async_read_realtime(self) -> dict[str, dict[str, Any]]:
         """Read and decode the model's realtime input registers.
+
+        On the first call the inverter family is auto-detected from register 5000
+        (device_type_code) when the code is known, falling back to the configured
+        ``model`` otherwise.
 
         Returns ``{code: {"code", "value", "unit", "source": "modbus"}}``. Raises
         :class:`SungrowModbusError` on connection/read failure so the caller can fall
         back to the cloud transport.
         """
+        await self._async_ensure_family()
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")
-        start, count = block_bounds(points)
+        out: dict[str, dict[str, Any]] = {}
         async with self._lock:
-            registers = await self._read_input(start, count)
-        return decode_registers(points, start, registers)
+            for start, count in block_partitions(points):
+                registers = await self._read_input(start, count)
+                out.update(decode_registers(points, start, registers))
+        return out
 
     async def async_read_daily_yield_diagnostic(self) -> dict[str, Any]:
         """Read the wire-register window around the daily_yield register and return a #223 diagnostic.
@@ -86,6 +95,24 @@ class SungrowModbusClient:
         async with self._lock:
             registers = await self._read_input(DAILY_YIELD_DIAG_START, DAILY_YIELD_DIAG_COUNT)
         return daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+
+    async def _async_ensure_family(self) -> None:
+        """Detect the inverter family once from register 5000 and update ``model``."""
+        if self._family_detected:
+            return
+        self._family_detected = True
+        try:
+            async with self._lock:
+                registers = await self._read_input(4999, 1)
+            code = int(registers[0])
+            family = family_for_device_type_code(code)
+            if family is not None:
+                _LOGGER.debug("Device-type code %s mapped to Modbus family %s", code, family)
+                self.model = family
+                return
+            _LOGGER.debug("Unknown device-type code %s; keeping configured model %s", code, self.model)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Could not auto-detect Modbus family: %s", err)
 
     async def _read_input(self, address: int, count: int) -> list[int]:
         """Read a contiguous input-register block, connecting/reconnecting as needed."""

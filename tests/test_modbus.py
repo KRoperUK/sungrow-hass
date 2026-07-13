@@ -9,11 +9,15 @@ from custom_components.sungrow.modbus_registers import (
     DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES,
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
+    DEVICE_TYPE_CODE_TO_FAMILY,
     SG_RS_INPUT_POINTS,
+    SH_RT_INPUT_POINTS,
     ModbusPoint,
     block_bounds,
+    block_partitions,
     daily_yield_diagnostic_dump,
     decode_registers,
+    family_for_device_type_code,
 )
 
 # ---------------------------------------------------------------------------
@@ -48,18 +52,64 @@ def test_decode_skips_points_outside_the_block():
     assert "out" not in out
 
 
+def test_decode_omits_nan_sentinel_values():
+    """Points marked with nan_value are omitted when the raw register matches."""
+    points = (
+        ModbusPoint(0, "present", "u16", 0.1, "V"),
+        ModbusPoint(1, "absent", "u16", 0.1, "V", nan_value=0xFFFF),
+    )
+    out = decode_registers(points, 0, [2404, 0xFFFF])
+    assert "present" in out
+    assert "absent" not in out
+
+
 def test_block_bounds_covers_all_points_in_one_read():
     """block_bounds spans from the lowest address to past the highest (incl. 32-bit width)."""
-    start, count = block_bounds(SG_RS_INPUT_POINTS)
-    assert start == 4999  # device_type_code
-    # Highest point is grid_frequency at 5035 (1 register) -> end 5036.
-    assert start + count == 5036
-    assert count == 37
+    points = (
+        ModbusPoint(10, "first", "u16", 1),
+        ModbusPoint(20, "wide", "u32", 1),
+        ModbusPoint(40, "last", "u16", 1),
+    )
+    start, count = block_bounds(points)
+    assert start == 10
+    assert start + count == 41
 
 
-def test_sg_rs_map_decodes_a_realistic_frame():
-    """A realistic SG-RS input-register frame decodes to sane, correctly-scaled values."""
-    start, count = block_bounds(SG_RS_INPUT_POINTS)
+def test_block_partitions_splits_wide_gaps():
+    """Wide address gaps are split into separate reads."""
+    points = (
+        ModbusPoint(10, "low", "u16", 1),
+        ModbusPoint(300, "high", "u16", 1),
+        ModbusPoint(310, "higher", "u16", 1),
+    )
+    blocks = block_partitions(points, max_gap=256)
+    assert blocks == [(10, 1), (300, 11)]
+
+
+def test_block_partitions_keeps_nearby_points_together():
+    """Nearby points are kept in a single block."""
+    points = (
+        ModbusPoint(10, "a", "u16", 1),
+        ModbusPoint(12, "b", "u16", 1),
+        ModbusPoint(15, "c", "u32", 1),
+    )
+    blocks = block_partitions(points, max_gap=256)
+    assert blocks == [(10, 7)]
+
+
+def test_sh_rt_map_partitions_around_large_gaps():
+    """The SH-RT map is split around gaps > 256 registers."""
+    blocks = block_partitions(SH_RT_INPUT_POINTS)
+    assert len(blocks) == 3
+    assert blocks[0][0] == 4999
+    assert blocks[1][0] == 5600
+    assert blocks[2][0] == 12999
+
+
+def test_sg_rs_low_block_decodes_a_realistic_frame():
+    """A realistic SG-RS low-register frame decodes to sane, correctly-scaled values."""
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
     regs = [0] * count
 
     def put(addr, *values):
@@ -75,7 +125,7 @@ def test_sg_rs_map_decodes_a_realistic_frame():
     put(5030, 259, 0)  # total active power 259 W
     put(5035, 499)  # grid frequency 49.9 Hz
 
-    out = decode_registers(SG_RS_INPUT_POINTS, start, regs)
+    out = decode_registers(low_points, start, regs)
     assert out["daily_yield"]["value"] == 38.9
     assert out["total_yield"]["value"] == 6305
     assert out["internal_temperature"]["value"] == 47.2
@@ -85,13 +135,30 @@ def test_sg_rs_map_decodes_a_realistic_frame():
     assert out["grid_frequency"]["value"] == 49.9  # regression: scale is ×0.1, not ×0.01
 
 
+def test_family_for_device_type_code_maps_known_codes():
+    """Known device-type codes resolve to a register-map family."""
+    for code, family in DEVICE_TYPE_CODE_TO_FAMILY.items():
+        assert family_for_device_type_code(code) == family
+
+
+def test_family_for_device_type_code_returns_none_for_unknown():
+    """Unknown codes return None so callers can fall back."""
+    assert family_for_device_type_code(99999) is None
+    assert family_for_device_type_code(None) is None
+
+
 # ---------------------------------------------------------------------------
 # SungrowModbusClient (pymodbus mocked)
 # ---------------------------------------------------------------------------
 
 
 def _mock_client_cls(registers, *, connected=True, connect_ok=True, is_error=False):
-    """Patch AsyncModbusTcpClient with a stub whose read returns ``registers``."""
+    """Patch AsyncModbusTcpClient with a stub whose read returns ``registers``.
+
+    The mock always returns the same register list regardless of the requested
+    address/count, which is good enough for the tests that only look at one
+    specific offset.
+    """
     inner = MagicMock()
     inner.connected = connected
     inner.connect = AsyncMock(return_value=connect_ok)
@@ -104,15 +171,25 @@ def _mock_client_cls(registers, *, connected=True, connect_ok=True, is_error=Fal
     return cls, inner
 
 
+def _skip_family_detect(client: SungrowModbusClient) -> None:
+    """Mark family detection done so tests can focus on a single read path."""
+    client._family_detected = True  # noqa: SLF001
+
+
 async def test_read_realtime_returns_decoded_points():
     """A successful read yields the decoded SG-RS points tagged source=modbus."""
-    start, count = block_bounds(SG_RS_INPUT_POINTS)
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
     regs = [0] * count
     regs[5035 - start] = 499  # grid frequency
     cls, inner = _mock_client_cls(regs)
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
         client = SungrowModbusClient("10.0.0.1", unit=1)
-        data = await client.async_read_realtime()
+        _skip_family_detect(client)
+        # Restrict to the low block so the test only exercises one read.
+        client.model = "_test_sg_rs_low"
+        with patch.dict("custom_components.sungrow.modbus.REGISTER_MAPS", {"_test_sg_rs_low": low_points}, clear=False):
+            data = await client.async_read_realtime()
     assert data["grid_frequency"]["value"] == 49.9
     assert data["grid_frequency"]["source"] == "modbus"
     inner.read_input_registers.assert_awaited_once()
@@ -120,9 +197,15 @@ async def test_read_realtime_returns_decoded_points():
 
 async def test_read_connects_when_not_connected():
     """The client connects before reading if the socket isn't up yet."""
-    cls, inner = _mock_client_cls([0] * block_bounds(SG_RS_INPUT_POINTS)[1], connected=False)
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    cls, inner = _mock_client_cls([0] * count, connected=False)
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
-        await SungrowModbusClient("10.0.0.1").async_read_realtime()
+        client = SungrowModbusClient("10.0.0.1")
+        _skip_family_detect(client)
+        client.model = "_test_sg_rs_low"
+        with patch.dict("custom_components.sungrow.modbus.REGISTER_MAPS", {"_test_sg_rs_low": low_points}, clear=False):
+            await client.async_read_realtime()
     inner.connect.assert_awaited_once()
 
 
@@ -143,7 +226,15 @@ async def test_read_error_raises_and_drops_connection():
         patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls),
         pytest.raises(SungrowModbusError, match="failed"),
     ):
-        await SungrowModbusClient("10.0.0.1").async_read_realtime()
+        client = SungrowModbusClient("10.0.0.1")
+        _skip_family_detect(client)
+        client.model = "_test_error"
+        with patch.dict(
+            "custom_components.sungrow.modbus.REGISTER_MAPS",
+            {"_test_error": (ModbusPoint(0, "x", "u16", 1),)},
+            clear=False,
+        ):
+            await client.async_read_realtime()
     inner.close.assert_called_once()
 
 
@@ -152,16 +243,63 @@ async def test_unknown_model_raises():
     cls, _ = _mock_client_cls([])
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
         client = SungrowModbusClient("10.0.0.1", model="sh_hybrid_not_yet_mapped")
+        _skip_family_detect(client)
         with pytest.raises(SungrowModbusError, match="register map"):
             await client.async_read_realtime()
 
 
 async def test_read_passes_configured_unit_as_device_id():
     """The configured unit id is forwarded to pymodbus as device_id."""
-    cls, inner = _mock_client_cls([0] * block_bounds(SG_RS_INPUT_POINTS)[1])
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    cls, inner = _mock_client_cls([0] * count)
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
-        await SungrowModbusClient("10.0.0.1", unit=3).async_read_realtime()
+        client = SungrowModbusClient("10.0.0.1", unit=3)
+        _skip_family_detect(client)
+        client.model = "_test_sg_rs_low"
+        with patch.dict("custom_components.sungrow.modbus.REGISTER_MAPS", {"_test_sg_rs_low": low_points}, clear=False):
+            await client.async_read_realtime()
     assert inner.read_input_registers.await_args.kwargs["device_id"] == 3
+
+
+async def test_family_auto_detection_reads_device_type_code_and_switches_map():
+    """On first read the client detects family from register 5000 and switches maps."""
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    regs = [0] * count
+    regs[4999 - start] = 9732  # SG-RS device-type code
+    regs[5035 - start] = 499  # grid frequency
+    cls, inner = _mock_client_cls(regs)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1")
+        # Restrict to low block to keep the test focused on one read after detection.
+        with patch.dict("custom_components.sungrow.modbus.REGISTER_MAPS", {"sg_rs": low_points}, clear=False):
+            data = await client.async_read_realtime()
+    assert client.model == "sg_rs"
+    assert data["grid_frequency"]["value"] == 49.9
+    # First call is family detection, second call is the block read.
+    assert inner.read_input_registers.await_count == 2
+
+
+async def test_family_auto_detection_falls_back_to_configured_model_for_unknown_code():
+    """An unknown device-type code keeps the configured model."""
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    regs = [0] * count
+    regs[4999 - start] = 12345  # Unknown device-type code
+    regs[5035 - start] = 499
+    cls, inner = _mock_client_cls(regs)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", model="sg_rs")
+        with patch.dict("custom_components.sungrow.modbus.REGISTER_MAPS", {"sg_rs": low_points}, clear=False):
+            await client.async_read_realtime()
+    assert client.model == "sg_rs"
+    assert inner.read_input_registers.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# #223 diagnostic dump
+# ---------------------------------------------------------------------------
 
 
 def test_daily_yield_diagnostic_dump_lists_every_candidate_address_and_scale():
