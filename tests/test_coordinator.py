@@ -803,7 +803,44 @@ async def test_apply_modbus_merges_over_cloud(hass: HomeAssistant):
     merged = await coordinator._async_apply_modbus(cloud)
     assert merged["total_active_power"]["value"] == 256
     assert merged["total_active_power"]["source"] == "modbus"
+    # No total_yield in this payload → derived daily is not applied; cloud daily kept.
     assert merged["daily_yield"]["source"] == "cloud"
+
+
+async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
+    """When Modbus supplies total_yield, daily_yield is total − start-of-day baseline (#223)."""
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+
+    entry = _make_entry(data={CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_yield": {"code": "total_yield", "value": 6467.0, "unit": "kWh", "source": "modbus"},
+            "daily_yield": {"code": "daily_yield", "value": 201.6, "unit": "kWh", "source": "modbus"},
+        }
+    )
+    # Pretend we already saw 6462 earlier today.
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline(
+        baseline=6462.0, baseline_date=date(2026, 7, 13), last_total=6462.0
+    )
+    # Avoid Store I/O in the unit test.
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 7, 13)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_yield"]["value"] == 5.0
+    assert data["daily_yield"]["source"] == "modbus_derived"
+    assert data["total_yield"]["value"] == 6467.0
+    coordinator._daily_yield_store.async_save.assert_awaited()
 
 
 async def test_apply_modbus_falls_back_to_cloud_on_error(hass: HomeAssistant):
