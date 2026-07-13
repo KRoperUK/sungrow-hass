@@ -146,6 +146,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
         if service is not None:
             all_devices, device_realtime = await _probe_plant_devices(service, plant_id)
 
+        modbus_diag: dict[str, Any] = {}
+        if getattr(coordinator, "modbus_diagnostics", None):
+            modbus_diag = dict(coordinator.modbus_diagnostics)
+
         plant_data[plant_id] = {
             "plant_name": coordinator.plant_name,
             "last_update_success": coordinator.last_update_success,
@@ -156,6 +160,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "all_devices": all_devices,
             # Per-device-type realtime data (best effort; {} where unsupported).
             "device_realtime": device_realtime,
+            # Local Modbus-only diagnostic metadata (skipped blocks, last error, family).
+            "modbus_diagnostics": modbus_diag,
         }
 
     return async_redact_data(

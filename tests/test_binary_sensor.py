@@ -5,13 +5,14 @@ from unittest.mock import MagicMock
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from pysolarcloud.plants import DeviceFaultStaus
+from pysolarcloud.plants import DeviceFaultStaus, DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import SungrowData
 from custom_components.sungrow.binary_sensor import (
     SungrowDeviceConnectivityBinarySensor,
     SungrowDeviceFaultBinarySensor,
+    SungrowModbusConnectivityBinarySensor,
     async_setup_entry,
     connectivity_is_on,
     fault_is_on,
@@ -169,3 +170,47 @@ def test_fault_binary_sensor_device_info_enriched():
     assert info["model"] == "SG3.6RS"
     assert info["serial_number"] == "A1"
     assert (DOMAIN, "inv-1") in info["identifiers"]
+
+
+async def test_modbus_connectivity_binary_sensor(hass: HomeAssistant):
+    """A Modbus-only entry creates a connectivity sensor driven by last_update_success."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_name": "Inverter1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SG3.6RS",
+            "device_sn": "A1",
+            "factory_name": "SUNGROW",
+        }
+    ]
+    coordinator = _coordinator_with(devices)
+    coordinator.plants_service = None  # Modbus-only
+    coordinator.via_plant_id = None
+    coordinator.local_configuration_url = "http://10.0.0.9"
+    coordinator.modbus_diagnostics = {
+        "device_family": "sg_rs",
+        "skipped_blocks": [{"start": 13035, "count": 12}],
+        "last_error": None,
+    }
+    data = SungrowData(coordinators=[coordinator], control=None, devices={"12345": devices})
+    entry.runtime_data = data
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    conn = next((e for e in added if isinstance(e, SungrowModbusConnectivityBinarySensor)), None)
+    assert conn is not None
+    assert conn._attr_device_class == BinarySensorDeviceClass.CONNECTIVITY
+    assert conn._attr_unique_id == "12345_inv-1_online"
+    assert conn.is_on is True  # last_update_success = True
+    attrs = conn.extra_state_attributes
+    assert attrs["device_family"] == "sg_rs"
+    assert attrs["skipped_blocks"] == [{"start": 13035, "count": 12}]
+    assert "last_error" not in attrs  # None values are not exposed
+
+    # Toggle last_update_success
+    coordinator.last_update_success = False
+    assert conn.is_on is False

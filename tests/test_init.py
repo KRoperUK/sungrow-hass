@@ -182,7 +182,7 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     with patch.object(hass.config_entries, "async_unload_platforms", side_effect=_spy):
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
-    assert seen["platforms"] == [Platform.SENSOR]
+    assert seen["platforms"] == [Platform.BINARY_SENSOR, Platform.SENSOR]
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 
@@ -316,7 +316,11 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
     client.async_read_realtime = AsyncMock(
         return_value={"grid_frequency": {"code": "grid_frequency", "value": 50.0, "unit": "Hz", "source": "modbus"}}
     )
-    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+    # Patch is_running before setup so the code takes the listener path
+    with (
+        patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client),
+        patch.object(hass, "is_running", False),
+    ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 

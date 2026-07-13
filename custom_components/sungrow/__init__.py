@@ -17,6 +17,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.http import HomeAssistantView
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
@@ -43,11 +44,11 @@ from .const import (
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
-# A cloud-free Modbus-only entry has no device status or dispatch, so it sets up only
-# the sensor platform (#159). Setup and unload MUST use the same list — unloading a
-# platform that was never set up fails the unload, which breaks the options-change
-# reload and takes every entity unavailable.
-MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.SENSOR]
+# A cloud-free Modbus-only entry has no cloud device status or dispatch, but it does
+# get a local connectivity binary sensor (#159). Setup and unload MUST use the same
+# list — unloading a platform that was never set up fails the unload, which breaks the
+# options-change reload and takes every entity unavailable.
+MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 
 def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
@@ -459,8 +460,9 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
 
     # If no cloud plant was found at setup time, the local entry may have set up before
-    # the cloud entry. Listen once for HA startup to finish, then re-check and reload so
-    # the inverter can nest under the cloud plant device when it exists.
+    # the cloud entry. Re-check once HA is running and reload so the inverter can nest
+    # under the cloud plant device. If HA is already running (e.g. config flow addition),
+    # schedule the check after a short delay so any in-progress cloud setups finish first.
     if cloud_plant_id is None:
 
         async def _async_recheck_nesting(_: Any) -> None:
@@ -468,7 +470,10 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
                 _LOGGER.debug("Cloud plant found after startup for %s; reloading local entry", serial)
                 await hass.config_entries.async_reload(entry.entry_id)
 
-        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_recheck_nesting))
+        if hass.is_running:
+            entry.async_on_unload(async_call_later(hass, 5, _async_recheck_nesting))
+        else:
+            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_recheck_nesting))
 
     return True
 
