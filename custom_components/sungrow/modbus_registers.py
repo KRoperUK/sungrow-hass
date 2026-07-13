@@ -79,10 +79,6 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5032, "reactive_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5034, "power_factor", "s16", 0.001, None, nan_value=NAN_S16),
     ModbusPoint(5035, "grid_frequency", "u16", 0.1, "Hz"),
-    ModbusPoint(13035, "daily_imported_energy", "u16", 0.1, "kWh", nan_value=NAN_U16),
-    ModbusPoint(13036, "total_imported_energy", "u32", 0.1, "kWh", nan_value=NAN_U16),
-    ModbusPoint(13044, "daily_exported_energy", "u16", 0.1, "kWh", nan_value=NAN_U16),
-    ModbusPoint(13045, "total_exported_energy", "u32", 0.1, "kWh", nan_value=NAN_U16),
 )
 
 # Hybrid inverter (SH-RT / SH-RS) input registers — Modbus function 0x04.

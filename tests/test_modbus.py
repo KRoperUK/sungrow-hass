@@ -238,6 +238,42 @@ async def test_read_error_raises_and_drops_connection():
     inner.close.assert_called_once()
 
 
+async def test_unsupported_address_block_is_skipped_but_other_blocks_return_data():
+    """An Illegal Data Address (exception_code=2) block is skipped; other blocks are decoded."""
+    test_points = (
+        ModbusPoint(0, "ok", "u16", 1),
+        # Far enough away to force a second read block.
+        ModbusPoint(300, "also_unsupported", "u16", 1),
+    )
+    cls, inner = _mock_client_cls([], is_error=True)
+
+    def side_effect(address, count, device_id):
+        result = MagicMock()
+        result.isError.return_value = True
+        if address == 0:
+            result.__str__ = lambda _s: "ExceptionResponse(dev_id=1, function_code=132, exception_code=2)"
+        else:
+            result.__str__ = lambda _s: "ExceptionResponse(dev_id=1, function_code=132, exception_code=4)"
+        return result
+
+    inner.read_input_registers = AsyncMock(side_effect=side_effect)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1")
+        _skip_family_detect(client)
+        client.model = "_test_skip"
+        with (
+            patch.dict(
+                "custom_components.sungrow.modbus.REGISTER_MAPS",
+                {"_test_skip": test_points},
+                clear=False,
+            ),
+            pytest.raises(SungrowModbusError, match="exception_code=4"),
+        ):
+            await client.async_read_realtime()
+    # The illegal-address block was skipped; the second block raised a different error.
+    assert inner.read_input_registers.await_count == 2
+
+
 async def test_unknown_model_raises():
     """An unmapped model raises rather than silently returning nothing."""
     cls, _ = _mock_client_cls([])
