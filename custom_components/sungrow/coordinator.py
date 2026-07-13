@@ -380,7 +380,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self._modbus_client is None:
             return
-        if not self.config_entry.options.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False):
+        entry = self.config_entry
+        if entry is None or not entry.options.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False):
             self.daily_yield_diagnostic = None
             return
         try:

@@ -120,7 +120,8 @@ def apply_derived_daily_yield(
 
     daily, new_state = step_daily_yield(total, local_date, state)
     unit = total_point.get("unit") or "kWh"
-    existing = data.get("daily_yield") if isinstance(data.get("daily_yield"), dict) else {}
+    existing_raw = data.get("daily_yield")
+    existing: dict[str, Any] = existing_raw if isinstance(existing_raw, dict) else {}
     data = {
         **data,
         "daily_yield": {
