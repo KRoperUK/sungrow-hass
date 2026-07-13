@@ -40,24 +40,13 @@
       },
       "zeroconf_confirm": {
         "title": "Configurer l'onduleur Sungrow local",
-        "description": "Un Sungrow **{model}** a été découvert sur votre réseau à **{host}** (WiNet-S). Configurez-le pour lire les données directement via Modbus local — rapide, sans quota et hors ligne, sans compte iSolarCloud."
+        "description": "Un onduleur Sungrow **{model}** a été découvert sur votre réseau à **{host}** (WiNet-S). Configurez-le comme une **entrée locale séparée** qui lit l'onduleur via Modbus — rapide, sans limite de consommation et fonctionnant hors ligne, sans compte iSolarCloud requis. Si vous avez également une entrée cloud pour le même onduleur, les deux restent indépendantes (le dispositif local est lié sous la centrale cloud lorsque les numéros de série correspondent)."
       },
       "reconfigure_modbus": {
         "title": "Reconfigurer l'onduleur Sungrow local",
         "description": "Mettez à jour l'adresse IP du WiNet-S si elle a changé sur votre réseau. Il s'agit d'une connexion Modbus locale — aucun compte iSolarCloud n'est impliqué.",
         "data": {
           "modbus_host": "Hôte Modbus local (IP du WiNet-S)"
-        }
-      },
-      "attach_modbus": {
-        "title": "Ajouter Modbus local à votre onduleur Sungrow",
-        "description": "Un Sungrow **{model}** a été découvert à **{host}** (WiNet-S), et il est déjà configuré via iSolarCloud (**{cloud}**). Ajoutez le Modbus local rapide à cette entrée — ses données proviendront d'abord de la connexion locale (Modbus préféré) et basculeront vers le cloud — sans créer de doublon."
-      },
-      "merge_local_modbus": {
-        "title": "Use your existing local Modbus connection?",
-        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
-        "data": {
-          "merge_local": "Attach local Modbus and remove the standalone local entry"
         }
       }
     },
@@ -77,8 +66,7 @@
       "reauth_successful": "La ré-authentification a réussi",
       "reconfigure_successful": "La reconfiguration a réussi",
       "wrong_account": "Le compte autorisé ne correspond pas à l'App ID de cette intégration. Utilisez l'application développeur d'origine.",
-      "not_sungrow_device": "L'appareil découvert n'est pas un onduleur Sungrow pris en charge.",
-      "modbus_enabled_on_cloud": "Le Modbus local a été activé sur votre entrée iSolarCloud existante pour cet onduleur."
+      "not_sungrow_device": "L'appareil découvert n'est pas un onduleur Sungrow pris en charge."
     }
   },
   "options": {
@@ -89,9 +77,7 @@
         "data": {
           "scan_interval": "Intervalle d'interrogation (secondes)",
           "extra_measure_points": "Points de mesure supplémentaires (point_id=code, séparés par des virgules)",
-          "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)",
-          "modbus_host": "Hôte Modbus local (IP du WiNet-S) — optionnel ; laisser vide pour le cloud uniquement",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "enable_device_sensors": "Créer des capteurs par appareil (bornes de recharge EV, compteurs, batteries supplémentaires)"
         }
       },
       "modbus_options": {
@@ -99,7 +85,7 @@
         "description": "Ajustez la fréquence à laquelle Home Assistant lit l'onduleur directement via Modbus local. Il n'y a pas de quota d'API cloud, vous pouvez donc interroger fréquemment ; le minimum est de 10 secondes.",
         "data": {
           "scan_interval": "Intervalle d'interrogation (secondes)",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "modbus_debug_daily_yield": "Exposer le dump brut du registre daily_yield Modbus sur le capteur (débogage uniquement)"
         }
       }
     }

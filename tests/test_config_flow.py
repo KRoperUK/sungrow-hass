@@ -296,8 +296,8 @@ async def test_finish_step_missing_code(hass: HomeAssistant, mock_auth):
     assert result["reason"] == "missing_code"
 
 
-async def test_finish_offers_merge_when_modbus_only_exists(hass: HomeAssistant, mock_auth):
-    """Cloud OAuth finish offers to adopt an existing Modbus-only entry (local-first hybrid)."""
+async def test_finish_leaves_modbus_only_entry_alone(hass: HomeAssistant, mock_auth):
+    """Cloud OAuth finish creates a pure cloud entry and does not merge/remove local."""
     from custom_components.sungrow.const import CONF_MODBUS_HOST, CONF_MODEL, CONF_TRANSPORT, TRANSPORT_MODBUS_ONLY
 
     local = MockConfigEntry(
@@ -320,20 +320,14 @@ async def test_finish_offers_merge_when_modbus_only_exists(hass: HomeAssistant, 
     flow.auth_client = mock_auth
     flow.auth_client.async_authorize = AsyncMock()
 
-    result = await flow.async_step_finish()
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "merge_local_modbus"
-    assert result["description_placeholders"]["host"] == "192.168.1.93"
-
     with patch("custom_components.sungrow.async_setup_entry", return_value=True):
-        result2 = await flow.async_step_merge_local_modbus({"merge_local": True})
+        result = await flow.async_step_finish()
         await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result2["options"][CONF_MODBUS_HOST] == "192.168.1.93"
-    assert result2["options"][CONF_SCAN_INTERVAL] == 30
-    # Standalone local entry removed so devices are not duplicated.
-    assert hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "modbus_SN1") is None
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert CONF_MODBUS_HOST not in (result.get("options") or {})
+    # Local entry untouched — separate transports.
+    assert hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "modbus_SN1") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -760,27 +754,25 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
     }
 
 
-async def test_options_flow_stores_and_trims_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """The Modbus host option is stored, whitespace-trimmed; blank means cloud-only (#159)."""
+async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Cloud options do not expose or store a Modbus host (local is a separate entry)."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    # OptionsFlowWithReload reloads the entry; stub Modbus so the hybrid setup does not open sockets.
-    client = MagicMock()
-    client.async_read_realtime = AsyncMock(return_value={})
-    client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
-    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
-        result2 = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={CONF_SCAN_INTERVAL: 30, CONF_MODBUS_HOST: "  192.168.1.93  "},
-        )
-        await hass.async_block_till_done()
+    keys = {str(m.schema) for m in result["data_schema"].schema}
+    assert CONF_MODBUS_HOST not in keys
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 30},
+    )
+    await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_MODBUS_HOST] == "192.168.1.93"
+    assert CONF_MODBUS_HOST not in entry.options
 
 
 async def test_options_flow_modbus_only_hides_cloud_settings(hass: HomeAssistant):
@@ -956,48 +948,45 @@ def _add_cloud_entry_with_inverter(
     return cloud
 
 
-async def test_zeroconf_offers_attach_when_inverter_already_cloud_configured(hass: HomeAssistant):
-    """Discovering an inverter already set up via cloud offers to add local Modbus to it (#218)."""
-    _add_cloud_entry_with_inverter(hass, "A2340512345")
+async def test_zeroconf_creates_local_even_when_cloud_has_same_serial(hass: HomeAssistant):
+    """Discovery always creates a standalone local entry — never attaches Modbus to cloud."""
+    cloud = _add_cloud_entry_with_inverter(hass, "A2340512345")
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(serial="A2340512345")
     )
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "attach_modbus"
-    assert result["description_placeholders"]["cloud"] == "My Cloud Plant"
-
-
-async def test_zeroconf_attach_enables_hybrid_on_cloud_entry(hass: HomeAssistant):
-    """Confirming the attach step writes the Modbus host onto the cloud entry (hybrid) (#218)."""
-    cloud = _add_cloud_entry_with_inverter(hass, "SNMATCH")
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_ZEROCONF},
-        data=_winet_discovery(host="192.168.1.77", serial="SNMATCH"),
-    )
-    assert result["step_id"] == "attach_modbus"
+    assert result["step_id"] == "zeroconf_confirm"
 
     with patch("custom_components.sungrow.async_setup_entry", return_value=True):
         result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
         await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
-    assert result2["reason"] == "modbus_enabled_on_cloud"
-    # The cloud entry became hybrid: the discovered host is now in its options.
-    assert cloud.options[CONF_MODBUS_HOST] == "192.168.1.77"
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
+    assert result2["data"][CONF_MODBUS_HOST] == "192.168.1.93"
+    # Cloud entry stays pure (no modbus_host mashup).
+    assert CONF_MODBUS_HOST not in cloud.options
 
 
-async def test_zeroconf_no_attach_when_cloud_entry_already_hybrid(hass: HomeAssistant):
-    """A cloud entry that already has a Modbus host is skipped — discovery stays standalone (#218)."""
-    cloud = _add_cloud_entry_with_inverter(hass, "A2340512345")
-    hass.config_entries.async_update_entry(cloud, options={CONF_MODBUS_HOST: "10.0.0.1"})
+async def test_import_creates_modbus_only_entry(hass: HomeAssistant):
+    """SOURCE_IMPORT creates a local Modbus entry (legacy hybrid split)."""
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_IMPORT},
+            data={
+                CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+                CONF_SERIAL: "SNIMPORT",
+                CONF_MODEL: "SG3.6RS",
+                CONF_MODBUS_HOST: "10.0.0.5",
+                CONF_SCAN_INTERVAL: 30,
+            },
+        )
+        await hass.async_block_till_done()
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(serial="A2340512345")
-    )
-
-    # No hybrid attach offered; falls through to the standalone Modbus-only confirm.
-    assert result["step_id"] == "zeroconf_confirm"
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Sungrow SG3.6RS (local)"
+    assert result["data"][CONF_MODBUS_HOST] == "10.0.0.5"
+    assert result["result"].unique_id == "modbus_SNIMPORT"

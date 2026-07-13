@@ -199,8 +199,8 @@ Non-battery controls — **Export Limitation**, **Export Limit (Power/%)**, and
 
 ## Local Modbus (WiNet-S)
 
-These apply to the optional [local Modbus transport](local-modbus.md) (hybrid or Modbus-only
-setups). Cloud-only setups are unaffected.
+These apply to a [local Modbus entry](local-modbus.md). Cloud-only setups are unaffected.
+Cloud and local never merge values onto the same entities.
 
 ### The WiNet-S wasn't auto-discovered
 
@@ -208,47 +208,41 @@ Discovery uses **mDNS/zeroconf**, which does **not** cross subnets or VLANs by d
 
 - Make sure Home Assistant and the WiNet-S are on the **same network segment**. If they're
   on different VLANs/subnets, the discovery card won't appear.
-- You don't have to wait for discovery: on an existing cloud entry, add the dongle manually
-  via **Configure → Local Modbus host** (hybrid). This talks straight to the dongle's IP and
-  needs no mDNS.
 - If discovery is dismissed, it reappears the next time the dongle is seen; you can also
   reload the integration or restart Home Assistant to re-trigger it.
+- A **DHCP reservation** for the dongle keeps the host stable after setup.
 
 ### Local reads fail / "Cannot connect" over Modbus
 
-The dongle is reachable for mDNS (port 80) but Modbus reads use **TCP port 502**. If sensors
-are unavailable on a Modbus-only entry, or a hybrid entry keeps falling back to the cloud:
+The dongle is reachable for mDNS (port 80) but Modbus reads use **TCP port 502**. If local
+sensors are unavailable:
 
 - Confirm the WiNet-S IP is correct and **reachable on port 502** from the Home Assistant
   host (a firewall/VLAN ACL may block 502 even when the web UI on 80 is reachable).
 - The WiNet-S allows only a **limited number of Modbus TCP clients** — if another tool
   (another HA integration, a Modbus poller, node-RED) already holds the connection, reads
   here can fail intermittently. Close the other client.
-- If the dongle's IP changed, a Modbus-only entry updates it automatically on the next
-  discovery; for a hybrid entry, update the **Local Modbus host** field. A **DHCP
-  reservation** for the dongle avoids this.
+- If the dongle's IP changed, rediscovery updates the stored host, or use **Reconfigure**
+  on the local entry.
 
-### `daily_yield` reads higher over Modbus than in the cloud
+### Local `daily_yield` vs cloud daily yield
 
-Known issue on some SG-RS firmware
-([#223](https://github.com/KRoperUK/sungrow-hass/issues/223)) — a scaling/semantics mismatch
-under investigation. **`total_yield` matches the cloud**; only the daily figure diverges. If
-you rely on the daily total, use the cloud value (cloud-only or the cloud sensor on a hybrid
-entry) until it's resolved.
+Local SG-RS firmware often does not reset the daily register at midnight. The local entry
+**derives** calendar-day yield from lifetime `total_yield`. Cloud daily remains the
+iSolarCloud figure. They can differ — that is expected with two independent sources.
+Prefer the cloud daily entity or the local derived entity deliberately in Energy /
+automations.
 
-To help pin the cause down, the `sensor.sungrow_*_daily_yield` entity carries a
-`daily_yield_diagnostic` attribute when a Modbus transport is configured: the raw 16-bit
-register values around the candidate daily_yield positions and every plausible
-`(address, scale)` decoding. If you can, attach that attribute (Dev Tools → States → pick
-the entity → copy `attributes.daily_yield_diagnostic`) to a comment on #223 alongside the
-matching cloud sensor's current value and the local time.
+Optional debug: enable **Expose raw Modbus daily_yield register dump** on the **local**
+entry options, then copy `attributes.daily_yield_diagnostic` from Dev Tools if you need to
+file a register-map issue.
 
 ### My inverter model isn't read over Modbus
 
 Local Modbus currently maps only the **SG-RS single-phase string inverters**. Other models
 (SH hybrids, three-phase SG, standalone battery/meter) aren't in the register map yet
-([#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) — use **cloud-only** or
-**hybrid** (the cloud half returns everything) in the meantime.
+([#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) — use the **cloud** entry for
+those metrics.
 
 ---
 

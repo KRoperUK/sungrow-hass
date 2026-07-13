@@ -28,6 +28,7 @@ from .const import (
     CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
     CONF_SCAN_INTERVAL,
+    CONF_TRANSPORT,
     DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_UNIT,
     DEFAULT_SCAN_INTERVAL,
@@ -37,6 +38,7 @@ from .const import (
     INVERTER_DIAGNOSTIC_POINTS,
     INVERTER_OPERATING_STATUS_POINT,
     METER_DEVICE_POINTS,
+    TRANSPORT_MODBUS_ONLY,
 )
 from .energy_units import normalize_energy_units, tag_source
 
@@ -203,11 +205,15 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # persist and curtail PV (#157/#148). 0 disables auto-revert (legacy behaviour).
         # Owned by the "Forced Dispatch Duration" number; read by the command select.
         self.forced_dispatch_duration_minutes: float = 0
-        # Optional local Modbus transport (#159): when a WiNet-S host is configured, the
-        # coordinator reads fast local values and merges them over the cloud data
-        # (Modbus preferred). None -> cloud only. Built lazily to avoid importing
-        # pymodbus for cloud-only installs.
+        # Local Modbus client is only built for Modbus-only entries (cloud-free). Cloud
+        # entries never attach Modbus — hybrid merge was removed in favour of a separate
+        # local config entry with a soft device link (serial / via_device).
         self._modbus_client = self._build_modbus_client(config_entry)
+        # Optional plant-device parent for device-registry nesting when a cloud plant
+        # already owns this inverter serial (set by Modbus-only setup).
+        self.via_plant_id: str | None = None
+        # WiNet-S web UI URL for local inverter DeviceInfo (Modbus-only).
+        self.local_configuration_url: str | None = None
         # Raw-wire diagnostic for #223 (daily_yield register window). Populated on each
         # successful Modbus poll and surfaced on the daily_yield sensor for inspection.
         # The *entity value* is no longer taken from that register — see
@@ -225,11 +231,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
-        """Return a SungrowModbusClient if a Modbus host is configured, else None.
+        """Return a SungrowModbusClient for a Modbus-only entry, else None.
 
-        The host lives in options for a cloud entry (opt-in hybrid) or in data for a
-        discovery-created Modbus-only entry (#159).
+        Cloud entries never get a Modbus client (no hybrid overlay). The WiNet-S host
+        lives in entry data for discovery/import-created local entries (#159).
         """
+        if config_entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY:
+            return None
         host = config_entry.options.get(CONF_MODBUS_HOST) or config_entry.data.get(CONF_MODBUS_HOST)
         if not host:
             return None
@@ -300,30 +308,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         cloud_data = cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
-        cloud_data = normalize_energy_units(tag_source(cloud_data, "cloud"))
-        # Overlay fast local Modbus values (Modbus preferred) when configured (#159).
-        return await self._async_apply_modbus(cloud_data)
-
-    async def _async_apply_modbus(self, cloud_data: dict[str, Any]) -> dict[str, Any]:
-        """Overlay live Modbus values onto the cloud data (Modbus preferred), if configured.
-
-        Best-effort: any Modbus failure keeps the cloud data, so the local transport can
-        never take the plant offline — it only ever supplies fresher values.
-        """
-        if self._modbus_client is None:
-            return cloud_data
-        from .modbus import merge_realtime
-
-        try:
-            async with asyncio.timeout(self._poll_timeout):
-                local = await self._modbus_client.async_read_realtime()
-        except Exception as err:  # pylint: disable=broad-except  (best-effort: fall back to cloud)
-            _LOGGER.debug("Local Modbus read failed for %s; using cloud data: %s", self.plant_name, err)
-            return cloud_data
-        await self._async_capture_daily_yield_diagnostic()
-        local = normalize_energy_units(local)
-        merged = merge_realtime(cloud_data, local)
-        return await self._async_apply_derived_daily_yield(merged)
+        return normalize_energy_units(tag_source(cloud_data, "cloud"))
 
     async def _async_modbus_only_update(self) -> dict[str, Any]:
         """Read realtime data from the local Modbus client only (cloud-free entry, #159)."""

@@ -36,28 +36,6 @@ class SungrowModbusError(Exception):
     """A local Modbus connection or read failed."""
 
 
-def merge_realtime(cloud: dict[str, dict[str, Any]], modbus: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Merge cloud and local-Modbus realtime, **Modbus preferred**, tagging provenance.
-
-    The cloud provides the structure (each point's ``id``/``name``, used for naming and
-    enum/device-class resolution) and any points Modbus doesn't expose; where both carry
-    a code, the live Modbus value (and its unit) win. Every returned point carries a
-    ``source`` (``"cloud"`` or ``"modbus"``) so the origin of each reading is accountable.
-    """
-    merged: dict[str, dict[str, Any]] = {code: {**point, "source": "cloud"} for code, point in cloud.items()}
-    for code, mpoint in modbus.items():
-        if code in merged:
-            merged[code] = {
-                **merged[code],
-                "value": mpoint["value"],
-                "unit": mpoint.get("unit") or merged[code].get("unit"),
-                "source": "modbus",
-            }
-        else:
-            merged[code] = dict(mpoint)
-    return merged
-
-
 class SungrowModbusClient:
     """Read realtime data from one Sungrow inverter over local Modbus TCP."""
 

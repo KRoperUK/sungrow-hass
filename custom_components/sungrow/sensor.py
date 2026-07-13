@@ -248,8 +248,16 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # device of the mapped type; otherwise keep it on the plant device (#158). The
         # unique_id above is unchanged, so HA re-parents the entity without renaming it.
         device = resolve_point_device(point_code, getattr(coordinator, "devices", None) or [])
+        via_plant_id = getattr(coordinator, "via_plant_id", None)
+        local_url = getattr(coordinator, "local_configuration_url", None)
         if device is not None:
-            self._attr_device_info = build_device_info(device, plant_id, fallback_name=plant_name)
+            self._attr_device_info = build_device_info(
+                device,
+                plant_id,
+                fallback_name=plant_name,
+                via_plant_id=via_plant_id,
+                configuration_url=local_url,
+            )
         else:
             self._attr_device_info = build_plant_device_info(plant_id, plant_name, console_url)
         self._apply_point_metadata(point_code, init_data, plant_name)
@@ -405,7 +413,13 @@ class SungrowDeviceSensor(SungrowSensor):
         device_name = device.get("device_name") or device.get("device_model_name") or coordinator.plant_name
         self._attr_unique_id = f"{self.plant_id}_{self.device_uuid}_{point_code}"
         # Enrich the device card with the model/serial the cloud reports.
-        self._attr_device_info = build_device_info(device, self.plant_id, fallback_name=coordinator.plant_name)
+        self._attr_device_info = build_device_info(
+            device,
+            self.plant_id,
+            fallback_name=coordinator.plant_name,
+            via_plant_id=getattr(coordinator, "via_plant_id", None),
+            configuration_url=getattr(coordinator, "local_configuration_url", None),
+        )
         self._apply_point_metadata(point_code, init_data, device_name)
         # Inverter internals (operating status, MPPT, DC power, device type, ...) are diagnostics.
         if point_code in _DIAGNOSTIC_CODES or point_code == "device_type_code":

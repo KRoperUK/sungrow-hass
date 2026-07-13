@@ -186,6 +186,75 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 
+async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
+    """Local inverter via_plant_id points at the matching cloud plant (soft link)."""
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.sungrow import find_related_cloud_plant_id
+
+    cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
+    cloud.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "plant-99")},
+        name="Plant",
+        entry_type=dr.DeviceEntryType.SERVICE,
+        manufacturer="Sungrow",
+    )
+    registry.async_get_or_create(
+        config_entry_id=cloud.entry_id,
+        identifiers={(DOMAIN, "inv-cloud")},
+        name="Inverter",
+        serial_number="SNLINK",
+        manufacturer="Sungrow",
+        via_device=(DOMAIN, "plant-99"),
+    )
+    assert find_related_cloud_plant_id(hass, "SNLINK") == "plant-99"
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SNLINK",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SNLINK",
+    )
+    entry.add_to_hass(hass)
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(
+        return_value={"grid_frequency": {"code": "grid_frequency", "value": 50.0, "unit": "Hz", "source": "modbus"}}
+    )
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.coordinators[0].via_plant_id == "plant-99"
+
+
+async def test_cloud_setup_strips_legacy_hybrid_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Loading a cloud entry with leftover modbus_host removes it (no hybrid mashup)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_DATA.copy(),
+        options={CONF_MODBUS_HOST: "192.168.1.93", CONF_SCAN_INTERVAL: 60},
+        unique_id="test_app_id",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert CONF_MODBUS_HOST not in entry.options
+    assert entry.options.get(CONF_SCAN_INTERVAL) == 60
+    # Coordinator is pure cloud (no Modbus client).
+    assert entry.runtime_data.coordinators[0]._modbus_client is None
+
+
 # ---------------------------------------------------------------------------
 # Heartbeat lifecycle
 # ---------------------------------------------------------------------------

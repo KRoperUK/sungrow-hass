@@ -176,7 +176,14 @@ async def _async_has_battery(plants_service: Plants, plant_id: str, devices: lis
     return _has_battery_device(devices)
 
 
-def build_device_info(device: dict[str, Any], plant_id: str, *, fallback_name: str | None = None) -> DeviceInfo:
+def build_device_info(
+    device: dict[str, Any],
+    plant_id: str,
+    *,
+    fallback_name: str | None = None,
+    via_plant_id: str | None = None,
+    configuration_url: str | None = None,
+) -> DeviceInfo:
     """Build a device-registry entry for a physical device, nested under its plant.
 
     Enriches the HA device card with the model, serial number and manufacturer the
@@ -184,15 +191,143 @@ def build_device_info(device: dict[str, Any], plant_id: str, *, fallback_name: s
     ``getDeviceListByPsId``) instead of a bare name, and links it to the plant device
     via ``via_device``. The uuid is stringified so the identifier matches
     ``_known_device_ids`` (which keys on ``str(uuid)``) and the device isn't pruned.
+
+    ``via_plant_id`` overrides the parent plant identifier (used by a local Modbus
+    inverter that nests under a matching cloud plant without merging data).
     """
-    return DeviceInfo(
+    info = DeviceInfo(
         identifiers={(DOMAIN, str(device["uuid"]))},
         name=device.get("device_name") or device.get("device_model_name") or fallback_name,
         manufacturer=device.get("factory_name") or "Sungrow",
         model=device.get("device_model_code") or device.get("device_model_name"),
         serial_number=device.get("device_sn"),
-        via_device=(DOMAIN, plant_id),
+        via_device=(DOMAIN, via_plant_id or plant_id),
     )
+    if configuration_url:
+        info["configuration_url"] = configuration_url
+    return info
+
+
+def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
+    """Return the cloud plant identifier that already owns this inverter serial, if any.
+
+    Used so a separate Modbus-only entry can nest its local inverter under the cloud
+    plant device without merging sensor values.
+    """
+    registry = dr.async_get(hass)
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+            continue
+        inv = None
+        for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+            if device.serial_number and device.serial_number == serial:
+                inv = device
+                break
+        if inv is None:
+            continue
+        if inv.via_device_id:
+            parent = registry.async_get(inv.via_device_id)
+            if parent is not None:
+                for domain_key, ident in parent.identifiers:
+                    if domain_key == DOMAIN:
+                        return str(ident)
+        for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+            if device.entry_type == dr.DeviceEntryType.SERVICE:
+                for domain_key, ident in device.identifiers:
+                    if domain_key == DOMAIN:
+                        return str(ident)
+    return None
+
+
+_HYBRID_OPTION_KEYS = frozenset(
+    {
+        CONF_MODBUS_HOST,
+        "modbus_port",
+        "modbus_unit",
+        "modbus_debug_daily_yield",
+    }
+)
+
+
+def _async_split_legacy_hybrid(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Strip hybrid Modbus settings from a cloud entry and spawn local entries.
+
+    Older builds stored ``modbus_host`` on the cloud entry and merged values. That
+    mashup is gone: cloud stays pure, and a separate Modbus-only entry is created
+    per known inverter serial when possible.
+    """
+    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+        return
+    host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "").strip()
+    has_hybrid_keys = any(k in entry.options or k in entry.data for k in _HYBRID_OPTION_KEYS)
+    if not host and not has_hybrid_keys:
+        return
+
+    debug = bool(entry.options.get("modbus_debug_daily_yield", False))
+    new_options = {k: v for k, v in entry.options.items() if k not in _HYBRID_OPTION_KEYS}
+    new_data = {k: v for k, v in entry.data.items() if k not in _HYBRID_OPTION_KEYS}
+    if new_options != dict(entry.options) or new_data != dict(entry.data):
+        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
+        _LOGGER.info(
+            "Removed hybrid Modbus settings from cloud entry %s; use a separate local entry instead",
+            entry.title,
+        )
+
+    if not host:
+        return
+
+    registry = dr.async_get(hass)
+    serials: list[tuple[str, str]] = []
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        sn = device.serial_number
+        if not sn:
+            continue
+        model = device.model or "Inverter"
+        serials.append((sn, str(model)))
+    # de-dupe by serial, keep first model
+    seen: set[str] = set()
+    unique_serials: list[tuple[str, str]] = []
+    for sn, model in serials:
+        if sn in seen:
+            continue
+        seen.add(sn)
+        unique_serials.append((sn, model))
+
+    if not unique_serials:
+        _LOGGER.warning(
+            "Cloud entry %s had modbus_host=%s but no inverter serial in the device registry; "
+            "set up local Modbus via discovery (or Add Integration) for a separate local entry",
+            entry.title,
+            host,
+        )
+        return
+
+    from homeassistant.config_entries import SOURCE_IMPORT
+
+    for serial, model in unique_serials:
+        unique_id = f"modbus_{serial}"
+        if hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, unique_id) is not None:
+            continue
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_IMPORT},
+                data={
+                    CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+                    CONF_SERIAL: serial,
+                    CONF_MODEL: model,
+                    CONF_MODBUS_HOST: host,
+                    CONF_SCAN_INTERVAL: 30,
+                    "modbus_debug_daily_yield": debug,
+                },
+            )
+        )
+        _LOGGER.info(
+            "Created separate local Modbus entry for serial %s (host %s) split from cloud entry %s",
+            serial,
+            host,
+            entry.title,
+        )
 
 
 def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) -> DeviceInfo:
@@ -264,34 +399,45 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Set up a cloud-free entry that reads a single inverter over local Modbus (#159).
 
-    Created by zeroconf discovery of a WiNet-S: no credentials, no cloud calls. One
-    coordinator reads the inverter's registers and the sensor platform builds entities
-    from the same measure-point codes the cloud path uses.
+    Created by zeroconf discovery or import from a legacy hybrid split: no credentials,
+    no cloud calls. One coordinator reads the inverter's registers and the sensor
+    platform builds entities from the same measure-point codes the cloud path uses.
+
+    When a cloud entry already owns this serial, the local inverter is nested under
+    that cloud plant (``via_device``) without merging any sensor values.
     """
     serial = str(entry.data.get(CONF_SERIAL) or entry.unique_id or "inverter")
+    # unique_id is modbus_{serial}; strip prefix if present for a clean serial key
+    if serial.startswith("modbus_"):
+        serial = serial.removeprefix("modbus_")
     model = str(entry.data.get(CONF_MODEL) or "Inverter")
-    plant_name = f"Sungrow {model}"
+    local_name = f"{model} (local)"
     host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "")
-    # One inverter device nested under a service "plant" anchor (mirrors the cloud
-    # topology); distinct identifiers so the plant and inverter don't collide.
+    winet_url = f"http://{host}" if host else None
+    cloud_plant_id = find_related_cloud_plant_id(hass, serial)
+    via_plant_id = cloud_plant_id or serial
+
+    # One inverter device. Distinct identifiers so the plant and inverter don't collide.
     inverter = {
         "uuid": f"{serial}_inv",
-        "device_name": plant_name,
+        "device_name": local_name,
         "device_type": DeviceType.INVERTER,
         "device_model_code": model,
         "device_sn": serial,
         "factory_name": "SUNGROW",
     }
-    coordinator = SungrowPlantCoordinator(hass, entry, None, serial, plant_name, [inverter])
+    coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
+    coordinator.via_plant_id = via_plant_id
+    coordinator.local_configuration_url = winet_url
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={serial: [inverter]})
-    # Pre-create the plant service device (via_device parent) with the WiNet-S web UI
-    # as its configuration URL.
-    dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        **build_plant_device_info(serial, plant_name, f"http://{host}" if host else DEFAULT_CONSOLE_URL),
-    )
+    # Only create a synthetic local plant anchor when there is no cloud plant to nest under.
+    if cloud_plant_id is None:
+        dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **build_plant_device_info(serial, f"Sungrow {model} (local)", winet_url or DEFAULT_CONSOLE_URL),
+        )
     # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
     return True
@@ -301,6 +447,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     """Set up Sungrow iSolarCloud from a config entry."""
     if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
         return await _async_setup_modbus_only(hass, entry)
+    # Split legacy hybrid cloud+Modbus entries into pure cloud + separate local.
+    _async_split_legacy_hybrid(hass, entry)
     if "tokens" not in entry.data:
         # Nothing to authenticate with — ask the user to re-authorize.
         raise ConfigEntryAuthFailed("No stored tokens; re-authorization required")

@@ -722,6 +722,8 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
 
     coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
     coordinator.enable_device_sensors = True
+    coordinator.via_plant_id = None
+    coordinator.local_configuration_url = None
     # The platform reads the live device list from the coordinator for naming.
     coordinator.devices = [
         {

@@ -70,14 +70,13 @@ manufacturer. The Fault sensor exposes an `operating_status` attribute with a hu
 reason for inverter/ESS devices (e.g. *Shut down due to faults*, *Low insulation resistance*),
 and the Connectivity sensor exposes the commissioning date as an attribute.
 
-## Local Modbus host (hybrid)
+## Local Modbus (separate entry)
 
-The options flow has a **Local Modbus host (WiNet-S IP)** field. Leave it blank for the
-default cloud-only behaviour, or enter your WiNet-S dongle's IP address to read the inverter
-**directly over your LAN** — local values are used first and the cloud is a fallback. This is
-faster and doesn't use API quota, while you keep the full cloud sensor set and all
-dispatch/control entities. See [Local Modbus (WiNet-S)](local-modbus.md) for the transport
-modes, auto-discovery, and current limitations.
+Local WiNet-S Modbus is a **separate integration entry**, not a field on the cloud options.
+Discover the dongle (or import a local entry) to get independent local sensors with their own
+poll interval. Cloud stays pure iSolarCloud. When serials match, the local inverter device is
+nested under the cloud plant in the device registry without merging values. See
+[Local Modbus (WiNet-S)](local-modbus.md).
 
 ## Energy dashboard
 

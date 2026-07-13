@@ -40,24 +40,13 @@
       },
       "zeroconf_confirm": {
         "title": "Gosod gwrthdröydd Sungrow lleol",
-        "description": "Darganfuwyd Sungrow **{model}** ar eich rhwydwaith yn **{host}** (WiNet-S). Gosodwch ef i ddarllen data'n uniongyrchol dros Modbus lleol — cyflym, heb derfyn ac all-lein, heb angen cyfrif iSolarCloud."
+        "description": "Canfuwyd **{model}** Sungrow ar eich rhwydwaith yn **{host}** (WiNet-S). Crëwch ef fel **cofnod lleol ar wahân** sy'n darllen y gwrthdröydd dros Modbus — cyflym, heb fesur ac yn gweithio all-lein, heb angen cyfrif iSolarCloud. Os oes gennych chi hefyd gofnod cwmwl ar gyfer yr un gwrthdröydd, mae'r ddau'n aros annibynnol (mae'r ddyfais leol yn gysylltiedig o dan y planhigyn cwmwl pan mae'r rhifau serial yn cyfateb)."
       },
       "reconfigure_modbus": {
         "title": "Ailgyflunio gwrthdröydd Sungrow lleol",
         "description": "Diweddarwch gyfeiriad IP y WiNet-S os yw wedi newid ar eich rhwydwaith. Cysylltiad Modbus lleol yw hwn — nid oes cyfrif iSolarCloud yn gysylltiedig.",
         "data": {
           "modbus_host": "Gwesteiwr Modbus lleol (IP WiNet-S)"
-        }
-      },
-      "attach_modbus": {
-        "title": "Ychwanegu Modbus lleol at eich gwrthdröydd Sungrow",
-        "description": "Canfuwyd Sungrow **{model}** yn **{host}** (WiNet-S), ac mae eisoes wedi'i sefydlu drwy iSolarCloud (**{cloud}**). Ychwanegwch Modbus lleol cyflym at y cofnod hwnnw — daw ei ddata o'r cysylltiad lleol yn gyntaf (Modbus a ffefrir) gan syrthio'n ôl i'r cwmwl — heb greu dyfais ddyblyg."
-      },
-      "merge_local_modbus": {
-        "title": "Use your existing local Modbus connection?",
-        "description": "You already have a local Modbus entry (**{local_title}**, host **{host}**) for a **{model}**. Enable hybrid mode on this iSolarCloud entry so plant/grid data comes from the cloud and live inverter metrics from local Modbus (preferred), then remove the standalone local entry to avoid duplicates.",
-        "data": {
-          "merge_local": "Attach local Modbus and remove the standalone local entry"
         }
       }
     },
@@ -77,8 +66,7 @@
       "reauth_successful": "Roedd yr ail-ddilysiad yn llwyddiannus",
       "reconfigure_successful": "Roedd yr ailgyflunio'n llwyddiannus",
       "wrong_account": "Nid yw'r cyfrif awdurdodedig yn cyfateb i App ID yr integreiddiad hwn. Defnyddiwch y cymhwysiad datblygwr gwreiddiol.",
-      "not_sungrow_device": "Nid yw'r ddyfais a ddarganfuwyd yn wrthdröydd Sungrow a gefnogir.",
-      "modbus_enabled_on_cloud": "Galluogwyd Modbus lleol ar eich cofnod iSolarCloud presennol ar gyfer y gwrthdröydd hwn."
+      "not_sungrow_device": "Nid yw'r ddyfais a ddarganfuwyd yn wrthdröydd Sungrow a gefnogir."
     }
   },
   "options": {
@@ -89,9 +77,7 @@
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
           "extra_measure_points": "Pwyntiau mesur ychwanegol (point_id=code, wedi'u gwahanu gan atalnodau)",
-          "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)",
-          "modbus_host": "Gwesteiwr Modbus lleol (IP y WiNet-S) — dewisol; gadewch yn wag ar gyfer cwmwl yn unig",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)"
         }
       },
       "modbus_options": {
@@ -99,7 +85,7 @@
         "description": "Addaswch pa mor aml y mae Home Assistant yn darllen y gwrthdröydd yn uniongyrchol dros Modbus lleol. Nid oes cwota API cwmwl, felly gallwch holi'n aml; yr isafswm yw 10 eiliad.",
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
-          "modbus_debug_daily_yield": "Expose raw Modbus daily_yield register dump on the sensor (debug only)"
+          "modbus_debug_daily_yield": "Datgelu dump cofrestr daily_yield Modbus crai ar y synhwyrydd (debug yn unig)"
         }
       }
     }
