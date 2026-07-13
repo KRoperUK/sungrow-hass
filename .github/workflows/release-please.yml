@@ -25,6 +25,22 @@ jobs:
                   config-file: release-please-config.json
                   manifest-file: .release-please-manifest.json
 
+            # Upload the HACS zip asset to the release so HACS can install via
+            # zip_release mode. This must happen before pruning dev builds so
+            # the stable release is immediately installable.
+            - name: Checkout code for zip packaging
+              if: ${{ steps.release.outputs.release_created == 'true' }}
+              uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Upload HACS zip asset
+              if: ${{ steps.release.outputs.release_created == 'true' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ steps.release.outputs.tag_name }}
+              run: |
+                  bash scripts/package-hacs-zip.sh sungrow.zip
+                  gh release upload "$TAG" sungrow.zip --clobber
+
             # A published release supersedes every dev build. Prune them all so only
             # the real release remains (rc builds + any leftover branch builds).
             - name: Prune all dev pre-releases on a real release
