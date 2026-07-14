@@ -34,6 +34,14 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [4.0.2](https://github.com/KRoperUK/sungrow-hass/compare/v4.0.1...v4.0.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **config-flow:** back-fill app_id at setup time, not only migration ([#245](https://github.com/KRoperUK/sungrow-hass/issues/245)) ([#248](https://github.com/KRoperUK/sungrow-hass/issues/248)) ([474a954](https://github.com/KRoperUK/sungrow-hass/commit/474a954838cd74b8e4b246817d6bb66c33a5007f))
+* **config-flow:** handle missing app_id in reconfigure/reauth ([#245](https://github.com/KRoperUK/sungrow-hass/issues/245)) ([#246](https://github.com/KRoperUK/sungrow-hass/issues/246)) ([5ec1318](https://github.com/KRoperUK/sungrow-hass/commit/5ec13184b266a71cca1fecdc96668b7fb73ca693))
+
 ## [4.0.1](https://github.com/KRoperUK/sungrow-hass/compare/v4.0.0...v4.0.1) (2026-07-13)
 
 
