@@ -433,6 +433,23 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             "Migrated config entry %s to version 3 (transport=%s)", config_entry.title, new_data[CONF_TRANSPORT]
         )
 
+    # Defensive back-fill: ensure cloud entries carry app_id (#245).
+    # The unique_id for cloud entries IS the app_id (set during initial setup).
+    # If the data key was lost (corrupt storage, partial migration, older RC builds)
+    # we can recover it from unique_id.
+    if config_entry.version >= 3:
+        data = dict(config_entry.data)
+        transport = data.get(CONF_TRANSPORT)
+        if transport != TRANSPORT_MODBUS_ONLY and not data.get(CONF_APP_ID):
+            uid = config_entry.unique_id
+            if uid and not uid.startswith("modbus_"):
+                data[CONF_APP_ID] = uid
+                hass.config_entries.async_update_entry(config_entry, data=data)
+                _LOGGER.info(
+                    "Back-filled missing app_id from unique_id for entry %s",
+                    config_entry.title,
+                )
+
     return True
 
 
@@ -518,6 +535,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     # cloud_only and cloud_modbus both use the standard cloud coordinator path.
     # Split legacy hybrid cloud+Modbus entries into pure cloud + separate local.
     _async_split_legacy_hybrid(hass, entry)
+
+    # Guard: cloud entries require app_id to authenticate. If missing (legacy/corrupt),
+    # trigger reauth so the reconfigure flow can collect it from the user (#245).
+    if not entry.data.get(CONF_APP_ID):
+        raise ConfigEntryAuthFailed("Missing app_id; reconfigure the entry to supply it")
+
     if "tokens" not in entry.data:
         # Nothing to authenticate with — ask the user to re-authorize.
         raise ConfigEntryAuthFailed("No stored tokens; re-authorization required")
