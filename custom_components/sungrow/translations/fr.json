@@ -98,7 +98,7 @@
       "reauth_successful": "La ré-authentification a réussi",
       "reconfigure_successful": "La reconfiguration a réussi",
       "wrong_account": "Le compte autorisé ne correspond pas à l'App ID de cette intégration. Utilisez l'application développeur d'origine.",
-      "missing_app_id": "This entry is missing the App ID. Use Reconfigure to supply it."
+      "missing_app_id": "Cet entrée n'a pas d'App ID. Utilisez Reconfigurer pour le fournir."
     }
   },
   "options": {

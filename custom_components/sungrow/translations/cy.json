@@ -98,7 +98,7 @@
       "reauth_successful": "Roedd yr ail-ddilysiad yn llwyddiannus",
       "reconfigure_successful": "Roedd yr ailgyflunio'n llwyddiannus",
       "wrong_account": "Nid yw'r cyfrif awdurdodedig yn cyfateb i App ID yr integreiddiad hwn. Defnyddiwch y cymhwysiad datblygwr gwreiddiol.",
-      "missing_app_id": "This entry is missing the App ID. Use Reconfigure to supply it."
+      "missing_app_id": "Mae'r cofnod hwn yn colli'r App ID. Defnyddiwch Ail-ffurfweddu i'w ddarparu."
     }
   },
   "options": {

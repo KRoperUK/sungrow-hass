@@ -98,7 +98,7 @@
       "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
       "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
       "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung.",
-      "missing_app_id": "This entry is missing the App ID. Use Reconfigure to supply it."
+      "missing_app_id": "Diesem Eintrag fehlt die App-ID. Verwenden Sie Neu konfigurieren, um sie anzugeben."
     }
   },
   "options": {
