@@ -97,7 +97,8 @@
       "missing_code": "Authorization code was not received. Please try again.",
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
-      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application."
+      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application.",
+      "missing_app_id": "This entry is missing the App ID. Use Reconfigure to supply it."
     }
   },
   "options": {

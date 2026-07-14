@@ -107,6 +107,10 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry = self._get_reauth_entry()
         # Reuse the credentials already stored on the entry; only the tokens are stale.
         self.init_info = {k: v for k, v in entry_data.items() if k != "tokens"}
+        # If the entry is missing the App ID (legacy/corrupted), we cannot proceed
+        # with auth — the user must reconfigure to supply the missing credential (#245).
+        if not self.init_info.get(CONF_APP_ID):
+            return self.async_abort(reason="missing_app_id")
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -120,6 +124,10 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else — region, keys, redirect URI — is editable. Because new credentials or a
         new region invalidate the stored tokens, submitting always re-runs the OAuth
         authorization and updates the entry in place (no delete & re-add).
+
+        For entries migrated from older versions that are missing the App ID, the
+        reconfigure form requests it so the user can supply the value without having
+        to delete and recreate the entry (#245).
         """
         entry = self._get_reconfigure_entry()
         transport = entry.data.get(CONF_TRANSPORT)
@@ -143,18 +151,21 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_auth()
 
         current = entry.data
+        # Build the schema dynamically: include App ID when the entry is missing it
+        # (legacy entries upgraded from older versions may lack this field).
+        schema_fields: dict[Any, Any] = {}
+        if not current.get(CONF_APP_ID):
+            schema_fields[vol.Required(CONF_APP_ID, default="")] = str
+        schema_fields[vol.Required(CONF_APP_KEY, default=current.get(CONF_APP_KEY, ""))] = str
+        schema_fields[vol.Required(CONF_APP_SECRET, default=current.get(CONF_APP_SECRET, ""))] = str
+        schema_fields[vol.Required(CONF_GATEWAY, default=current.get(CONF_GATEWAY, "Europe"))] = vol.In(
+            list(GATEWAYS.keys())
+        )
+        schema_fields[vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, ""))] = str
+
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_APP_KEY, default=current.get(CONF_APP_KEY, "")): str,
-                    vol.Required(CONF_APP_SECRET, default=current.get(CONF_APP_SECRET, "")): str,
-                    vol.Required(CONF_GATEWAY, default=current.get(CONF_GATEWAY, "Europe")): vol.In(
-                        list(GATEWAYS.keys())
-                    ),
-                    vol.Required(CONF_REDIRECT_URI, default=current.get(CONF_REDIRECT_URI, "")): str,
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
         )
 
     async def async_step_reconfigure_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
