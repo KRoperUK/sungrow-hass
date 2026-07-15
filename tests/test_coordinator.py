@@ -1131,7 +1131,12 @@ def _golden_preservation_cases():
         pytest.param(DeviceType.INVERTER, True, dict(INVERTER_DIAGNOSTIC_POINTS), id="inverter-on"),
         # Sensors off: only the single operating-status point, no heavy diagnostic set.
         pytest.param(DeviceType.INVERTER, False, dict(INVERTER_OPERATING_STATUS_POINT), id="inverter-off"),
-        pytest.param(DeviceType.ENERGY_STORAGE_SYSTEM, False, {**ESS_OPERATING_STATUS_POINT, **ESS_BATTERY_POWER_POINTS}, id="ess-off"),
+        pytest.param(
+            DeviceType.ENERGY_STORAGE_SYSTEM,
+            False,
+            {**ESS_OPERATING_STATUS_POINT, **ESS_BATTERY_POWER_POINTS},
+            id="ess-off",
+        ),
         # Battery / meter / comm each request their existing point set unchanged.
         pytest.param(DeviceType.BATTERY, True, dict(BATTERY_DEVICE_POINTS), id="battery-on"),
         pytest.param(DeviceType.METER, True, dict(METER_DEVICE_POINTS), id="meter-on"),
