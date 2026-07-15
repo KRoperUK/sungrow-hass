@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    ESS_BATTERY_POWER_POINTS,
     ESS_MPPT_DIAGNOSTIC_POINTS,
     ESS_OPERATING_STATUS_POINT,
     INVERTER_DIAGNOSTIC_POINTS,
@@ -526,6 +527,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # (#182). Inverters use point 29, ESS/hybrids 13146.
             if type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value:
                 extra.update(ESS_OPERATING_STATUS_POINT)
+                # Always request battery charge/discharge power for ESS devices so hybrid
+                # users see separate charge and discharge power sensors (#31).
+                extra.update(ESS_BATTERY_POWER_POINTS)
             elif type_id == DeviceType.INVERTER.value:
                 extra.update(INVERTER_OPERATING_STATUS_POINT)
             # The full diagnostic/battery/meter/comm sets (and user extras) are only

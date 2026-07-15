@@ -24,6 +24,7 @@ from custom_components.sungrow.const import (
     CONF_TRANSPORT,
     DEVICE_REFRESH_INTERVAL,
     DOMAIN,
+    ESS_BATTERY_POWER_POINTS,
     ESS_OPERATING_STATUS_POINT,
     INVERTER_DIAGNOSTIC_POINTS,
     INVERTER_OPERATING_STATUS_POINT,
@@ -534,7 +535,10 @@ async def test_operating_status_fetched_for_inverter_when_disabled(hass: HomeAss
 
 
 async def test_operating_status_uses_13146_for_ess_when_disabled(hass: HomeAssistant):
-    """ESS/hybrid operating status is requested on point 13146, not the inverter point (#182)."""
+    """ESS/hybrid operating status is requested on point 13146, not the inverter point (#182).
+
+    Battery charge/discharge power points are also always requested (#31).
+    """
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
     plants.async_get_device_realtime = AsyncMock(return_value={})
@@ -544,7 +548,11 @@ async def test_operating_status_uses_13146_for_ess_when_disabled(hass: HomeAssis
     await coordinator._async_update_data()
 
     extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
-    assert extra == {"13146": "operating_status"}
+    assert extra == {
+        "13146": "operating_status",
+        "13126": "battery_charge_power",
+        "13150": "battery_discharge_power",
+    }
 
 
 async def test_ess_operating_status_avoids_point29_collision(hass: HomeAssistant):
@@ -1123,7 +1131,7 @@ def _golden_preservation_cases():
         pytest.param(DeviceType.INVERTER, True, dict(INVERTER_DIAGNOSTIC_POINTS), id="inverter-on"),
         # Sensors off: only the single operating-status point, no heavy diagnostic set.
         pytest.param(DeviceType.INVERTER, False, dict(INVERTER_OPERATING_STATUS_POINT), id="inverter-off"),
-        pytest.param(DeviceType.ENERGY_STORAGE_SYSTEM, False, dict(ESS_OPERATING_STATUS_POINT), id="ess-off"),
+        pytest.param(DeviceType.ENERGY_STORAGE_SYSTEM, False, {**ESS_OPERATING_STATUS_POINT, **ESS_BATTERY_POWER_POINTS}, id="ess-off"),
         # Battery / meter / comm each request their existing point set unchanged.
         pytest.param(DeviceType.BATTERY, True, dict(BATTERY_DEVICE_POINTS), id="battery-on"),
         pytest.param(DeviceType.METER, True, dict(METER_DEVICE_POINTS), id="meter-on"),

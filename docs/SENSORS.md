@@ -52,7 +52,7 @@ The following codes are surfaced for many hybrid inverters / battery systems:
 - `daily_field_charge_capacity` → **Battery Daily Charge Capacity**
 - `daily_field_discharge_capacity` → **Battery Daily Discharge Capacity**
 
-If you need separate **Battery Charge Power** and **Battery Discharge Power** sensors (rather than a single signed value), you can request the additional point IDs via the integration options once you know them for your hardware. See the next section.
+If you need separate **Battery Charge Power** and **Battery Discharge Power** sensors (rather than a single signed value), these are now automatically requested for energy-storage inverter (ESS/hybrid) devices — no manual configuration needed. They appear as device-level sensors on your inverter. If they don't appear, your inverter model may not report them; in that case, see the next section for how to try the point IDs manually.
 
 ## Adding extra measure points
 
