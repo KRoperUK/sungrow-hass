@@ -98,6 +98,16 @@ DEVICE_REFRESH_INTERVAL = 900
 INVERTER_OPERATING_STATUS_POINT: dict[str, str] = {"29": "operating_status"}
 ESS_OPERATING_STATUS_POINT: dict[str, str] = {"13146": "operating_status"}
 
+# Battery charge/discharge power measuring points for energy-storage inverters (#31).
+# Always requested for ESS devices (even with per-device sensors off) so hybrid users
+# see separate charge and discharge power sensors without manual configuration. The
+# signed plant-level ``total_field_energy_storage_active_power`` is already present, but
+# many users expect dedicated charge/discharge readings.
+ESS_BATTERY_POWER_POINTS: dict[str, str] = {
+    "13126": "battery_charge_power",
+    "13150": "battery_discharge_power",
+}
+
 # Inverter/ESS device-level measuring points surfaced as diagnostic sensors (#149),
 # requested per-device when device sensors are enabled. Maps the documented inverter
 # point ID -> a stable code. Every ID is already in the measure-point catalog, so it
