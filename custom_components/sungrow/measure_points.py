@@ -74,6 +74,7 @@ _UNIT_CLASS_MAP: dict[str, _ClassPair] = {
     "w/m^2": (SensorDeviceClass.IRRADIANCE, _MEASUREMENT),
     "h": (SensorDeviceClass.DURATION, _MEASUREMENT),
     # Numeric-but-no-HA-device-class units: classify as plain numeric so they graph.
+    "wp": (None, _MEASUREMENT),
     "varh": (None, _TOTAL_INCREASING),
     "kω": (None, _MEASUREMENT),
     "ω": (None, _MEASUREMENT),

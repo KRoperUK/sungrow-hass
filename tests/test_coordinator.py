@@ -1359,8 +1359,8 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
     client.async_get_plant_detail.assert_awaited_once_with("12345")
     assert data["current_power"]["value"] == "3200"
     assert data["current_power"]["source"] == "cloud_user"
-    # The p83106 measure point is present (Wh normalised to kWh downstream).
-    assert "p83106" in data
+    # The 83106 measure point is present (Wh normalised to kWh downstream).
+    assert "83106" in data
 
 
 async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):

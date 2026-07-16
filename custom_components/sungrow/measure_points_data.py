@@ -510,6 +510,8 @@ RAW_POINTS: list[tuple[str, str, str]] = [
     ("83119", "Daily Feed-in Energy (PV)", "Wh"),
     ("83072", "Feed-in Energy Today", "Wh"),
     ("83075", "Feed-in Energy Total", "Wh"),
+    # Nameplate PV capacity in watt-peak (surfaced by the user-account getPsDetail, #269).
+    ("83202", "Nominal Power", "Wp"),
     ("83252", "Battery Level (SOC)", ""),
     ("83129", "Battery SOC", ""),
     ("83232", "Total field SOC", ""),
