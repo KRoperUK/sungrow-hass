@@ -155,6 +155,9 @@ ask for, so hardware the upstream library hasn't catalogued — e.g. a **Sungrow
 AC011E EV charger** ([#18](https://github.com/KRoperUK/sungrow-hass/issues/18)) —
 won't create sensors automatically even though it appears in the iSolarCloud app.
 
+First, check the [Model support matrix](model-support.md) — the value may be a known
+limitation of your inverter model rather than a bug.
+
 To help map it:
 
 1. **Download diagnostics.** Go to **Settings → Devices & services → Sungrow
@@ -164,6 +167,9 @@ To help map it:
      `device_type` (unmapped hardware shows a raw numeric type).
    - `device_realtime` — a best-effort per-device realtime fetch for each device
      type, so any reachable charger points show up here.
+   - `points_catalog` — a flattened, per-device list of **every point your hardware
+     reports** (point ID, name, value, unit), so you can copy the IDs you want into
+     **Extra measure points** without portal-spelunking.
 2. **Attach that JSON to [#18](https://github.com/KRoperUK/sungrow-hass/issues/18)**
    so the point IDs can be added to the default mapping.
 3. **Surface the device's own sensors.** Enable **Configure → Create per-device

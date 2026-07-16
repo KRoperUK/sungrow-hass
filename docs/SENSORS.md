@@ -2,7 +2,7 @@
 
 The integration models each iSolarCloud plant as a Home Assistant device, with the plant's physical devices (inverter, battery, meter, WiNet-S) nested underneath it. It adds a sensor for every realtime measure point the plant returns and **groups each one under the physical device it belongs to** when that device can be identified (see [Device grouping](#device-grouping)). The point codes come from the iSolarCloud API; this guide maps the most common ones to the values shown in the iSolarCloud app.
 
-> Not every inverter / battery / meter returns every point. The available set depends on your model, firmware, and region. If a value you expect is missing, see [Adding extra measure points](#adding-extra-measure-points) below.
+> Not every inverter / battery / meter returns every point. The available set depends on your model, firmware, and region. For a per-family breakdown of what to expect, see the [Model support matrix](model-support.md). If a value you expect is missing, see [Adding extra measure points](#adding-extra-measure-points) below.
 
 ## Device grouping
 
