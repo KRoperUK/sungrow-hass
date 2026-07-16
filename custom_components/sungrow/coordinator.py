@@ -40,9 +40,11 @@ from .const import (
     INVERTER_DIAGNOSTIC_POINTS,
     INVERTER_OPERATING_STATUS_POINT,
     METER_DEVICE_POINTS,
+    STRING_MPPT_POINTS,
     TRANSPORT_MODBUS_ONLY,
 )
 from .energy_units import normalize_energy_units, tag_source
+from .model_capabilities import mppt_points_for_model, resolve_capabilities
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
 # the coordinator indefinitely nor let successive polls pile up.
@@ -521,17 +523,30 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for d in self.devices
                 if getattr(d.get("device_type"), "value", d.get("device_type")) == type_id and d.get("ps_key")
             ]
+            # Resolve the inverter family from the model code (#251). The cloud sometimes
+            # types a hybrid as a plain INVERTER; the model's battery signal is used to
+            # request battery/MPPT points that the device-type heuristic alone would miss.
+            model_code = device.get("device_model_code")
+            caps = resolve_capabilities(model_code)
+            is_ess = type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value
+
             extra: dict[str, str] = {}
             # Always request the operating-status point for inverters/ESS so the Fault
             # binary sensor can surface a reason regardless of the device-sensor option
             # (#182). Inverters use point 29, ESS/hybrids 13146.
-            if type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value:
+            if is_ess:
                 extra.update(ESS_OPERATING_STATUS_POINT)
                 # Always request battery charge/discharge power for ESS devices so hybrid
                 # users see separate charge and discharge power sensors (#31).
                 extra.update(ESS_BATTERY_POWER_POINTS)
             elif type_id == DeviceType.INVERTER.value:
                 extra.update(INVERTER_OPERATING_STATUS_POINT)
+                # A hybrid the cloud typed as a plain inverter still has a battery — request
+                # its charge/discharge power so those sensors appear without manual config
+                # (#31/#251). The battery power ids are ESS-specific, so a true string
+                # inverter (has_battery False) never requests them.
+                if caps.has_battery is True:
+                    extra.update(ESS_BATTERY_POWER_POINTS)
             # The full diagnostic/battery/meter/comm sets (and user extras) are only
             # fetched when the user has opted into per-device sensors (#149/#154/#179).
             # With the option on, an unmapped device type still gets a best-effort fetch
@@ -539,25 +554,34 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.enable_device_sensors:
                 extra.update(self.extra_measure_points)
                 if type_id in (DeviceType.INVERTER.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
-                    diagnostic = INVERTER_DIAGNOSTIC_POINTS
-                    if type_id == DeviceType.ENERGY_STORAGE_SYSTEM.value:
+                    diagnostic = dict(INVERTER_DIAGNOSTIC_POINTS)
+                    # Pick the MPPT id range by model family when known (#251): SG-family
+                    # string inverters report MPPT on points 5-10, SH-family hybrids on a
+                    # separate 13xxx range. Both ranges share the mpptN_* codes, so mixing
+                    # them would map two ids to one code and silently overwrite each other
+                    # in the per-device merge — hence we swap the range wholesale rather
+                    # than union it. Falls back to the device-type heuristic for unknown
+                    # models so nothing regresses.
+                    model_mppt = mppt_points_for_model(model_code)
+                    if model_mppt:
+                        for pid in set(STRING_MPPT_POINTS) | set(ESS_MPPT_DIAGNOSTIC_POINTS):
+                            diagnostic.pop(pid, None)
+                        diagnostic.update(model_mppt)
+                    elif is_ess:
+                        for pid in STRING_MPPT_POINTS:
+                            diagnostic.pop(pid, None)
+                        diagnostic.update(ESS_MPPT_DIAGNOSTIC_POINTS)
+                    if is_ess:
                         # An ESS reports operating status on 13146 (already requested above);
                         # drop the inverter point 29 so the two don't collide on the shared
                         # "operating_status" code and silently overwrite each other (#182).
-                        # ESS also reports MPPT on a separate 13xxx range: drop the
-                        # string-inverter MPPT IDs (5-10) and merge the hybrid MPPT IDs
-                        # instead. Both ranges share the mpptN_* codes, so requesting BOTH
-                        # would map two IDs to one code and silently overwrite each other in
-                        # the per-device merge.
-                        string_inverter_mppt_ids = {"5", "6", "7", "8", "9", "10"}
-                        diagnostic = {
-                            pid: code
-                            for pid, code in INVERTER_DIAGNOSTIC_POINTS.items()
-                            if pid != "29" and pid not in string_inverter_mppt_ids
-                        }
-                        diagnostic = {**diagnostic, **ESS_MPPT_DIAGNOSTIC_POINTS}
+                        diagnostic.pop("29", None)
                     extra.update(diagnostic)
-                if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value):
+                # Battery device points for an ESS/battery device, or a hybrid the cloud
+                # typed as a plain inverter (model says it has a battery) (#251).
+                if type_id in (DeviceType.BATTERY.value, DeviceType.ENERGY_STORAGE_SYSTEM.value) or (
+                    type_id == DeviceType.INVERTER.value and caps.has_battery is True
+                ):
                     extra.update(BATTERY_DEVICE_POINTS)
                 # Communication modules report WLAN/wireless signal strength (#149).
                 if type_id == DeviceType.COMMUNICATION_MODULE.value:

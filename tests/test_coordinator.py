@@ -578,6 +578,111 @@ async def test_ess_operating_status_avoids_point29_collision(hass: HomeAssistant
     assert extra["14"] == "total_dc_power"
 
 
+async def test_hybrid_typed_as_inverter_requests_battery_power(hass: HomeAssistant):
+    """A hybrid the cloud types as a plain INVERTER still gets battery power points (#251).
+
+    The model code (SH10RT-20) says it has a battery, so charge/discharge power is
+    requested even though the device type is INVERTER and per-device sensors are off.
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SH10RT-20",
+            "ps_key": "12345_1_1_1",
+        }
+    ]
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["29"] == "operating_status"  # inverter-typed -> inverter status point
+    assert extra["13126"] == "battery_charge_power"
+    assert extra["13150"] == "battery_discharge_power"
+
+
+async def test_string_inverter_never_requests_battery_power(hass: HomeAssistant):
+    """An SG string inverter (no battery) is not asked for battery power points (#251)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SG3.6RS",
+            "ps_key": "12345_1_1_1",
+        }
+    ]
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices)
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra == {"29": "operating_status"}
+    assert "13126" not in extra
+    assert "13150" not in extra
+
+
+async def test_sh_model_uses_hybrid_mppt_range(hass: HomeAssistant):
+    """An SH hybrid (even typed INVERTER) requests the hybrid MPPT range, not points 5-10 (#251)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SH10RT-20",
+            "ps_key": "12345_1_1_1",
+        }
+    ]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    # Hybrid MPPT range (13xxx) is requested; the string-inverter ids (5-10) are dropped.
+    assert extra["13001"] == "mppt1_voltage"
+    assert "5" not in extra
+    assert "7" not in extra
+    # Battery device points are requested too (model has a battery).
+    assert extra["58604"] == "battery_level"
+
+
+async def test_sg_model_uses_string_mppt_range(hass: HomeAssistant):
+    """An SG string inverter keeps the string MPPT range (points 5-10), not the 13xxx range (#251)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SG3.6RS",
+            "ps_key": "12345_1_1_1",
+        }
+    ]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    extra = plants.async_get_device_realtime.await_args.kwargs["extra_measure_points"]
+    assert extra["5"] == "mppt1_voltage"
+    assert extra["7"] == "mppt2_voltage"
+    assert "13001" not in extra
+    # No battery device points for a string inverter.
+    assert "58604" not in extra
+
+
 async def test_device_data_best_effort_on_error(hass: HomeAssistant):
     """A failing device type is skipped without failing the whole update."""
     plants = MagicMock()

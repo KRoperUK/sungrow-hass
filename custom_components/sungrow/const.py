@@ -108,6 +108,19 @@ ESS_BATTERY_POWER_POINTS: dict[str, str] = {
     "13150": "battery_discharge_power",
 }
 
+# String-inverter MPPT voltage/current (points 5-10, MPPT1-3). Named so the per-model
+# capability resolver (#251) and the ESS branch can reference the exact string-inverter
+# MPPT id set instead of a duplicated literal. Merged into INVERTER_DIAGNOSTIC_POINTS
+# below so the diagnostic map is unchanged.
+STRING_MPPT_POINTS: dict[str, str] = {
+    "5": "mppt1_voltage",
+    "6": "mppt1_current",
+    "7": "mppt2_voltage",
+    "8": "mppt2_current",
+    "9": "mppt3_voltage",
+    "10": "mppt3_current",
+}
+
 # Inverter/ESS device-level measuring points surfaced as diagnostic sensors (#149),
 # requested per-device when device sensors are enabled. Maps the documented inverter
 # point ID -> a stable code. Every ID is already in the measure-point catalog, so it
@@ -119,12 +132,8 @@ INVERTER_DIAGNOSTIC_POINTS: dict[str, str] = {
     "4": "internal_temperature",
     "27": "grid_frequency",
     "94": "array_insulation_resistance",
-    "5": "mppt1_voltage",
-    "6": "mppt1_current",
-    "7": "mppt2_voltage",
-    "8": "mppt2_current",
-    "9": "mppt3_voltage",
-    "10": "mppt3_current",
+    # String-inverter MPPT voltage/current (points 5-10) — see STRING_MPPT_POINTS above.
+    **STRING_MPPT_POINTS,
     # Grid-side health (#179). Per-phase voltages/currents, power quality and DC-link
     # voltage — all live-confirmed on real hardware except the AFCI/insulation extras,
     # which the per-device builder simply skips when a model doesn't report them.
