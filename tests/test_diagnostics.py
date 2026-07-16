@@ -266,3 +266,125 @@ async def test_diagnostics_without_service_skips_probe(hass: HomeAssistant):
 
     assert diag["plants"]["1"]["all_devices"] == []
     assert diag["plants"]["1"]["device_realtime"] == {}
+
+
+async def test_points_catalog_lists_points_per_device(hass: HomeAssistant):
+    """The points_catalog flattens plant + per-device points into pickable rows (#252)."""
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    service = MagicMock()
+    service.async_get_plant_devices = AsyncMock(
+        return_value=[
+            {
+                "uuid": "ess-1",
+                "device_name": "My Inverter",
+                "device_type": DeviceType.ENERGY_STORAGE_SYSTEM,
+                "device_model_code": "SH10RT-20",
+            },
+        ]
+    )
+    service.async_get_device_realtime = AsyncMock(
+        return_value={
+            "ess-1": {
+                "battery_charge_power": {"id": "13126", "code": "battery_charge_power", "value": "800", "unit": "W"},
+                "operating_status": {"id": "13146", "code": "operating_status", "value": "13"},
+            }
+        }
+    )
+    coordinator = _make_coordinator(
+        "1",
+        "P",
+        {"total_active_power": {"id": "83022", "code": "total_active_power", "value": "5.2", "unit": "kW"}},
+        plants_service=service,
+    )
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    catalog = diag["plants"]["1"]["points_catalog"]
+
+    # Plant-level points are listed with id/code/value/unit.
+    plant_ids = {row["point_id"] for row in catalog["plant"]}
+    assert "83022" in plant_ids
+
+    ess_type = str(DeviceType.ENERGY_STORAGE_SYSTEM.value)
+    device = catalog["devices"][ess_type]
+    # The device is annotated with its resolved family/battery capability (#251).
+    assert device["model"] == "SH10RT-20"
+    assert device["family"] == "sh_rt"
+    assert device["has_battery"] is True
+    rows = {row["point_id"]: row for row in device["points"]}
+    assert rows["13126"]["code"] == "battery_charge_power"
+    assert rows["13126"]["unit"] == "W"
+    assert "13146" in rows
+    # Rows are sorted by point id for stable, scannable output.
+    assert [r["point_id"] for r in device["points"]] == sorted(rows)
+    json.dumps(diag)
+
+
+async def test_points_catalog_contains_no_pii(hass: HomeAssistant):
+    """The catalog carries only point metadata + model code — no uuids/serials/names (#252)."""
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    service = MagicMock()
+    service.async_get_plant_devices = AsyncMock(
+        return_value=[
+            {
+                "uuid": "secret-uuid",
+                "device_name": "7 Acacia Avenue Inverter",
+                "device_sn": "SN-SECRET",
+                "device_type": DeviceType.INVERTER,
+                "device_model_code": "SG3.6RS",
+            }
+        ]
+    )
+    service.async_get_device_realtime = AsyncMock(
+        return_value={
+            "secret-uuid": {"mppt1_voltage": {"id": "5", "code": "mppt1_voltage", "value": "320", "unit": "V"}}
+        }
+    )
+    coordinator = _make_coordinator("1", "P", {}, plants_service=service)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    catalog = diag["plants"]["1"]["points_catalog"]
+
+    dumped = json.dumps(catalog)
+    for secret in ("secret-uuid", "SN-SECRET", "7 Acacia Avenue"):
+        assert secret not in dumped
+    # A string inverter is correctly flagged as having no battery.
+    inv = catalog["devices"][str(DeviceType.INVERTER.value)]
+    assert inv["has_battery"] is False
+    assert inv["model"] == "SG3.6RS"
+
+
+async def test_points_catalog_handles_probe_error(hass: HomeAssistant):
+    """A per-device probe error yields an empty point list for that type, never a crash (#252)."""
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    service = MagicMock()
+    service.async_get_plant_devices = AsyncMock(
+        return_value=[{"uuid": "chg-1", "device_type": 999, "device_model_code": "AC011E"}]
+    )
+    service.async_get_device_realtime = AsyncMock(side_effect=RuntimeError("nope"))
+    coordinator = _make_coordinator("1", "P", None, plants_service=service)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    catalog = diag["plants"]["1"]["points_catalog"]
+
+    # Plant data was None -> empty plant list; the errored type has no points but is
+    # still listed (as an unknown family, since AC011E isn't an SG/SH inverter).
+    assert catalog["plant"] == []
+    charger = catalog["devices"]["999"]
+    assert charger["points"] == []
+    assert charger["family"] == "unknown"
+    json.dumps(diag)

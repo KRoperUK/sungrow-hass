@@ -11,6 +11,8 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import SungrowConfigEntry, SungrowData
+from .measure_points import resolve_name
+from .model_capabilities import resolve_capabilities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,25 +84,92 @@ def _jsonable(obj: Any) -> Any:
     return obj
 
 
-async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _catalog_rows(points: Any) -> list[dict[str, Any]]:
+    """Flatten a ``{code: point}`` realtime dict into tidy, sorted catalog rows.
+
+    Each row is ``{point_id, code, name, value, unit}`` — the exact fields a user needs
+    to pick a point for the "Extra measure points" option (#252). The friendly English
+    ``name`` comes from the measure-point catalog (``resolve_name``), not the API's
+    Chinese-for-English-locale name nor the user's device name, so the rows carry no PII.
+    """
+    if not isinstance(points, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for code, point in points.items():
+        if not isinstance(point, dict):
+            continue
+        point_id = str(point.get("id") or code)
+        rows.append(
+            {
+                "point_id": point_id,
+                "code": str(code),
+                "name": resolve_name(point_id, str(code), point.get("name")),
+                "value": point.get("value"),
+                "unit": point.get("unit"),
+            }
+        )
+    return sorted(rows, key=lambda row: row["point_id"])
+
+
+def build_points_catalog(
+    plant_realtime: Any,
+    device_realtime: dict[str, Any],
+    models_by_type: dict[str, str | None],
+) -> dict[str, Any]:
+    """Build a human-readable catalog of every point the API reports (#252).
+
+    Turns the raw plant + per-device realtime dumps into flat, sorted point lists so a
+    user can see exactly which point IDs are available on their hardware and copy them
+    into the "Extra measure points" option, instead of hunting in the developer portal.
+    Each device type is annotated with the resolved model family / battery capability
+    (#251) so it is obvious which device a point belongs to. Contains only point
+    metadata and model codes — no uuids, serials or user-set names — so it is safe to
+    include in a shared diagnostics bundle.
+    """
+    catalog: dict[str, Any] = {"plant": _catalog_rows(plant_realtime), "devices": {}}
+    for type_id, per_device in device_realtime.items():
+        # Merge points across all devices of this type, deduped by point id (devices of
+        # one type report the same point set). ``per_device`` is ``{device_N: {code:
+        # point}}`` on success, or ``{"error": ...}`` when the probe failed.
+        merged: dict[str, dict[str, Any]] = {}
+        if isinstance(per_device, dict):
+            for payload in per_device.values():
+                for row in _catalog_rows(payload):
+                    merged.setdefault(row["point_id"], row)
+        model = models_by_type.get(type_id)
+        caps = resolve_capabilities(model)
+        catalog["devices"][type_id] = {
+            "model": model,
+            "family": caps.family.value,
+            "has_battery": caps.has_battery,
+            "points": sorted(merged.values(), key=lambda row: row["point_id"]),
+        }
+    return catalog
+
+
+async def _probe_plant_devices(
+    service: Any, plant_id: str
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str | None]]:
     """Best-effort capture of every device and its per-device realtime data.
 
-    Returns ``(all_devices, device_realtime)``. The plant realtime endpoint only
-    returns point IDs the library knows about, so hardware like EV chargers never
-    shows up as sensors (issue #18). This walks the *full* device list (not just
-    inverter/ESS) and attempts a per-device realtime fetch for each distinct type,
-    so a diagnostics download reveals an unmapped device's type and reachable
-    points — enough to add a proper mapping. All failures are captured, never
-    raised, so a diagnostics download always succeeds.
+    Returns ``(all_devices, device_realtime, models_by_type)``. The plant realtime
+    endpoint only returns point IDs the library knows about, so hardware like EV
+    chargers never shows up as sensors (issue #18). This walks the *full* device list
+    (not just inverter/ESS) and attempts a per-device realtime fetch for each distinct
+    type, so a diagnostics download reveals an unmapped device's type and reachable
+    points — enough to add a proper mapping. ``models_by_type`` maps each device-type id
+    to that type's model code, so the point catalog can annotate device families (#252).
+    All failures are captured, never raised, so a diagnostics download always succeeds.
     """
     try:
         async with asyncio.timeout(PROBE_TIMEOUT):
             all_devices = await service.async_get_plant_devices(plant_id)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.debug("Diagnostics: could not list devices for plant %s: %s", plant_id, err)
-        return [{"error": str(err)}], {}
+        return [{"error": str(err)}], {}, {}
 
     device_realtime: dict[str, Any] = {}
+    models_by_type: dict[str, str | None] = {}
     seen_types: set[Any] = set()
     # Shared across device types so a given device uuid always maps to the same
     # ``device_N`` placeholder within this plant's per-device realtime section (#122).
@@ -112,6 +181,9 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
         if device_type is None:
             continue
         type_id = getattr(device_type, "value", device_type)
+        # Record the model code for this type (first device of the type wins), for the
+        # point-catalog family annotation (#252).
+        models_by_type.setdefault(str(type_id), device.get("device_model_code"))
         if type_id in seen_types:
             continue
         seen_types.add(type_id)
@@ -123,7 +195,7 @@ async def _probe_plant_devices(service: Any, plant_id: str) -> tuple[list[dict[s
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}
 
-    return _jsonable(all_devices), device_realtime
+    return _jsonable(all_devices), device_realtime, models_by_type
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SungrowConfigEntry) -> dict[str, Any]:
@@ -131,7 +203,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
 
     Tokens and secrets are redacted; raw coordinator data, the full device list,
     and per-device realtime data are included to help identify unsupported point
-    IDs (e.g. EV chargers — see issue #18).
+    IDs (e.g. EV chargers — see issue #18). A flattened ``points_catalog`` lists
+    every reported point (id/name/value/unit) per device so users can pick point
+    IDs for the "Extra measure points" option without portal-spelunking (#252).
     """
     data = getattr(entry, "runtime_data", None)
     coordinators = data.coordinators if isinstance(data, SungrowData) else []
@@ -143,8 +217,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
         service = getattr(coordinator, "plants_service", None)
         all_devices: list[dict[str, Any]] = []
         device_realtime: dict[str, Any] = {}
+        models_by_type: dict[str, str | None] = {}
         if service is not None:
-            all_devices, device_realtime = await _probe_plant_devices(service, plant_id)
+            all_devices, device_realtime, models_by_type = await _probe_plant_devices(service, plant_id)
 
         modbus_diag: dict[str, Any] = {}
         if getattr(coordinator, "modbus_diagnostics", None):
@@ -160,6 +235,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "all_devices": all_devices,
             # Per-device-type realtime data (best effort; {} where unsupported).
             "device_realtime": device_realtime,
+            # Flattened, human-readable catalog of every reported point (#252): the
+            # point IDs a user can copy into the "Extra measure points" option.
+            "points_catalog": build_points_catalog(coordinator.data, device_realtime, models_by_type),
             # Local Modbus-only diagnostic metadata (skipped blocks, last error, family).
             "modbus_diagnostics": modbus_diag,
         }
