@@ -39,9 +39,23 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
 
 | Mode | Data source | Cloud account | Control (dispatch) | Best for |
 | --- | --- | --- | --- | --- |
-| **Cloud-only** | iSolarCloud API | Required | ✅ Yes | Full plant sensors and battery/dispatch controls. |
+| **Cloud-only** | iSolarCloud OpenAPI | Developer app (App Key/Secret/ID) | ✅ Yes | Full plant sensors and battery/dispatch controls. |
+| **Cloud (user account)** *(unofficial)* | iSolarCloud app/web API | Just email + password | ❌ Not yet | No developer app — quickest cloud setup. See caveats below. |
 | **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ❌ Read-only | Fast local metrics, offline / privacy-first. |
 | **Both** *(two entries)* | Each entry its own source | Cloud entry only | Via **cloud** entry | Compare or use cloud + local side by side. |
+
+### Cloud user account (unofficial)
+
+If you don't have (or don't want to register) an iSolarCloud **developer application**, you can connect with the **normal email + password** you use in the iSolarCloud app/web portal. Choose **Cloud (user account, unofficial)** as the transport and enter your email, password and region.
+
+!!! warning "Unofficial and experimental"
+    This uses Sungrow's **undocumented app/web API**, not the official OpenAPI. It may change or stop working without notice, and its use may be subject to Sungrow's terms of service. Your password is stored in the Home Assistant config entry and is never logged. Prefer the developer **Cloud-only** transport if you can.
+
+Current limitations:
+
+- **Plant-level data only** so far (e.g. current power, daily/total yield, alarm/fault counts) — from the `getPsDetail` endpoint. Per-device and richer measure points may follow.
+- **No dispatch/control** — read-only. Use the developer Cloud-only transport for charge/discharge and other controls.
+- If login fails with "account or password incorrect", it's most often the **wrong region** — pick the region your account actually uses.
 
 ```mermaid
 flowchart LR

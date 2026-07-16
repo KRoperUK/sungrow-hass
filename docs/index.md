@@ -21,6 +21,9 @@ inverters** through the **iSolarCloud** cloud API, using the
   [Local Modbus](local-modbus.md).
 - **Auto-discovery** — finds every plant linked to your account, and discovers WiNet-S
   dongles on the network for local Modbus.
+- **User-account login (unofficial)** — connect with your normal iSolarCloud email +
+  password, without registering a developer application. Read-only, experimental — see
+  [Local Modbus & transport modes](local-modbus.md#cloud-user-account-unofficial).
 - **Rich sensors** — power, energy, battery SOC, and more, with correct device/state classes so
   they work in the Energy dashboard out of the box. See the
   [Model support matrix](model-support.md) for what each inverter family reports.

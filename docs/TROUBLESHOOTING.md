@@ -143,6 +143,24 @@ when iSolarCloud rejects requests for a reason you can act on:
 
 ---
 
+## User-account (unofficial) login fails or shows "account or password incorrect"
+
+The **Cloud (user account)** transport logs in with your normal iSolarCloud email/password
+via the unofficial app/web API. If setup (or reauth) fails:
+
+- **"account or password incorrect" — check the region first.** This is most often a
+  **wrong region**, not a wrong password: logging in against the wrong regional gateway
+  returns that message. Pick the region your account actually uses (the same one you log
+  into on the iSolarCloud app/web). Repeated failed attempts can temporarily **lock the
+  account**, so confirm the region before retrying.
+- **Confirm the credentials** are exactly what works in the official app (no stray spaces).
+- If it worked before and suddenly fails, the unofficial API may have changed — the
+  transport is experimental. The developer **Cloud-only** transport is the robust option.
+- This transport is **read-only** and surfaces plant-level data only; for dispatch/control
+  or per-device sensors, use the developer Cloud-only transport.
+
+---
+
 ## Sensors update too often / not often enough
 
 The default polling interval is **5 minutes**. You can change it:
