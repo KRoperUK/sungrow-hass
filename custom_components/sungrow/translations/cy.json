@@ -135,6 +135,10 @@
     "backfill_partial": {
       "title": "Gorffennodd y llenwi hanesyddol gyda bylchau",
       "description": "Gorffennodd llenwi'r ystadegau hanesyddol ar gyfer **{plant}** ond ni ellid mewnforio {failed_chunks} ystod amser, felly gall fod bylchau ar y dangosfyrddau Hanes ac Ynni ar gyfer y cyfnod hwnnw. Ail-redwch **Offer Datblygwyr → Gweithredoedd → Sungrow: Llenwi ystadegau hanesyddol** i lenwi'r bylchau; mae'r oriau llwyddiannus wedi'u mewnforio'n barod ac mae ail-redeg ond yn eu trosysgrifo'n lân."
+    },
+    "heartbeat_stopped": {
+      "title": "Stopiodd y cadw'n fyw anfon",
+      "description": "Mae'r cadw'n fyw yn y cefndir sy'n dal **{plant}** yn y modd gwefru/dadwefru gorfodol wedi stopio'n annisgwyl, felly bydd y gwrthdröydd yn dod allan o'r modd gorfodol ac ni chaiff y gorchymyn ei gymhwyso mwyach. Gosodwch y Gorchymyn Gwefru/Dadwefru i Stop ac yn ôl i Wefru/Dadwefru i'w ailgychwyn; os yw'n parhau, gwiriwch y logiau ac agorwch fater."
     }
   },
   "entity": {

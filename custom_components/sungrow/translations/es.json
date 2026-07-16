@@ -135,6 +135,10 @@
     "backfill_partial": {
       "title": "El relleno histórico terminó con huecos",
       "description": "El relleno de estadísticas históricas para **{plant}** terminó, pero no se pudieron importar {failed_chunks} rango(s) de tiempo, por lo que los paneles de Historial y Energía pueden tener huecos en ese periodo. Vuelva a ejecutar **Herramientas para desarrolladores → Acciones → Sungrow: Rellenar estadísticas históricas** para completar los huecos; las horas correctas ya están importadas y volver a ejecutarlo solo las sobrescribe de forma limpia."
+    },
+    "heartbeat_stopped": {
+      "title": "Se detuvo el keepalive de despacho",
+      "description": "El keepalive en segundo plano que mantiene **{plant}** en modo de carga/descarga forzada se detuvo inesperadamente, por lo que el inversor saldrá del modo forzado y el comando ya no se aplica. Cambie el comando de carga/descarga a Detener y de nuevo a Cargar/Descargar para reiniciarlo; si sigue ocurriendo, revise los registros y abra una incidencia."
     }
   },
   "entity": {

@@ -9,6 +9,7 @@ from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -447,6 +448,68 @@ async def test_stop_heartbeat_cancels_stubborn_loop(hass: HomeAssistant):
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert task.done()
+
+
+async def _drain_until_done(task: asyncio.Task) -> None:
+    """Yield control until the task finishes and its done-callbacks have run."""
+    for _ in range(10):
+        if task.done():
+            await asyncio.sleep(0)  # let add_done_callback callbacks fire
+            return
+        await asyncio.sleep(0)
+
+
+async def test_heartbeat_unexpected_exit_raises_repair(hass: HomeAssistant):
+    """A heartbeat loop that dies on its own raises a Repair (the #231 silent death, #254)."""
+    entry = _entry_with_heartbeats(hass)
+
+    async def _boom(uuid, interval, stop_event):
+        raise RuntimeError("heartbeat died")
+
+    entry.runtime_data.control.heartbeat_loop = _boom
+    # A coordinator so the Repair resolves the plant's display name (exercises _plant_name).
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.plant_name = "Test Plant"
+    entry.runtime_data.coordinators = [coordinator]
+
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    _, task = entry.runtime_data.heartbeats["12345"]
+    await _drain_until_done(task)
+
+    assert (DOMAIN, "heartbeat_stopped_12345") in ir.async_get(hass).issues
+
+
+async def test_heartbeat_normal_stop_no_repair(hass: HomeAssistant):
+    """A requested stop must NOT raise the dead-heartbeat Repair (#254)."""
+    entry = _entry_with_heartbeats(hass)
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    _, task = entry.runtime_data.heartbeats["12345"]
+
+    await async_stop_heartbeat(hass, entry, "12345")
+    await _drain_until_done(task)
+
+    assert (DOMAIN, "heartbeat_stopped_12345") not in ir.async_get(hass).issues
+
+
+async def test_start_heartbeat_clears_stale_repair(hass: HomeAssistant):
+    """Starting a fresh keepalive clears a previous dead-heartbeat Repair (#254)."""
+    entry = _entry_with_heartbeats(hass)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "heartbeat_stopped_12345",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="heartbeat_stopped",
+        translation_placeholders={"plant": "Test Plant"},
+    )
+    assert (DOMAIN, "heartbeat_stopped_12345") in ir.async_get(hass).issues
+
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    assert (DOMAIN, "heartbeat_stopped_12345") not in ir.async_get(hass).issues
+
+    await async_stop_heartbeat(hass, entry, "12345")
 
 
 async def test_unload_cancels_running_heartbeat(hass: HomeAssistant, mock_setup_auth, mock_plants_service):

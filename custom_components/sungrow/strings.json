@@ -135,6 +135,10 @@
     "backfill_partial": {
       "title": "Historical backfill finished with gaps",
       "description": "The historical statistics backfill for **{plant}** finished but {failed_chunks} time range(s) could not be imported, so the History and Energy dashboards may have gaps for that period. Re-run **Developer Tools → Actions → Sungrow: Backfill historical statistics** to fill the gaps; the successful hours are already imported and re-running only overwrites them cleanly."
+    },
+    "heartbeat_stopped": {
+      "title": "Dispatch keepalive stopped",
+      "description": "The background keepalive that holds **{plant}** in forced charge/discharge mode stopped unexpectedly, so the inverter will time out of forced mode and the command is no longer being applied. Set the Charge/Discharge Command to Stop and back to Charge/Discharge to restart it; if it keeps happening, check the logs and open an issue."
     }
   },
   "entity": {

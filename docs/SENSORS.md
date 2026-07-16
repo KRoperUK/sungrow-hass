@@ -175,6 +175,8 @@ When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integr
 
 Selecting **Stop** restores Self-consumption mode and turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
 
+If that heartbeat ever stops unexpectedly while a forced Charge/Discharge is active (so the inverter would silently time out of forced mode), the integration raises a **"Dispatch keepalive stopped"** Repair — see [Troubleshooting](TROUBLESHOOTING.md#a-repair-appeared-whitelist-rejection-or-rate-limit).
+
 > **Auto-revert (safety).** Set **Forced Dispatch Duration** to a number of minutes and a forced *Charge*/*Discharge* automatically reverts to **Stop** after that long — so a forced command can't silently persist and curtail your solar (the [#148](https://github.com/KRoperUK/sungrow-hass/issues/148) footgun). The countdown survives a Home Assistant restart (if it expires while HA is down, the command reverts on startup). Leave it at **0** to keep the legacy behaviour (a forced command stays until you change it). It's a local control — it writes nothing to the inverter itself.
 
 > Dispatch support requires the correct iSolarCloud API plan and firmware. The integration will only create dispatch entities if it can discover a compatible inverter or ESS device for the plant.

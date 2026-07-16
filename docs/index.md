@@ -41,8 +41,8 @@ inverters** through the **iSolarCloud** cloud API, using the
   charge/discharge to *Stop* after a set time (surviving restarts), so it can't silently persist.
 - **Resilient polling** — rides out brief API/network hiccups instead of flapping unavailable, and
   auto-backs-off when rate-limited.
-- **Guided repairs** — whitelist and rate-limit rejections surface as actionable Home Assistant
-  Repairs.
+- **Guided repairs** — whitelist and rate-limit rejections, and an unexpectedly-stopped
+  dispatch keepalive, surface as actionable Home Assistant Repairs.
 - **UI config flow** — set up entirely through the Home Assistant interface.
 - **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay
   available across restarts; if credentials expire you're prompted to re-authorize in place.
