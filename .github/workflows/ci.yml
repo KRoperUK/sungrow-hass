@@ -326,6 +326,29 @@ jobs:
           fi
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "dev-release-cut"
 
+      # Each push to the PR mints a fresh vX.Y.Z-pr.<PR>.<run> build; the newest one
+      # supersedes the rest. Prune the older builds for this PR now rather than leaving
+      # them until the PR closes (cleanup-pr-release.yml) or the weekly sweep.
+      - name: Prune superseded builds for this PR
+        if: steps.prerelease.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          KEEP_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          echo "Keeping ${KEEP_TAG}; pruning older pr.${PR_NUMBER} builds."
+          gh release list --limit 1000 --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease) | .tagName' \
+          | { grep -E "^v[0-9]+\\.[0-9]+\\.[0-9]+-pr\\.${PR_NUMBER}\\." || true; } \
+          | while read -r tag; do
+              if [ "$tag" = "$KEEP_TAG" ]; then
+                continue
+              fi
+              echo "Deleting superseded PR pre-release: ${tag}"
+              gh release delete "$tag" --yes --cleanup-tag || true
+            done
+
   # Main release-candidate dev builds — a push to main that changed the component,
   # once CI is green. Never for the "chore(main): release X.Y.Z" commit (matched via
   # ": release ") which release-please lands when its PR merges.
@@ -426,6 +449,7 @@ jobs:
             done
 
       - name: Create pre-release
+        id: create
         if: ${{ steps.tag.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -526,6 +550,9 @@ jobs:
               export TAG COMMIT_SHA
               bash scripts/verify-dev-release-target.sh
               echo "Created ${TAG} -> ${SYNTHETIC_SHA} (base ${BASE_SHA}, version ${DEV_VERSION})"
+              # Publish the tag actually created (RC_NUMBER may have rolled over on
+              # collision) so the follow-up prune keeps the right one.
+              echo "created_tag=${TAG}" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "gh release create failed for ${TAG} (attempt ${attempt}):"
@@ -540,3 +567,27 @@ jobs:
           done
           echo "Exhausted ${max_attempts} RC tag attempts without creating a release." >&2
           exit 1
+
+      # The RC just created supersedes every earlier RC of the same version line, so
+      # prune them immediately instead of leaving the long tail for the weekly sweep.
+      # Cross-version RCs were already pruned before creation; this keeps only the
+      # newest RC of the current line (new vX.Y.Z-rc.N and legacy dev-vX.Y.Z-rc.N).
+      - name: Prune superseded RCs of this version line
+        if: ${{ steps.tag.outputs.skip != 'true' && steps.create.outputs.created_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.tag.outputs.base_version }}
+          KEEP_TAG: ${{ steps.create.outputs.created_tag }}
+        run: |
+          echo "Keeping ${KEEP_TAG}; pruning older RCs of v${VERSION}."
+          gh release list --limit 1000 --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease) | .tagName' \
+          | { grep -E "^(dev-)?v${VERSION}-rc\\.[0-9]+$" || true; } \
+          | while read -r tag; do
+              if [ "$tag" = "$KEEP_TAG" ]; then
+                continue
+              fi
+              echo "Deleting superseded RC pre-release: ${tag}"
+              gh release delete "$tag" --yes --cleanup-tag || true
+            done

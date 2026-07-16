@@ -62,17 +62,24 @@ jobs:
                   echo "Verified sungrow.zip is attached to ${TAG}."
 
             # A published release supersedes every dev build. Prune them all so only
-            # the real release remains (rc builds + any leftover branch builds).
+            # the real release remains. Covers both the current tag schemes
+            # (vX.Y.Z-rc.N release candidates, vX.Y.Z-pr.P.R PR builds) and the legacy
+            # dev-* scheme — matching the weekly sweep in cleanup-dev-releases.yml.
             - name: Prune all dev pre-releases on a real release
               if: ${{ steps.release.outputs.release_created == 'true' }}
               env:
                   GH_TOKEN: ${{ github.token }}
                   GH_REPO: ${{ github.repository }}
               run: |
-                  echo "Release created; deleting all dev-* pre-releases."
+                  echo "Release created; deleting all dev pre-releases (rc / pr / legacy dev-*)."
                   gh release list --limit 1000 --json tagName,isPrerelease \
-                    --jq '.[] | select(.isPrerelease and (.tagName | startswith("dev-"))) | .tagName' \
+                    --jq '.[] | select(.isPrerelease) | .tagName' \
                   | while read -r tag; do
+                      case "$tag" in
+                        dev-*) ;;
+                        v[0-9]*.[0-9]*.[0-9]*-rc.*|v[0-9]*.[0-9]*.[0-9]*-pr.*) ;;
+                        *) continue ;;
+                      esac
                       echo "Deleting ${tag}"
                       gh release delete "$tag" --yes --cleanup-tag
                     done
