@@ -135,6 +135,10 @@
     "backfill_partial": {
       "title": "Le remplissage historique s'est terminé avec des lacunes",
       "description": "Le remplissage des statistiques historiques pour **{plant}** est terminé, mais {failed_chunks} plage(s) horaire(s) n'ont pas pu être importées, de sorte que les tableaux de bord Historique et Énergie peuvent présenter des lacunes pour cette période. Relancez **Outils de développement → Actions → Sungrow : Remplir les statistiques historiques** pour combler les lacunes ; les heures réussies sont déjà importées et une nouvelle exécution ne fait que les écraser proprement."
+    },
+    "heartbeat_stopped": {
+      "title": "Keepalive de pilotage arrêté",
+      "description": "Le keepalive en arrière-plan qui maintient **{plant}** en mode charge/décharge forcée s'est arrêté de façon inattendue ; l'onduleur va donc quitter le mode forcé et la commande n'est plus appliquée. Réglez la commande de charge/décharge sur Arrêt puis de nouveau sur Charge/Décharge pour le relancer ; si le problème persiste, consultez les journaux et ouvrez un ticket."
     }
   },
   "entity": {

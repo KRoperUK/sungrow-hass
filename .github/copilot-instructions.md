@@ -12,7 +12,8 @@ iSolarCloud cloud API (`iot_class: cloud_polling`), built on the
   **persists rotated tokens** to the config entry; classifies errors into
   `ConfigEntryNotReady` (retry) vs `ConfigEntryAuthFailed` (reauth); registers the
   OAuth callback HTTP view; owns `build_device_info`, battery detection, and the EMS
-  heartbeat helpers. `PLATFORMS = [BINARY_SENSOR, NUMBER, SELECT, SENSOR]`.
+  heartbeat helpers (which raise the `heartbeat_stopped` Repair if a heartbeat loop
+  dies unexpectedly while dispatch is active, #254). `PLATFORMS = [BINARY_SENSOR, NUMBER, SELECT, SENSOR]`.
 - `auth.py` — `SungrowAuth(pysolarcloud.Auth)` with a `token_updater` callback;
   `AUTH_ERRORS` lists upstream "credentials dead" codes.
 - `coordinator.py` — `SungrowPlantCoordinator`; realtime + per-device fetch;

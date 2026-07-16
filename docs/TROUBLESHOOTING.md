@@ -122,6 +122,15 @@ when iSolarCloud rejects requests for a reason you can act on:
   root cause, **raise the polling interval** (Configure → Polling interval) and,
   if you have per-device sensors enabled, consider turning them off (each device
   type adds a call per poll). The Repair clears once the quota resets.
+- **"Dispatch keepalive stopped".** While a forced **Charge**/**Discharge** is
+  active, the integration runs a background keepalive (the External-EMS heartbeat)
+  that holds the inverter in forced mode. If that keepalive stops unexpectedly, the
+  inverter times out of forced mode and the command silently stops being applied —
+  so this Repair is raised. To recover, set **Charge/Discharge Command** back to
+  **Stop** and then to **Charge**/**Discharge** again to restart the keepalive; the
+  Repair clears when the keepalive restarts or you Stop dispatch. If it keeps
+  recurring, enable debug logging (below) and open an issue with the log around the
+  time it happened.
 
 ---
 

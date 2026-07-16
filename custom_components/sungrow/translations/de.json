@@ -135,6 +135,10 @@
     "backfill_partial": {
       "title": "Historische Rückfüllung mit Lücken abgeschlossen",
       "description": "Die Rückfüllung der historischen Statistiken für **{plant}** wurde abgeschlossen, aber {failed_chunks} Zeitbereich(e) konnten nicht importiert werden, sodass die Verlaufs- und Energie-Dashboards für diesen Zeitraum Lücken aufweisen können. Führen Sie **Entwicklerwerkzeuge → Aktionen → Sungrow: Historische Statistiken rückfüllen** erneut aus, um die Lücken zu füllen; die erfolgreichen Stunden sind bereits importiert und ein erneuter Lauf überschreibt sie nur sauber."
+    },
+    "heartbeat_stopped": {
+      "title": "Dispatch-Keepalive gestoppt",
+      "description": "Das Hintergrund-Keepalive, das **{plant}** im erzwungenen Lade-/Entlademodus hält, wurde unerwartet beendet. Der Wechselrichter verlässt daher den erzwungenen Modus und der Befehl wird nicht mehr angewendet. Setzen Sie den Lade-/Entladebefehl auf Stopp und wieder auf Laden/Entladen, um ihn neu zu starten; tritt das Problem weiterhin auf, prüfen Sie die Protokolle und öffnen Sie ein Issue."
     }
   },
   "entity": {
