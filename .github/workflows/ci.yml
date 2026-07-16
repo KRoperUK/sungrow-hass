@@ -145,6 +145,36 @@ jobs:
       - name: Hassfest validation
         uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c # master
 
+  # Syntax-check the release / dev-build shell helpers. These scripts drive tag
+  # computation, dev-version commits and HACS packaging, so a syntax error there can
+  # break a release or leave a half-published pre-release. `bash -n` parses each script
+  # without executing it — no external tooling, no network, so it is unaffected by
+  # marketplace-action or registry outages.
+  scripts:
+    needs: changes
+    if: needs.changes.outputs.component == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Syntax-check shell scripts
+        run: |
+          shopt -s nullglob
+          status=0
+          for f in scripts/*.sh; do
+            if bash -n "$f"; then
+              echo "ok: $f"
+            else
+              echo "::error file=$f::bash -n found a syntax error"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "One or more shell scripts failed syntax checking." >&2
+          fi
+          exit "$status"
+
 
   # Branch dev builds — a same-repo PR that changed the component, once CI is green.
   # Fork PRs get a read-only token (release would fail) and this job holds
