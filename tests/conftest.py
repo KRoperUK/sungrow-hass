@@ -243,3 +243,26 @@ def live_credentials():
         "app_id": app_id,
         "host": host,
     }
+
+
+@pytest.fixture
+def live_tokens():
+    """Return stored OAuth tokens for authorized live smoke tests, or skip.
+
+    Authorized API calls (list plants, realtime) need OAuth tokens that can only be
+    obtained interactively, so they're supplied to CI as a ``SUNGROW_TOKENS`` secret
+    holding the JSON ``{"access_token", "refresh_token", "expires_at"}`` dict. Absent
+    that secret the test skips, so ordinary CI and local runs are unaffected (#257).
+    """
+    import json
+
+    raw = os.getenv("SUNGROW_TOKENS")
+    if not raw:
+        pytest.skip("SUNGROW_TOKENS not set; skipping authorized live smoke test")
+    try:
+        tokens = json.loads(raw)
+    except (TypeError, ValueError) as err:
+        pytest.skip(f"SUNGROW_TOKENS is not valid JSON: {err}")
+    if not isinstance(tokens, dict) or "access_token" not in tokens:
+        pytest.skip("SUNGROW_TOKENS must be a JSON object with at least an access_token")
+    return tokens
