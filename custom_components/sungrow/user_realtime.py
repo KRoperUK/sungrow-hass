@@ -5,9 +5,10 @@ realtime shape. The measure points arrive as ``p<ID>_map`` / ``p<ID>_map_virgin`
 (the ``_virgin`` variant carries the raw value in its base unit, e.g. ``Wh``) keyed by the
 same measure-point IDs the integration's catalog already knows, plus a handful of named
 plant-level fields (``curr_power`` etc). This module turns that into the integration's
-``{code: {id, code, value, unit}}`` realtime shape so the existing naming/classification
-(``resolve_name`` / ``resolve_classification``, keyed on point ID) produces correctly
-named, correctly classified sensors. Energy-unit normalisation is applied by the caller.
+``{code: {id, code, value, unit}}`` realtime shape. Measure points use the *bare numeric*
+point ID as their code so ``resolve_name`` / ``resolve_classification`` take the digit-code
+catalog path and produce the same English names/entity slugs the OAuth transport gives
+(#269). Energy-unit normalisation is applied by the caller.
 """
 
 from __future__ import annotations
@@ -59,8 +60,11 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
     for point_id, (value, unit) in raw.items():
         if value in (None, ""):
             continue
-        code = f"p{point_id}"
-        points[code] = {"id": point_id, "code": code, "value": value, "unit": unit or ""}
+        # Use the bare numeric point ID as the code so the resolver's digit-code path
+        # (``resolve_name``) consults the measure-point catalog and produces the same
+        # English name/entity slug the OAuth transport gives (#269). A ``p<ID>`` code is
+        # non-numeric and would fall back to an opaque "P<ID>" title-case name.
+        points[point_id] = {"id": point_id, "code": point_id, "value": value, "unit": unit or ""}
 
     for field, code in _NAMED_DICT_FIELDS.items():
         val = detail.get(field)
