@@ -999,3 +999,70 @@ async def test_import_creates_modbus_only_entry(hass: HomeAssistant):
     assert result["title"] == "Sungrow SG3.6RS (local)"
     assert result["data"][CONF_MODBUS_HOST] == "10.0.0.5"
     assert result["result"].unique_id == "modbus_SNIMPORT"
+
+
+# ---------------------------------------------------------------------------
+# Cloud user-account transport (#268)
+# ---------------------------------------------------------------------------
+
+
+async def test_cloud_user_transport_creates_entry(hass: HomeAssistant):
+    """Selecting the user-account transport and submitting valid creds creates the entry."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_USER}
+    )
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["step_id"] == "cloud_user"
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 1, "ps_name": "Home"}])
+    with patch("custom_components.sungrow.config_flow.UserAuth", return_value=client):
+        result3 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result3["data"][CONF_TRANSPORT] == TRANSPORT_CLOUD_USER
+    assert result3["data"][CONF_USER_ACCOUNT] == "me@example.com"
+    assert result3["data"][CONF_GATEWAY] == "Europe"
+
+
+async def test_cloud_user_invalid_auth_shows_error(hass: HomeAssistant):
+    """A rejected user-account login surfaces invalid_auth on the form (#268)."""
+    from pysolarcloud import AuthError
+
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_USER})
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(side_effect=AuthError({"error": "user_login_failed"}))
+    with patch("custom_components.sungrow.config_flow.UserAuth", return_value=client):
+        result3 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USER_ACCOUNT: "me@example.com", CONF_USER_PASSWORD: "bad", CONF_GATEWAY: "Europe"},
+        )
+
+    assert result3["type"] == data_entry_flow.FlowResultType.FORM
+    assert result3["step_id"] == "cloud_user"
+    assert result3["errors"]["base"] == "invalid_auth"

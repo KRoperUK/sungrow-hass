@@ -1022,3 +1022,38 @@ async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup
     assert registry.async_get_device(identifiers={(DOMAIN, "12345")}) is not None
     # ...and the physical inverter device exists too.
     assert registry.async_get_device(identifiers={(DOMAIN, str(inv_uuid))}) is not None
+
+
+async def test_setup_cloud_user_entry(hass: HomeAssistant):
+    """A cloud_user entry authenticates, discovers plants and sets up one coordinator (#268)."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            CONF_USER_ACCOUNT: "me@example.com",
+            CONF_USER_PASSWORD: "pw",
+            CONF_GATEWAY: "Europe",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 5, "ps_name": "Home"}])
+    client.async_get_token = AsyncMock(return_value="T")
+
+    with patch("custom_components.sungrow.UserAuth", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    data = entry.runtime_data
+    assert len(data.coordinators) == 1
+    assert data.coordinators[0].plant_id == "5"
+    # No dispatch/Control over the user-account API in Phase 2.
+    assert data.control is None

@@ -37,6 +37,13 @@ CONF_TRANSPORT = "transport"
 TRANSPORT_CLOUD_ONLY = "cloud_only"
 TRANSPORT_CLOUD_MODBUS = "cloud_modbus"
 TRANSPORT_MODBUS_ONLY = "modbus_only"
+# Cloud via a normal iSolarCloud user account (email/password) using the unofficial
+# app/web API (pysolarcloud.UserAuth), instead of the developer OAuth app (#268).
+TRANSPORT_CLOUD_USER = "cloud_user"
+# Config-entry keys for the user-account transport. The password is stored in the
+# (HA-encrypted) config entry and never logged.
+CONF_USER_ACCOUNT = "user_account"
+CONF_USER_PASSWORD = "user_password"
 # Discovered WiNet-S identity stored on a Modbus-only entry.
 CONF_MODEL = "model"
 CONF_SERIAL = "serial"

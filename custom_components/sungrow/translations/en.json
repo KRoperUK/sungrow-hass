@@ -40,6 +40,15 @@
           "model": "Inverter model"
         }
       },
+      "cloud_user": {
+        "title": "Connect with an iSolarCloud account",
+        "description": "Log in with your normal iSolarCloud app/web account (email + password) — no developer application required.\n\n⚠️ This uses an unofficial API that may change or break without notice, and may be subject to Sungrow's terms of service. Your password is stored locally and never logged.",
+        "data": {
+          "user_account": "Email",
+          "user_password": "Password",
+          "gateway": "Region"
+        }
+      },
       "auth_callback": {
         "title": "Waiting for authorization",
         "description": "Open the link below to authorize the application:\n\n{auth_url}\n\nAfter you log in and approve the app, you will be redirected back and this screen will update automatically.\n\nIf the redirect does not complete (for example the page shows an error), wait a moment and you will be able to paste the code manually."

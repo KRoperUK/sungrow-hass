@@ -14,7 +14,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from pysolarcloud import AuthError, PySolarCloudException
+from pysolarcloud import AuthError, PySolarCloudException, UserAuth
 from pysolarcloud.plants import DeviceType, Plants
 
 from .auth import AUTH_ERRORS
@@ -156,11 +156,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plant_id: str,
         plant_name: str,
         devices: list[dict[str, Any]] | None = None,
+        user_auth: UserAuth | None = None,
     ) -> None:
         """Initialize the coordinator.
 
-        ``plants_service`` is ``None`` for a Modbus-only (cloud-free) entry, in which
-        case the realtime data comes entirely from the local Modbus client (#159).
+        ``plants_service`` is ``None`` for a cloud-free entry: either a Modbus-only entry
+        (data comes from the local Modbus client, #159) or a cloud user-account entry
+        (``user_auth`` set, data comes from the app/web API, #268).
         """
         scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
@@ -171,6 +173,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=config_entry,
         )
         self.plants_service = plants_service
+        # UserAuth-backed client for a cloud user-account entry (#268); None otherwise.
+        self._user_auth = user_auth
         self.plant_id = plant_id
         self.plant_name = plant_name
         # The user-configured poll interval, restored after a rate-limit back-off (#156).
@@ -258,8 +262,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
-        # Cloud-free (Modbus-only) entry: everything comes from the local inverter.
+        # Cloud-free entries have no Plants service: user-account (app/web) or Modbus.
         if self.plants_service is None:
+            if self._user_auth is not None:
+                return await self._async_user_update()
             return await self._async_modbus_only_update()
         try:
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
@@ -335,6 +341,29 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_capture_daily_yield_diagnostic()
         data = normalize_energy_units(cast("dict[str, Any]", data))
         return await self._async_apply_derived_daily_yield(data)
+
+    async def _async_user_update(self) -> dict[str, Any]:
+        """Poll a cloud user-account entry via the app/web API (#268).
+
+        Phase 2 proves authentication/connectivity only — mapping the user-API realtime
+        shapes onto the measure-point model is Phase 3 (#269), so no measure points are
+        produced yet. ``async_get_token`` logs in on the first poll and is a cheap cached
+        no-op thereafter; a dead credential (``AuthError``) triggers reauth, and a
+        transient failure rides out the availability grace window like the other paths.
+        """
+        assert self._user_auth is not None
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                await self._user_auth.async_get_token()
+        except Exception as err:  # pylint: disable=broad-except
+            if is_auth_error(err):
+                raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
+            if self.data is not None and self._within_availability_grace():
+                _LOGGER.debug("Transient user-account poll failure for %s; keeping last-good: %s", self.plant_name, err)
+                return self.data
+            raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
+        self._last_successful_update = self.hass.loop.time()
+        return self.data or {}
 
     async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
         """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.

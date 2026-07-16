@@ -1336,3 +1336,46 @@ async def test_ess_mppt_ids_have_no_code_collision(hass: HomeAssistant):
     requested = set(extra)
     assert not (STRING_INVERTER_MPPT_POINT_IDS & requested & HYBRID_MPPT_POINT_IDS)
     assert not (STRING_INVERTER_MPPT_POINT_IDS & requested)  # "5"-"10" fully dropped for ESS
+
+
+# ---------------------------------------------------------------------------
+# Cloud user-account transport (#268)
+# ---------------------------------------------------------------------------
+
+
+async def test_user_update_success_returns_empty(hass: HomeAssistant):
+    """A cloud_user coordinator authenticates and returns no measure points yet (Phase 2)."""
+    client = MagicMock()
+    client.async_get_token = AsyncMock(return_value="T")
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+
+    data = await coordinator._async_update_data()
+
+    assert data == {}
+    client.async_get_token.assert_awaited_once()
+
+
+async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
+    """A dead user-account credential raises ConfigEntryAuthFailed so HA starts reauth (#268)."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from pysolarcloud import AuthError
+
+    client = MagicMock()
+    client.async_get_token = AsyncMock(side_effect=AuthError({"error": "user_login_failed"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_user_update_transient_rides_grace_window(hass: HomeAssistant):
+    """A transient user-account failure keeps last-good data within the grace window (#268/#152)."""
+    client = MagicMock()
+    client.async_get_token = AsyncMock(side_effect=RuntimeError("network blip"))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+    coordinator.data = {"total_active_power": {"value": "1.2"}}
+    coordinator._last_successful_update = hass.loop.time()  # recent success
+
+    data = await coordinator._async_update_data()
+
+    assert data == {"total_active_power": {"value": "1.2"}}
