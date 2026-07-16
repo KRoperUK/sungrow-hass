@@ -1,0 +1,54 @@
+name: Live smoke test
+
+# Gated live smoke test against a real iSolarCloud account (#257). Unit tests mock
+# pysolarcloud, so API-contract regressions (e.g. the result_code handling behind
+# pysolarcloud #9, or the getDeviceRealTimeData 009 spam in #155) can't be caught by
+# them. This runs the read-only `-m live` suite on demand and on a nightly schedule.
+#
+# It never runs on PRs (protects secrets, respects the ~2000 calls/hr quota) and is
+# read-only (no dispatch writes). Without the credential/token secrets the live tests
+# skip cleanly, so a fork or an unconfigured repo sees a green, no-op run.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 03:17 UTC daily (off the hour to avoid the scheduler rush).
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-smoke
+  cancel-in-progress: true
+
+jobs:
+  live:
+    # Never run the scheduled job on forks — they don't have the secrets and it would
+    # just be a pointless (or confusingly skipped) run.
+    if: github.repository == 'KRoperUK/sungrow-hass'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements_test.txt
+
+      - name: Run live smoke tests (read-only)
+        # The live fixtures skip when their secrets are absent, so this is a green no-op
+        # without them. `-m live` overrides the default `-m 'not live'` deselection.
+        env:
+          SUNGROW_APPKEY: ${{ secrets.SUNGROW_APPKEY }}
+          SUNGROW_APPSECRET: ${{ secrets.SUNGROW_APPSECRET }}
+          SUNGROW_APP_ID: ${{ secrets.SUNGROW_APP_ID }}
+          SUNGROW_HOST: ${{ secrets.SUNGROW_HOST }}
+          SUNGROW_TOKENS: ${{ secrets.SUNGROW_TOKENS }}
+        run: pytest tests/test_integration_live.py -m live -o addopts= -v
