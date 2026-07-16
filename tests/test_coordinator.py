@@ -1343,16 +1343,24 @@ async def test_ess_mppt_ids_have_no_code_collision(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_user_update_success_returns_empty(hass: HomeAssistant):
-    """A cloud_user coordinator authenticates and returns no measure points yet (Phase 2)."""
+async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
+    """A cloud_user coordinator maps getPsDetail onto measure points (#269)."""
     client = MagicMock()
-    client.async_get_token = AsyncMock(return_value="T")
+    client.async_get_plant_detail = AsyncMock(
+        return_value={
+            "curr_power": {"value": "3200", "unit": "W"},
+            "p83106_map_virgin": {"value": "12500", "unit": "Wh"},
+        }
+    )
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     data = await coordinator._async_update_data()
 
-    assert data == {}
-    client.async_get_token.assert_awaited_once()
+    client.async_get_plant_detail.assert_awaited_once_with("12345")
+    assert data["current_power"]["value"] == "3200"
+    assert data["current_power"]["source"] == "cloud_user"
+    # The p83106 measure point is present (Wh normalised to kWh downstream).
+    assert "p83106" in data
 
 
 async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
@@ -1361,7 +1369,7 @@ async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
     from pysolarcloud import AuthError
 
     client = MagicMock()
-    client.async_get_token = AsyncMock(side_effect=AuthError({"error": "user_login_failed"}))
+    client.async_get_plant_detail = AsyncMock(side_effect=AuthError({"error": "user_login_failed"}))
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     with pytest.raises(ConfigEntryAuthFailed):
@@ -1371,7 +1379,7 @@ async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
 async def test_user_update_transient_rides_grace_window(hass: HomeAssistant):
     """A transient user-account failure keeps last-good data within the grace window (#268/#152)."""
     client = MagicMock()
-    client.async_get_token = AsyncMock(side_effect=RuntimeError("network blip"))
+    client.async_get_plant_detail = AsyncMock(side_effect=RuntimeError("network blip"))
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
     coordinator.data = {"total_active_power": {"value": "1.2"}}
     coordinator._last_successful_update = hass.loop.time()  # recent success
