@@ -7,6 +7,7 @@ from homeassistant.components.number import NumberDeviceClass
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -511,9 +512,11 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
     command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
 
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
         await command.async_select_option("Charge")
+    command._cancel_verify()  # cancel the scheduled actuation check (no lingering timer)
 
     # Charge/Discharge must also switch Energy Management Mode to Compulsory (10003=2)
     # or the inverter accepts 10004/10005 but stays in Self-consumption (#231).
@@ -556,9 +559,11 @@ async def test_select_discharge_switches_to_compulsory_mode(hass: HomeAssistant)
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
     command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
 
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
         await command.async_select_option("Discharge")
+    command._cancel_verify()  # cancel the scheduled actuation check (no lingering timer)
 
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
@@ -1259,3 +1264,158 @@ def test_icons_json_covers_all_dispatch_entities():
         assert icons["number"][param]["default"].startswith("mdi:"), f"missing icon for number.{param}"
     for param in DISPATCH_SELECTS:
         assert icons["select"][param]["default"].startswith("mdi:"), f"missing icon for select.{param}"
+
+
+# ---------------------------------------------------------------------------
+# Post-write actuation verification (#254)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0", True),  # raw numeric self-consumption
+        (0, True),
+        ("0.0", True),
+        ("Self-consumption", True),
+        ("self_consumption", True),
+        ("2", False),  # compulsory / forced
+        ("Compulsory", False),
+        ("Forced mode", False),
+        ("", None),  # unparseable -> unknown
+        (None, None),
+        ("weird", False),  # a named non-self mode reads as actuated
+    ],
+)
+def test_reads_as_self_consumption_interpretation(value, expected):
+    """The EMS-mode read-back interpreter is conservative (#254)."""
+    from custom_components.sungrow.select import SungrowDispatchSelect
+
+    params = [{"id": "10003", "code": "energy_management_mode", "value": value}]
+    assert SungrowDispatchSelect._reads_as_self_consumption(params) is expected
+    # A payload without the EMS-mode param is "unknown".
+    assert SungrowDispatchSelect._reads_as_self_consumption([{"id": "10004", "value": "170"}]) is None
+
+
+def _command_select(hass: HomeAssistant):
+    """Build a charge/discharge command select wired to hass for direct-method tests."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    return data, entry
+
+
+async def test_verify_flags_when_still_self_consumption(hass: HomeAssistant):
+    """A Charge that reads back as Self-consumption raises the 'not actuated' Repair (#254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command._attr_current_option = "Charge"
+    data.control.async_read_parameters = AsyncMock(
+        return_value=[{"id": "10003", "code": "energy_management_mode", "value": "0"}]
+    )
+
+    await command._verify_actuation()
+
+    assert (DOMAIN, "dispatch_not_actuated_12345") in ir.async_get(hass).issues
+
+
+async def test_verify_retry_recovers_no_issue(hass: HomeAssistant):
+    """If the forced-mode retry succeeds (2nd read is Forced), no Repair is raised (#254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command._attr_current_option = "Charge"
+    # First read: still Self-consumption -> triggers a retry write; second read: Forced.
+    data.control.async_read_parameters = AsyncMock(
+        side_effect=[
+            [{"id": "10003", "code": "energy_management_mode", "value": "0"}],
+            [{"id": "10003", "code": "energy_management_mode", "value": "2"}],
+        ]
+    )
+
+    await command._verify_actuation()
+
+    # The forced-mode write was re-issued once, and no Repair was raised.
+    data.control.async_update_parameters.assert_awaited_once()
+    assert (DOMAIN, "dispatch_not_actuated_12345") not in ir.async_get(hass).issues
+
+
+async def test_verify_clears_issue_when_actuated(hass: HomeAssistant):
+    """A Charge confirmed in Forced mode clears any prior 'not actuated' Repair (#254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command._attr_current_option = "Charge"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "dispatch_not_actuated_12345",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="dispatch_not_actuated",
+        translation_placeholders={"plant": "Test Plant"},
+    )
+    data.control.async_read_parameters = AsyncMock(
+        return_value=[{"id": "10003", "code": "energy_management_mode", "value": "2"}]
+    )
+
+    await command._verify_actuation()
+
+    assert (DOMAIN, "dispatch_not_actuated_12345") not in ir.async_get(hass).issues
+
+
+async def test_verify_skips_on_read_error(hass: HomeAssistant):
+    """A read-back failure must NOT raise a false 'not actuated' Repair (fail-safe, #254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command._attr_current_option = "Charge"
+    data.control.async_read_parameters = AsyncMock(side_effect=PySolarCloudException("E900"))
+
+    await command._verify_actuation()
+
+    assert (DOMAIN, "dispatch_not_actuated_12345") not in ir.async_get(hass).issues
+
+
+async def test_verify_noop_when_not_charging(hass: HomeAssistant):
+    """No read-back (or Repair) when the command is not Charge/Discharge (#254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+    command._attr_current_option = "Stop"
+    data.control.async_read_parameters = AsyncMock(return_value=[])
+
+    await command._verify_actuation()
+
+    data.control.async_read_parameters.assert_not_awaited()
+    assert (DOMAIN, "dispatch_not_actuated_12345") not in ir.async_get(hass).issues
+
+
+async def test_charge_schedules_check_and_stop_cancels(hass: HomeAssistant):
+    """Charge schedules the actuation check; Stop cancels it and clears the Repair (#254)."""
+    data, entry = _command_select(hass)
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "charge_discharge_command")
+    command.hass = hass
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()),
+    ):
+        await command.async_select_option("Charge")
+        assert command._verify_cancel is not None  # a check is pending
+
+        await command.async_select_option("Stop")
+        assert command._verify_cancel is None  # cancelled, no lingering timer

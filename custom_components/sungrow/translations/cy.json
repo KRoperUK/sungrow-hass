@@ -139,6 +139,10 @@
     "heartbeat_stopped": {
       "title": "Stopiodd y cadw'n fyw anfon",
       "description": "Mae'r cadw'n fyw yn y cefndir sy'n dal **{plant}** yn y modd gwefru/dadwefru gorfodol wedi stopio'n annisgwyl, felly bydd y gwrthdröydd yn dod allan o'r modd gorfodol ac ni chaiff y gorchymyn ei gymhwyso mwyach. Gosodwch y Gorchymyn Gwefru/Dadwefru i Stop ac yn ôl i Wefru/Dadwefru i'w ailgychwyn; os yw'n parhau, gwiriwch y logiau ac agorwch fater."
+    },
+    "dispatch_not_actuated": {
+      "title": "Ni chymhwyswyd y gorchymyn anfon",
+      "description": "Derbyniodd iSolarCloud orchymyn gwefru/dadwefru gorfodol ar gyfer **{plant}**, ond arhosodd y gwrthdröydd mewn hunan-ddefnydd yn lle mynd i'r modd gorfodol, felly nid yw'r gorchymyn yn cael effaith. Gall hyn ddigwydd ar rai modelau/cadarnwedd neu gynlluniau API. Gosodwch y Gorchymyn Gwefru/Dadwefru i Stop ac eto i Wefru/Dadwefru; os yw'n parhau, gwiriwch y logiau ac agorwch fater."
     }
   },
   "entity": {

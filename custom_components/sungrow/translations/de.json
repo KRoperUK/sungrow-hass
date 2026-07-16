@@ -139,6 +139,10 @@
     "heartbeat_stopped": {
       "title": "Dispatch-Keepalive gestoppt",
       "description": "Das Hintergrund-Keepalive, das **{plant}** im erzwungenen Lade-/Entlademodus hält, wurde unerwartet beendet. Der Wechselrichter verlässt daher den erzwungenen Modus und der Befehl wird nicht mehr angewendet. Setzen Sie den Lade-/Entladebefehl auf Stopp und wieder auf Laden/Entladen, um ihn neu zu starten; tritt das Problem weiterhin auf, prüfen Sie die Protokolle und öffnen Sie ein Issue."
+    },
+    "dispatch_not_actuated": {
+      "title": "Dispatch-Befehl wurde nicht angewendet",
+      "description": "Ein erzwungener Lade-/Entladebefehl für **{plant}** wurde von iSolarCloud akzeptiert, aber der Wechselrichter blieb im Eigenverbrauchsmodus, statt in den erzwungenen Modus zu wechseln, sodass der Befehl keine Wirkung hat. Dies kann bei manchen Modellen/Firmware oder API-Tarifen vorkommen. Setzen Sie den Lade-/Entladebefehl auf Stopp und erneut auf Laden/Entladen; bleibt das Problem bestehen, prüfen Sie die Protokolle und öffnen Sie ein Issue."
     }
   },
   "entity": {

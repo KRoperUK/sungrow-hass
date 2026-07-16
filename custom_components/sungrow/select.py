@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -35,6 +36,14 @@ PARALLEL_UPDATES = 1
 _EMS_MODE_PARAM = "energy_management_mode"
 _EMS_MODE_SELF_CONSUMPTION = Control.encode_parameter("energy_management_mode", "self_consumption")
 _EMS_MODE_COMPULSORY = Control.encode_parameter("energy_management_mode", "compulsory")
+
+# Post-write actuation check (#254). After commanding Charge/Discharge we read Energy
+# Management Mode (10003) back and, if it is *still* Self-consumption, the inverter did
+# not enter Forced mode (the #231 failure) — the write was accepted but had no effect.
+# The read is deferred briefly so the device has time to apply the change.
+DISPATCH_VERIFY_DELAY = 15
+_NOT_ACTUATED_ISSUE = "dispatch_not_actuated"
+_REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
 
 # Select parameters exposed as HA Select entities.
 DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
@@ -173,6 +182,8 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # uses these; other selects leave them unset.
         self._revert_cancel: CALLBACK_TYPE | None = None
         self._revert_deadline: float | None = None
+        # Pending post-write actuation check (#254); command select only.
+        self._verify_cancel: CALLBACK_TYPE | None = None
         # Set once the entity is removed (e.g. an entry reload) so an already-fired
         # auto-revert task doesn't act on the plant after this instance is gone (#157).
         self._removed = False
@@ -214,9 +225,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                     self._arm_revert(deadline=deadline)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Cancel the auto-revert timer when the command select is removed."""
+        """Cancel the auto-revert and actuation-check timers when the select is removed."""
         self._removed = True
         self._cancel_revert()
+        self._cancel_verify()
         await super().async_will_remove_from_hass()
 
     @staticmethod
@@ -275,9 +287,15 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             )
             # Arm the auto-revert so this forced command can't silently persist (#157).
             self._arm_revert()
+            # Verify the inverter actually entered Forced mode shortly after (#254): the
+            # write can be accepted while the plant stays in Self-consumption (#231).
+            self._schedule_actuation_check()
         elif self.param == "charge_discharge_command" and option == "Stop":
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
             self._cancel_revert()
+            # Stopping dispatch clears any "not actuated" Repair and pending check (#254).
+            self._cancel_verify()
+            self._clear_not_actuated_issue()
 
     # NOTE: the heartbeat is deliberately NOT stopped from async_will_remove_from_hass.
     # All ~13 dispatch entities share one heartbeat keyed by plant_id, so stopping it
@@ -343,6 +361,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
         self._revert_deadline = None
         self._revert_cancel = None
+        # Reverting to Stop makes any "not actuated" Repair moot (#254).
+        self._cancel_verify()
+        self._clear_not_actuated_issue()
         self._attr_current_option = stop_option
         self.async_write_ha_state()
 
@@ -352,3 +373,119 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         if self._revert_cancel is not None:
             self._revert_cancel()
             self._revert_cancel = None
+
+    # --- Post-write actuation verification (#254) ---------------------------------
+
+    def _schedule_actuation_check(self) -> None:
+        """Schedule a deferred check that the inverter actually entered Forced mode."""
+        self._cancel_verify()
+        self._verify_cancel = async_call_later(self.hass, DISPATCH_VERIFY_DELAY, self._handle_actuation_check)
+
+    @callback
+    def _handle_actuation_check(self, _now: Any) -> None:
+        """async_call_later fired — run the async actuation check."""
+        self._verify_cancel = None
+        self.hass.async_create_task(self._verify_actuation())
+
+    def _cancel_verify(self) -> None:
+        """Cancel any pending actuation check."""
+        if self._verify_cancel is not None:
+            self._verify_cancel()
+            self._verify_cancel = None
+
+    @staticmethod
+    def _reads_as_self_consumption(params: list[dict[str, Any]]) -> bool | None:
+        """Interpret an EMS-mode read-back: True = still Self-consumption, None = unknown.
+
+        Conservative on purpose (#254): only a *positive* Self-consumption read-back means
+        "not actuated". A numeric ``0`` or a name containing "self" is Self-consumption; any
+        other recognised mode (compulsory/forced/external/vpp) is actuated → ``False``; an
+        empty/absent/unparseable value is ``None`` (unknown) so we never raise a false alarm.
+        """
+        for param in params:
+            if str(param.get("id")) == "10003" or param.get("code") == _EMS_MODE_PARAM:
+                raw = param.get("value")
+                if raw is None:
+                    return None
+                try:
+                    return float(raw) == 0
+                except (TypeError, ValueError):
+                    pass
+                text = str(raw).strip().lower()
+                if not text or text in {"none", "null"}:
+                    return None
+                # Self-consumption reads as a name containing "self"; any other named
+                # mode (compulsory/forced/external/vpp) means the inverter actuated.
+                return "self" in text
+        return None
+
+    async def _read_still_self_consumption(self) -> bool | None:
+        """Read Energy Management Mode back. True/False = still/not Self-consumption; None = unknown.
+
+        Best-effort and fail-safe: any read error or ambiguous value returns ``None`` so a
+        flaky/limited read-back never drives a false verdict on a battery-control path.
+        """
+        try:
+            params = await self.control.async_read_parameters(self.device_uuid, [_EMS_MODE_PARAM])
+        except Exception as err:  # pylint: disable=broad-except  (best-effort verification)
+            _LOGGER.debug("EMS-mode read-back failed for %s; skipping actuation check: %s", self.device_uuid, err)
+            return None
+        return self._reads_as_self_consumption(params)
+
+    async def _verify_actuation(self) -> None:
+        """Confirm the inverter left Self-consumption; retry once, then flag if it didn't.
+
+        Follows the cloud-actuation Confirm → Retry → Notify discipline: a write can be
+        accepted while the plant stays in Self-consumption (#231). If the read-back confirms
+        it never switched, re-issue the forced-mode write **once** before raising a Repair —
+        and default to no action on an unknown/errored read-back (never a false alarm on a
+        battery-control path). Only a positive Self-consumption read-back raises the Repair.
+        """
+        if self._removed or self._attr_current_option not in {"Charge", "Discharge"}:
+            return
+        still_self = await self._read_still_self_consumption()
+        if still_self is not True:
+            # Actuated (False) → clear any prior Repair; unknown (None) → leave it as-is so a
+            # real, still-valid warning is not dismissed by a flaky read.
+            if still_self is False:
+                self._clear_not_actuated_issue()
+            return
+
+        # Confirmed still in Self-consumption: retry the forced-mode write once.
+        option = self._attr_current_option
+        _LOGGER.debug("Dispatch %s for %s not actuated; re-issuing forced mode", option, self.device_uuid)
+        try:
+            await self.control.async_update_parameters(
+                self.device_uuid, self._command_payload(option, self.options_map[option])
+            )
+        except PySolarCloudException as err:
+            _LOGGER.debug("Forced-mode retry write failed for %s: %s", self.device_uuid, err)
+
+        still_self = await self._read_still_self_consumption()
+        if still_self is True:
+            _LOGGER.warning(
+                "Dispatch command %s for %s was accepted but the inverter is still in "
+                "Self-consumption after a retry — it did not enter Forced mode",
+                option,
+                self.device_uuid,
+            )
+            self._raise_not_actuated_issue()
+        elif still_self is False:
+            self._clear_not_actuated_issue()
+
+    def _raise_not_actuated_issue(self) -> None:
+        """Raise the 'dispatch not actuated' Repair for this plant (#254)."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{_NOT_ACTUATED_ISSUE}_{self.coordinator.plant_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=_NOT_ACTUATED_ISSUE,
+            translation_placeholders={"plant": self.coordinator.plant_name},
+            learn_more_url=_REPAIR_LEARN_MORE,
+        )
+
+    def _clear_not_actuated_issue(self) -> None:
+        """Clear the 'dispatch not actuated' Repair for this plant (#254)."""
+        ir.async_delete_issue(self.hass, DOMAIN, f"{_NOT_ACTUATED_ISSUE}_{self.coordinator.plant_id}")

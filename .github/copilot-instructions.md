@@ -28,7 +28,9 @@ iSolarCloud cloud API (`iot_class: cloud_polling`), built on the
   and Connectivity binary sensors.
 - `number.py` / `select.py` — dispatch controls (charge/discharge, SOC limits, forced
   charging, export/power limits, reactive power). `battery_only` params gate on
-  `coordinator.has_battery`; `select.py` owns the EMS-heartbeat lifecycle.
+  `coordinator.has_battery`; `select.py` owns the EMS-heartbeat lifecycle and, after a
+  Charge/Discharge write, verifies actuation by reading Energy Management Mode back
+  (retry-once, then the `dispatch_not_actuated` Repair) — #254.
 - `const.py` — domain, config keys, gateways, scan-interval defaults, per-device point
   maps (`INVERTER_DIAGNOSTIC_POINTS`, `BATTERY_DEVICE_POINTS`, …).
 - `measure_points.py` / `measure_points_data.py` — English naming, unit/code
