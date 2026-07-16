@@ -20,6 +20,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.http import HomeAssistantView
+from pysolarcloud import UserAuth
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -35,6 +36,8 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    CONF_USER_ACCOUNT,
+    CONF_USER_PASSWORD,
     DEFAULT_CONSOLE_URL,
     DEFAULT_HOST,
     DOMAIN,
@@ -43,6 +46,7 @@ from .const import (
     POINT_DEVICE_TYPE,
     TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
@@ -54,12 +58,18 @@ PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.S
 # list — unloading a platform that was never set up fails the unload, which breaks the
 # options-change reload and takes every entity unavailable.
 MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+# A cloud user-account entry has no dispatch (no Control) and, in Phase 2, no realtime
+# points yet — only the sensor platform is forwarded; data lands in Phase 3 (#268/#269).
+CLOUD_USER_PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
-    """Return the platforms this entry sets up (fewer for a Modbus-only entry, #159)."""
-    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
+    """Return the platforms this entry sets up (fewer for cloud-free entries, #159/#268)."""
+    transport = entry.data.get(CONF_TRANSPORT)
+    if transport == TRANSPORT_MODBUS_ONLY:
         return MODBUS_ONLY_PLATFORMS
+    if transport == TRANSPORT_CLOUD_USER:
+        return CLOUD_USER_PLATFORMS
     return PLATFORMS
 
 
@@ -524,6 +534,63 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     return True
 
 
+async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
+    """Set up a cloud entry authenticated with a user account (email/password) (#268).
+
+    Uses the unofficial app/web API via ``UserAuth`` instead of the developer OAuth app.
+    Phase 2 authenticates, discovers plants and registers each plant device; realtime
+    sensor data is Phase 3 (#269), so the coordinator produces no measure points yet.
+    Isolated from the OAuth path so the unofficial transport can't destabilise it.
+    """
+    session = async_get_clientsession(hass)
+    host = GATEWAYS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_HOST)
+    user_auth = UserAuth(
+        host,
+        entry.data[CONF_USER_ACCOUNT],
+        entry.data[CONF_USER_PASSWORD],
+        websession=session,
+    )
+
+    try:
+        async with asyncio.timeout(SETUP_TIMEOUT):
+            plant_list = await user_auth.async_get_plants()
+    except Exception as err:
+        if is_auth_error(err):
+            raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
+        raise ConfigEntryNotReady(f"Unable to reach iSolarCloud (user account): {err}") from err
+
+    coordinators: list[SungrowPlantCoordinator] = []
+    for plant_info in plant_list:
+        plant_id = str(plant_info["ps_id"])
+        plant_name = plant_info.get("ps_name") or f"Plant {plant_id}"
+        coordinator = SungrowPlantCoordinator(hass, entry, None, plant_id, plant_name, user_auth=user_auth)
+        try:
+            await coordinator.async_config_entry_first_refresh()
+        except ConfigEntryAuthFailed:
+            raise
+        except ConfigEntryNotReady as err:
+            _LOGGER.warning("Plant %s failed its initial user-account refresh, skipping: %s", plant_name, err)
+            continue
+        coordinators.append(coordinator)
+
+    if plant_list and not coordinators:
+        raise ConfigEntryNotReady("No plants could be set up; all initial refreshes failed")
+
+    # No Control client: dispatch is not supported over the user-account API in Phase 2.
+    entry.runtime_data = SungrowData(coordinators=coordinators, control=None, devices={})
+
+    console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
+    device_registry = dr.async_get(hass)
+    for coordinator in coordinators:
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
+        )
+
+    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
     """Set up Sungrow iSolarCloud from a config entry."""
     transport = entry.data.get(CONF_TRANSPORT)
@@ -534,6 +601,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
 
     if transport == TRANSPORT_MODBUS_ONLY:
         return await _async_setup_modbus_only(hass, entry)
+
+    if transport == TRANSPORT_CLOUD_USER:
+        return await _async_setup_cloud_user(hass, entry)
 
     if transport == TRANSPORT_CLOUD_MODBUS:
         _LOGGER.info(

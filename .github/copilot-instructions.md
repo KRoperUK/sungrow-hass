@@ -21,7 +21,9 @@ iSolarCloud cloud API (`iot_class: cloud_polling`), built on the
   back-off, and Repairs (`whitelist_rejection` / `rate_limited`).
 - `config_flow.py` — two-phase setup (hub entry first, then authorize via **reauth**),
   a **reconfigure** flow, and options (polling interval, extra measure points, per-device
-  sensors).
+  sensors). Also a **`cloud_user`** transport (#268): a `UserAuth` email/password app/web
+  login (unofficial), set up via `_async_setup_cloud_user`; Phase 2 authenticates + lists
+  plants, realtime data is Phase 3 (#269).
 - `sensor.py` — `SungrowSensor` (plant) + `SungrowDeviceSensor` (per-device) +
   `SungrowPlantDetailSensor`; `infer_device_class()` maps units → device/state class.
 - `binary_sensor.py` — per-device Fault (PROBLEM, exposes an `operating_status` reason)

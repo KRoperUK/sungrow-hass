@@ -40,6 +40,15 @@
           "model": "Inverter model"
         }
       },
+      "cloud_user": {
+        "title": "Cysylltu â chyfrif iSolarCloud",
+        "description": "Mewngofnodwch gyda'ch cyfrif app/gwe iSolarCloud arferol (e-bost + cyfrinair) — nid oes angen cymhwysiad datblygwr.\n\n⚠️ Mae hyn yn defnyddio API answyddogol a all newid neu dorri heb rybudd, a gall fod yn ddarostyngedig i delerau gwasanaeth Sungrow. Mae eich cyfrinair yn cael ei storio'n lleol ac ni chaiff ei gofnodi byth.",
+        "data": {
+          "user_account": "E-bost",
+          "user_password": "Cyfrinair",
+          "gateway": "Rhanbarth"
+        }
+      },
       "auth_callback": {
         "title": "Yn aros am awdurdodiad",
         "description": "Agorwch y ddolen isod i awdurdodi'r cymhwysiad:\n\n{auth_url}\n\nAr ôl i chi fewngofnodi a chymeradwyo'r ap, cewch eich ailgyfeirio yn ôl a bydd y sgrin hon yn diweddaru'n awtomatig.\n\nOs na fydd yr ailgyfeirio'n cwblhau (er enghraifft mae'r dudalen yn dangos gwall), arhoswch am eiliad a byddwch yn gallu gludo'r cod â llaw."

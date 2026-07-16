@@ -28,6 +28,8 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    CONF_USER_ACCOUNT,
+    CONF_USER_PASSWORD,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -36,15 +38,18 @@ from .const import (
     MIN_SCAN_INTERVAL,
     TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
 
 # Try to import pysolarcloud, handle if missing gracefully for development
 try:
-    from pysolarcloud import Auth
+    from pysolarcloud import Auth, AuthError, PySolarCloudException, UserAuth
 except ImportError:
     # Optional import for local dev; production always has it via requirements.
     Auth = None  # type: ignore[assignment,misc]
+    UserAuth = None  # type: ignore[assignment,misc]
+    AuthError = PySolarCloudException = Exception  # type: ignore[assignment,misc]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,8 +108,12 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return SungrowOptionsFlow()
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
-        """Handle re-authentication when the stored tokens are no longer valid."""
+        """Handle re-authentication when the stored tokens/credentials are no longer valid."""
         self._reauth_entry = self._get_reauth_entry()
+        # A user-account entry has no OAuth tokens — reauth just re-collects the password
+        # (the account/region are reused as defaults) (#268).
+        if entry_data.get(CONF_TRANSPORT) == TRANSPORT_CLOUD_USER:
+            return await self.async_step_cloud_user()
         # Reuse the credentials already stored on the entry; only the tokens are stale.
         self.init_info = {k: v for k, v in entry_data.items() if k != "tokens"}
         # If the entry is missing the App ID (legacy/corrupted), we cannot proceed
@@ -293,6 +302,8 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._transport = transport
             if transport == TRANSPORT_MODBUS_ONLY:
                 return await self.async_step_local_setup()
+            if transport == TRANSPORT_CLOUD_USER:
+                return await self.async_step_cloud_user()
             # cloud_only or cloud_modbus → cloud credentials
             return await self.async_step_cloud_credentials()
 
@@ -301,6 +312,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         transport_options = [
             SelectOptionDict(value=TRANSPORT_CLOUD_ONLY, label="Cloud Only"),
             SelectOptionDict(value=TRANSPORT_CLOUD_MODBUS, label="Cloud + Modbus"),
+            SelectOptionDict(value=TRANSPORT_CLOUD_USER, label="Cloud (user account, unofficial)"),
             SelectOptionDict(value=TRANSPORT_MODBUS_ONLY, label="Modbus Only"),
         ]
         return self.async_show_form(
@@ -438,6 +450,71 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def async_step_cloud_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Collect iSolarCloud user-account credentials for the unofficial cloud_user transport (#268).
+
+        Used for both initial setup and reauth (when ``self._reauth_entry`` is set). Validates
+        the credentials by logging in and listing plants via ``UserAuth`` before creating/updating
+        the entry. The password is stored in the config entry and never logged.
+        """
+        from homeassistant.helpers.selector import (
+            SelectOptionDict,
+            SelectSelector,
+            SelectSelectorConfig,
+            TextSelector,
+            TextSelectorConfig,
+            TextSelectorType,
+        )
+
+        reauth_entry = self._reauth_entry
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            email = (user_input.get(CONF_USER_ACCOUNT) or "").strip()
+            password = user_input.get(CONF_USER_PASSWORD) or ""
+            gateway = user_input.get(CONF_GATEWAY) or "Europe"
+            if UserAuth is None:
+                errors["base"] = "unknown"
+            else:
+                session = async_get_clientsession(self.hass)
+                client = UserAuth(GATEWAYS[gateway], email, password, websession=session)
+                try:
+                    async with asyncio.timeout(30):
+                        await client.async_get_plants()
+                except AuthError:
+                    errors["base"] = "invalid_auth"
+                except (PySolarCloudException, ClientError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Unexpected error validating user-account login")
+                    errors["base"] = "unknown"
+            if not errors:
+                data = {
+                    CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+                    CONF_USER_ACCOUNT: email,
+                    CONF_USER_PASSWORD: password,
+                    CONF_GATEWAY: gateway,
+                }
+                if reauth_entry is not None:
+                    return self.async_update_reload_and_abort(reauth_entry, data=data)
+                await self.async_set_unique_id(f"user_{email.lower()}")
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=f"Sungrow ({email})", data=data)
+
+        default_email = reauth_entry.data.get(CONF_USER_ACCOUNT, "") if reauth_entry is not None else ""
+        default_gateway = reauth_entry.data.get(CONF_GATEWAY, "Europe") if reauth_entry is not None else "Europe"
+        region_options = [SelectOptionDict(value=name, label=name) for name in GATEWAYS]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_USER_ACCOUNT, default=default_email): str,
+                vol.Required(CONF_USER_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+                vol.Required(CONF_GATEWAY, default=default_gateway): SelectSelector(
+                    SelectSelectorConfig(options=region_options)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="cloud_user", data_schema=schema, errors=errors)
 
     def _ensure_auth_client(self) -> bool:
         """Initialize the pysolarcloud Auth client if needed.
