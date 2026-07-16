@@ -41,6 +41,26 @@ jobs:
                   bash scripts/package-hacs-zip.sh sungrow.zip
                   gh release upload "$TAG" sungrow.zip --clobber
 
+            # Regression guard for #245: v4.0.0 shipped without sungrow.zip, so every
+            # HACS install/update failed. Because hacs.json sets zip_release: true, a
+            # release missing the asset is broken for users. Fail the release loudly if
+            # the upload step above is ever dropped/renamed so it can't silently regress.
+            - name: Verify HACS zip asset is attached
+              if: ${{ steps.release.outputs.release_created == 'true' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ steps.release.outputs.tag_name }}
+              run: |
+                  set -euo pipefail
+                  assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+                  echo "Assets on ${TAG}:"
+                  printf '%s\n' "$assets"
+                  if ! printf '%s\n' "$assets" | grep -Fxq "sungrow.zip"; then
+                    echo "::error::Release ${TAG} is missing the sungrow.zip asset — HACS installs would fail (regression of #245)."
+                    exit 1
+                  fi
+                  echo "Verified sungrow.zip is attached to ${TAG}."
+
             # A published release supersedes every dev build. Prune them all so only
             # the real release remains (rc builds + any leftover branch builds).
             - name: Prune all dev pre-releases on a real release
