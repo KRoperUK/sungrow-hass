@@ -139,6 +139,10 @@
     "heartbeat_stopped": {
       "title": "Keepalive de pilotage arrêté",
       "description": "Le keepalive en arrière-plan qui maintient **{plant}** en mode charge/décharge forcée s'est arrêté de façon inattendue ; l'onduleur va donc quitter le mode forcé et la commande n'est plus appliquée. Réglez la commande de charge/décharge sur Arrêt puis de nouveau sur Charge/Décharge pour le relancer ; si le problème persiste, consultez les journaux et ouvrez un ticket."
+    },
+    "dispatch_not_actuated": {
+      "title": "La commande de pilotage n'a pas été appliquée",
+      "description": "Une commande de charge/décharge forcée pour **{plant}** a été acceptée par iSolarCloud, mais l'onduleur est resté en autoconsommation au lieu de passer en mode forcé, la commande n'a donc aucun effet. Cela peut arriver sur certains modèles/firmwares ou forfaits d'API. Réglez la commande de charge/décharge sur Arrêt puis de nouveau sur Charge/Décharge ; si le problème persiste, consultez les journaux et ouvrez un ticket."
     }
   },
   "entity": {

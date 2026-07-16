@@ -139,6 +139,10 @@
     "heartbeat_stopped": {
       "title": "Dispatch keepalive stopped",
       "description": "The background keepalive that holds **{plant}** in forced charge/discharge mode stopped unexpectedly, so the inverter will time out of forced mode and the command is no longer being applied. Set the Charge/Discharge Command to Stop and back to Charge/Discharge to restart it; if it keeps happening, check the logs and open an issue."
+    },
+    "dispatch_not_actuated": {
+      "title": "Dispatch command was not applied",
+      "description": "A forced charge/discharge command for **{plant}** was accepted by iSolarCloud, but the inverter stayed in Self-consumption instead of entering Forced mode, so the command is not taking effect. This can happen on some models/firmware or API plans. Try setting the Charge/Discharge Command to Stop and again to Charge/Discharge; if it persists, check the logs and open an issue."
     }
   },
   "entity": {

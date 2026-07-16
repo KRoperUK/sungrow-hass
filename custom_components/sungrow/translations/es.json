@@ -139,6 +139,10 @@
     "heartbeat_stopped": {
       "title": "Se detuvo el keepalive de despacho",
       "description": "El keepalive en segundo plano que mantiene **{plant}** en modo de carga/descarga forzada se detuvo inesperadamente, por lo que el inversor saldrá del modo forzado y el comando ya no se aplica. Cambie el comando de carga/descarga a Detener y de nuevo a Cargar/Descargar para reiniciarlo; si sigue ocurriendo, revise los registros y abra una incidencia."
+    },
+    "dispatch_not_actuated": {
+      "title": "El comando de despacho no se aplicó",
+      "description": "iSolarCloud aceptó un comando de carga/descarga forzada para **{plant}**, pero el inversor permaneció en autoconsumo en lugar de entrar en modo forzado, por lo que el comando no surte efecto. Esto puede ocurrir en algunos modelos/firmware o planes de API. Cambie el comando de carga/descarga a Detener y de nuevo a Cargar/Descargar; si persiste, revise los registros y abra una incidencia."
     }
   },
   "entity": {

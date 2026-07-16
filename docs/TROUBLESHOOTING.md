@@ -131,6 +131,15 @@ when iSolarCloud rejects requests for a reason you can act on:
   Repair clears when the keepalive restarts or you Stop dispatch. If it keeps
   recurring, enable debug logging (below) and open an issue with the log around the
   time it happened.
+- **"Dispatch command was not applied".** After you command **Charge**/**Discharge**,
+  the integration reads the inverter's Energy Management Mode back to confirm it
+  actually entered **Forced** mode. If the write was accepted but the inverter stayed
+  in **Self-consumption**, it re-sends the forced-mode command once; if it *still*
+  hasn't switched, this Repair is raised — the command isn't taking effect. This can
+  happen on some models/firmware or API plans. Try **Stop** then **Charge**/**Discharge**
+  again; if it persists, your account/model may not support cloud dispatch (some
+  require External-EMS to be enabled). The Repair clears once a command is confirmed
+  applied or you Stop dispatch.
 
 ---
 
