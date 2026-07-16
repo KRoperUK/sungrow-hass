@@ -22,7 +22,8 @@ inverters** through the **iSolarCloud** cloud API, using the
 - **Auto-discovery** — finds every plant linked to your account, and discovers WiNet-S
   dongles on the network for local Modbus.
 - **Rich sensors** — power, energy, battery SOC, and more, with correct device/state classes so
-  they work in the Energy dashboard out of the box.
+  they work in the Energy dashboard out of the box. See the
+  [Model support matrix](model-support.md) for what each inverter family reports.
 - **Device health & diagnostics** — per-device **Fault** and **Connectivity** binary sensors,
   device-level diagnostics (inverter temperature, MPPT, WLAN signal), and device cards enriched
   with model, serial number and manufacturer.

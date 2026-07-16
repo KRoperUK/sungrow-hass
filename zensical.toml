@@ -15,6 +15,7 @@ nav = [
   { "Configuration" = "configuration.md" },
   { "Local Modbus" = "local-modbus.md" },
   { "Sensors" = "SENSORS.md" },
+  { "Model support" = "model-support.md" },
   { "Troubleshooting" = "TROUBLESHOOTING.md" },
 ]
 
