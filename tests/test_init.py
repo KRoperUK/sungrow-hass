@@ -1047,6 +1047,7 @@ async def test_setup_cloud_user_entry(hass: HomeAssistant):
     client = MagicMock()
     client.async_get_plants = AsyncMock(return_value=[{"ps_id": 5, "ps_name": "Home"}])
     client.async_get_token = AsyncMock(return_value="T")
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "3200", "unit": "W"}})
 
     with patch("custom_components.sungrow.UserAuth", return_value=client):
         assert await hass.config_entries.async_setup(entry.entry_id)

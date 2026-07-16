@@ -343,18 +343,18 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self._async_apply_derived_daily_yield(data)
 
     async def _async_user_update(self) -> dict[str, Any]:
-        """Poll a cloud user-account entry via the app/web API (#268).
+        """Poll a cloud user-account entry via the app/web API (#268/#269).
 
-        Phase 2 proves authentication/connectivity only — mapping the user-API realtime
-        shapes onto the measure-point model is Phase 3 (#269), so no measure points are
-        produced yet. ``async_get_token`` logs in on the first poll and is a cheap cached
-        no-op thereafter; a dead credential (``AuthError``) triggers reauth, and a
-        transient failure rides out the availability grace window like the other paths.
+        Fetches the plant detail (``getPsDetail``) and maps it onto the measure-point
+        model. A dead credential (``AuthError``) triggers reauth; a transient failure
+        rides out the availability grace window like the other paths.
         """
+        from .user_realtime import map_plant_detail_to_points
+
         assert self._user_auth is not None
         try:
             async with asyncio.timeout(self._poll_timeout):
-                await self._user_auth.async_get_token()
+                detail = await self._user_auth.async_get_plant_detail(self.plant_id)
         except Exception as err:  # pylint: disable=broad-except
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
@@ -363,7 +363,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.data
             raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
-        return self.data or {}
+        points = map_plant_detail_to_points(detail)
+        return normalize_energy_units(tag_source(points, "cloud_user"))
 
     async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
         """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.
