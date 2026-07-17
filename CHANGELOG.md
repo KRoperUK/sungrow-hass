@@ -34,6 +34,32 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v4.1.0...v5.0.0) (2026-07-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* select.*_charge_discharge_command is replaced by select.*_battery_mode with renamed options. Update automations or use sungrow.set_battery_mode.
+* **dispatch:** select.*_charge_discharge_command is replaced by select.*_battery_mode with renamed options. Update automations or use sungrow.set_battery_mode.
+
+### Features
+
+* cloud_user realtime — map getPsDetail to measure points ([#269](https://github.com/KRoperUK/sungrow-hass/issues/269)) ([#276](https://github.com/KRoperUK/sungrow-hass/issues/276)) ([10a46e3](https://github.com/KRoperUK/sungrow-hass/commit/10a46e3bf6e7e2789e001e974b5e7f554590ad82))
+* cloud_user transport (email/password) + config flow ([#268](https://github.com/KRoperUK/sungrow-hass/issues/268)) ([#275](https://github.com/KRoperUK/sungrow-hass/issues/275)) ([96d94f8](https://github.com/KRoperUK/sungrow-hass/commit/96d94f8d72292be08016941a83d027e3dddb73bc))
+* **dispatch:** unified Battery Mode select + set_battery_mode service ([#284](https://github.com/KRoperUK/sungrow-hass/issues/284)) ([e5bd744](https://github.com/KRoperUK/sungrow-hass/commit/e5bd744ff3adb7c040709d1b59f35b8591ebf3c9))
+* per-model measure-point capability map ([#251](https://github.com/KRoperUK/sungrow-hass/issues/251)) ([#259](https://github.com/KRoperUK/sungrow-hass/issues/259)) ([1f831cc](https://github.com/KRoperUK/sungrow-hass/commit/1f831ccd314e7717ce833cb9c402be023eeb42bc))
+* point-discovery catalog in diagnostics ([#252](https://github.com/KRoperUK/sungrow-hass/issues/252)) ([#261](https://github.com/KRoperUK/sungrow-hass/issues/261)) ([61caa6f](https://github.com/KRoperUK/sungrow-hass/commit/61caa6fa7253defd28943ee510cfff47de99c7e7))
+* surface silent EMS heartbeat death as a Repair ([#254](https://github.com/KRoperUK/sungrow-hass/issues/254)) ([#266](https://github.com/KRoperUK/sungrow-hass/issues/266)) ([763dc5d](https://github.com/KRoperUK/sungrow-hass/commit/763dc5dd937c65124a1aef1003ab0fa227651e68))
+* verify dispatch actuation, retry, then Repair if unapplied ([#254](https://github.com/KRoperUK/sungrow-hass/issues/254)) ([#273](https://github.com/KRoperUK/sungrow-hass/issues/273)) ([9e42709](https://github.com/KRoperUK/sungrow-hass/commit/9e42709ed1461c73dd5a86f74f5c9111b8b85ee1))
+
+
+### Bug Fixes
+
+* **cloud_user:** catalog plant point 83123 as total feed-in ([#282](https://github.com/KRoperUK/sungrow-hass/issues/282)) ([efd2d74](https://github.com/KRoperUK/sungrow-hass/commit/efd2d74e952f56dab54626a6075c44d74fe51458)), closes [#281](https://github.com/KRoperUK/sungrow-hass/issues/281)
+* **cloud_user:** resolve realtime point names via the catalog ([#269](https://github.com/KRoperUK/sungrow-hass/issues/269)) ([#278](https://github.com/KRoperUK/sungrow-hass/issues/278)) ([433c946](https://github.com/KRoperUK/sungrow-hass/commit/433c946dd3bf8481e97328a22b3f3bda87a7c569))
+* **dispatch:** default Forced Dispatch Duration to 60 minutes ([#283](https://github.com/KRoperUK/sungrow-hass/issues/283)) ([8b1df3b](https://github.com/KRoperUK/sungrow-hass/commit/8b1df3b3ff7bbb1d34c3fd8fcf4becc6f1ddd559))
+* normalize kW→W for cloud_user power sensors ([#285](https://github.com/KRoperUK/sungrow-hass/issues/285)) ([6c0d3fa](https://github.com/KRoperUK/sungrow-hass/commit/6c0d3fa18e67aaac53413f1c6c9d3984ba6e1dd0))
+
 ## [4.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v4.0.2...v4.1.0) (2026-07-15)
 
 
