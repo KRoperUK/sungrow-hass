@@ -34,6 +34,13 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.0.0...v5.1.0) (2026-07-17)
+
+
+### Features
+
+* cache unsupported device types, add services.py tests ([#295](https://github.com/KRoperUK/sungrow-hass/issues/295)) ([3f189fa](https://github.com/KRoperUK/sungrow-hass/commit/3f189fac5a320a4dfc324fd5641ed0c926180c0a))
+
 ## [5.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v4.1.0...v5.0.0) (2026-07-17)
 
 
