@@ -197,6 +197,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
         # uuid -> { code: point } for per-device realtime (populated when enabled).
         self.device_data: dict[str, dict[str, Any]] = {}
+        # Device types that returned "unsupported" on a previous poll. Skipped on
+        # subsequent polls to avoid wasting API quota on endpoints that don't exist
+        # for this account/region (#288).
+        self._unsupported_device_types: set[Any] = set()
         # Whether the dispatch device accepts parameter writes. Checked once at
         # setup; defaults True (fail-open) so an unavailable/unknown check never
         # hides working controls.
@@ -543,6 +547,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if type_id in seen_types:
                 continue
             seen_types.add(type_id)
+            # Skip device types that were previously marked unsupported (#288).
+            if type_id in self._unsupported_device_types:
+                continue
             # Forward the ps_key of every device of this type. getDeviceRealTimeData is
             # keyed per-device and rejects the call with result_code 009 when neither
             # ps_key_list nor sn_list is supplied (pysolarcloud >=0.9.1). Passing None
@@ -634,6 +641,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as err:  # pylint: disable=broad-except
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
                 continue
-            for uuid, points in (result or {}).items():
+            if not result:
+                # The endpoint is unavailable for this device type; skip on future polls.
+                self._unsupported_device_types.add(type_id)
+                continue
+            for uuid, points in result.items():
                 merged.setdefault(str(uuid), {}).update(points)
         return merged
