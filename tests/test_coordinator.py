@@ -1348,7 +1348,7 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(
         return_value={
-            "curr_power": {"value": "3200", "unit": "W"},
+            "curr_power": {"value": "0.49", "unit": "kW"},
             "p83106_map_virgin": {"value": "12500", "unit": "Wh"},
         }
     )
@@ -1357,7 +1357,9 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
     data = await coordinator._async_update_data()
 
     client.async_get_plant_detail.assert_awaited_once_with("12345")
-    assert data["current_power"]["value"] == "3200"
+    # kW is normalised to W for the cloud_user path (×1000).
+    assert data["current_power"]["value"] == 490.0
+    assert data["current_power"]["unit"] == "W"
     assert data["current_power"]["source"] == "cloud_user"
     # The 83106 measure point is present (Wh normalised to kWh downstream).
     assert "83106" in data

@@ -43,7 +43,7 @@ from .const import (
     STRING_MPPT_POINTS,
     TRANSPORT_MODBUS_ONLY,
 )
-from .energy_units import normalize_energy_units, tag_source
+from .energy_units import normalize_energy_units, normalize_power_units, tag_source
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
@@ -364,7 +364,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
         points = map_plant_detail_to_points(detail)
-        return normalize_energy_units(tag_source(points, "cloud_user"))
+        return normalize_power_units(normalize_energy_units(tag_source(points, "cloud_user")))
 
     async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
         """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.
