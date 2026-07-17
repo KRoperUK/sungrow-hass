@@ -829,4 +829,12 @@ CODE_ALIASES: dict[str, str] = {
     "wlan_signal_strength": "WLAN Signal Strength",
     "battery_dc_contactor_status": "Battery DC Contactor Status",
     "battery_fault_module_id": "Battery Fault Module ID",
+    # Named fields from getPsDetail (cloud_user transport, #292).
+    "current_power": "Current Power",
+    "today_energy": "Energy Today",
+    "total_energy": "Total Energy",
+    "month_energy": "Energy This Month",
+    "co2_reduce_total": "CO₂ Reduction Total",
+    "today_income": "Income Today",
+    "total_income": "Total Income",
 }

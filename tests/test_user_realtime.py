@@ -67,3 +67,37 @@ def test_map_virgin_regex_not_confused_by_suffix():
     points = map_plant_detail_to_points({"p83102_percent": "42", "p83102_map_virgin": {"value": "9", "unit": "kWh"}})
     assert set(points) == {"83102"}
     assert points["83102"]["unit"] == "kWh"
+
+
+def test_maps_today_energy():
+    """today_energy becomes a today_energy point (#292)."""
+    points = map_plant_detail_to_points({"today_energy": {"value": "12.5", "unit": "kWh"}})
+    assert points["today_energy"] == {"id": "today_energy", "code": "today_energy", "value": "12.5", "unit": "kWh"}
+
+
+def test_maps_total_energy():
+    """total_energy becomes a total_energy point (#292)."""
+    points = map_plant_detail_to_points({"total_energy": {"value": "6800.0", "unit": "kWh"}})
+    assert points["total_energy"]["value"] == "6800.0"
+    assert points["total_energy"]["unit"] == "kWh"
+
+
+def test_maps_co2_reduce_total():
+    """co2_reduce_total becomes a co2_reduce_total point (#292)."""
+    points = map_plant_detail_to_points({"co2_reduce_total": {"value": "4200.5", "unit": "kg"}})
+    assert points["co2_reduce_total"]["value"] == "4200.5"
+    assert points["co2_reduce_total"]["unit"] == "kg"
+
+
+def test_maps_today_income():
+    """today_income becomes a today_income point (#292)."""
+    points = map_plant_detail_to_points({"today_income": {"value": "3.50", "unit": "GBP"}})
+    assert points["today_income"]["value"] == "3.50"
+    assert points["today_income"]["unit"] == "GBP"
+
+
+def test_maps_total_income():
+    """total_income becomes a total_income point (#292)."""
+    points = map_plant_detail_to_points({"total_income": {"value": "1850.25", "unit": "GBP"}})
+    assert points["total_income"]["value"] == "1850.25"
+    assert points["total_income"]["unit"] == "GBP"
