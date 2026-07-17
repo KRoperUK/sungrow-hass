@@ -97,8 +97,10 @@ def _resolve_battery_mode_selects(hass: HomeAssistant, call: ServiceCall) -> lis
     for device_id in call.data.get(ATTR_DEVICE_ID) or []:
         ent_reg = er.async_get(hass)
         for ent in er.async_entries_for_device(ent_reg, device_id):
-            if ent.domain == "select" and ent.platform == DOMAIN and (ent.unique_id or "").endswith(
-                f"_{_BATTERY_MODE_PARAM}"
+            if (
+                ent.domain == "select"
+                and ent.platform == DOMAIN
+                and (ent.unique_id or "").endswith(f"_{_BATTERY_MODE_PARAM}")
             ):
                 entity_ids.add(ent.entity_id)
 
@@ -109,8 +111,10 @@ def _resolve_battery_mode_selects(hass: HomeAssistant, call: ServiceCall) -> lis
             raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
         ent_reg = er.async_get(hass)
         for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-            if ent.domain == "select" and ent.platform == DOMAIN and (ent.unique_id or "").endswith(
-                f"_{_BATTERY_MODE_PARAM}"
+            if (
+                ent.domain == "select"
+                and ent.platform == DOMAIN
+                and (ent.unique_id or "").endswith(f"_{_BATTERY_MODE_PARAM}")
             ):
                 entity_ids.add(ent.entity_id)
 

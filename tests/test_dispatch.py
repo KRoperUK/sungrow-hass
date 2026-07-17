@@ -1085,7 +1085,9 @@ async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant
     command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command.async_write_ha_state = MagicMock()
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Force charge", {"revert_at": time.time() - 10}))
+    command.async_get_last_state = AsyncMock(
+        return_value=State("select.x", "Force charge", {"revert_at": time.time() - 10})
+    )
 
     with (
         patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
