@@ -299,12 +299,14 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         self._attr_native_value = value
 
 
-# Default duration (minutes) for a forced Charge/Discharge before auto-revert (#157).
-DEFAULT_FORCED_DISPATCH_DURATION = 0  # 0 = auto-revert disabled (legacy behaviour)
+# Default duration (minutes) for a forced Charge/Discharge before auto-revert (#157 / #255).
+# A non-zero default means forced commands always have a bounded lifetime out of the box;
+# users can still set 0 to opt out of auto-revert.
+DEFAULT_FORCED_DISPATCH_DURATION = 60
 
 
 class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreNumber):
-    """Local number controlling the forced-dispatch auto-revert timeout (#157).
+    """Local number controlling the forced-dispatch auto-revert timeout (#157 / #255).
 
     Unlike the other dispatch numbers this writes *nothing* to the inverter — it only
     records, on the coordinator, how long a forced Charge/Discharge command may stay
