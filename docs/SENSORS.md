@@ -38,6 +38,7 @@ The **plant** is a *service* device (no physical hardware of its own) that ancho
 | Usage from Grid | `grid_active_power` or `grid_active_power_ems` | Positive = importing, negative = exporting. |
 | Daily Solar Yield | `daily_yield` / `inverter_daily_yield` / `daily_pv_yield_ems` | Resets at midnight local time. |
 | Daily Feed-in | `feed_in_energy_today` / `daily_feed_in_energy_pv` | Energy exported to the grid today. |
+| Total Feed-in | `feed_in_energy_total` / point `83123` (*Total Feed-in Energy (PV)*) | Lifetime export; user-cloud `getPsDetail` uses **83123**, open API often **83075**. |
 | Daily Import | `energy_purchased_today` / `total_purchased_energy` | Energy imported from the grid today. |
 
 ## Battery-specific points

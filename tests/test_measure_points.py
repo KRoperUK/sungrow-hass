@@ -302,3 +302,11 @@ def test_resolve_name_readable_code_title_cases():
 def test_resolve_name_unknown_numeric_falls_back():
     assert mp.resolve_name("99999", "99999", None) == "Sensor 99999"
     assert mp.resolve_name("99999", "99999", "Some API Name") == "Some API Name"
+
+
+def test_resolve_name_83123_total_feed_in_energy():
+    """Plant point 83123 is total feed-in on the user-cloud path (#281)."""
+    assert mp.resolve_name("83123", "83123", None) == "Total Feed-in Energy (PV)"
+    assert "83123" in mp.POINT_CATALOG
+    info = mp.POINT_CATALOG["83123"]
+    assert info.name == "Total Feed-in Energy (PV)"

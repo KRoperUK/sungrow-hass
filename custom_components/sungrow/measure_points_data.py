@@ -508,6 +508,9 @@ RAW_POINTS: list[tuple[str, str, str]] = [
     ("83118", "Daily Load Consumption", "Wh"),
     ("83124", "Total Load Consumption", "Wh"),
     ("83119", "Daily Feed-in Energy (PV)", "Wh"),
+    # User-cloud getPsDetail / household report virtual total feed-in (#281).
+    # Same quantity as open-API 83075; app path surfaces it as p83123_map.
+    ("83123", "Total Feed-in Energy (PV)", "Wh"),
     ("83072", "Feed-in Energy Today", "Wh"),
     ("83075", "Feed-in Energy Total", "Wh"),
     # Nameplate PV capacity in watt-peak (surfaced by the user-account getPsDetail, #269).
