@@ -138,7 +138,7 @@ This is a **cloud-polling** integration — it does not talk to the inverter loc
 
 Entity IDs depend on your device name — check **Settings → Devices & Services → Sungrow** for the exact IDs. The examples below assume a device called `inverter`.
 
-**Charge the battery overnight (cheap tariff), then let it discharge during the peak:**
+**Charge the battery overnight (cheap tariff), then return to self-consumption:**
 
 ```yaml
 automation:
@@ -147,27 +147,26 @@ automation:
       - trigger: time
         at: "00:30:00"
     actions:
-      - action: select.select_option
-        target:
-          entity_id: select.inverter_charge_discharge_command
-        data:
-          option: "Charge"
       - action: number.set_value
         target:
           entity_id: number.inverter_charge_discharge_power
         data:
           value: 3000
+      - action: sungrow.set_battery_mode
+        data:
+          mode: force_charge
+          duration_minutes: 300   # auto-revert after 5 hours
+          entity_id: select.inverter_battery_mode
 
-  - alias: "Battery: stop forced charge at peak start"
+  - alias: "Battery: self-consumption at peak start"
     triggers:
       - trigger: time
         at: "05:30:00"
     actions:
-      - action: select.select_option
-        target:
-          entity_id: select.inverter_charge_discharge_command
+      - action: sungrow.set_battery_mode
         data:
-          option: "Stop"
+          mode: self_consumption
+          entity_id: select.inverter_battery_mode
 ```
 
 **Notify when the battery gets low:**

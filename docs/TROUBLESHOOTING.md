@@ -122,29 +122,30 @@ when iSolarCloud rejects requests for a reason you can act on:
   root cause, **raise the polling interval** (Configure → Polling interval) and,
   if you have per-device sensors enabled, consider turning them off (each device
   type adds a call per poll). The Repair clears once the quota resets.
-- **"Dispatch keepalive stopped".** While a forced **Charge**/**Discharge** is
+- **"Dispatch keepalive stopped".** While **Force charge**/**Force discharge** is
   active, the integration runs a background keepalive (the External-EMS heartbeat)
   that holds the inverter in forced mode. If that keepalive stops unexpectedly, the
   inverter times out of forced mode and the command silently stops being applied —
-  so this Repair is raised. To recover, set **Charge/Discharge Command** back to
-  **Stop** and then to **Charge**/**Discharge** again to restart the keepalive; the
-  Repair clears when the keepalive restarts or you Stop dispatch. If it keeps
-  recurring, enable debug logging (below) and open an issue with the log around the
-  time it happened.
-- **"Dispatch command was not applied".** After you command **Charge**/**Discharge**,
-  the integration reads the inverter's Energy Management Mode back to confirm it
-  actually entered **Forced** mode. If the write was accepted but the inverter stayed
-  in **Self-consumption**, it re-sends the forced-mode command once; if it *still*
+  so this Repair is raised. To recover, set **Battery Mode** back to
+  **Self-consumption** (or **Stop**) and then to **Force charge**/**Force discharge**
+  again to restart the keepalive; the Repair clears when the keepalive restarts or you
+  leave forced mode. If it keeps recurring, enable debug logging (below) and open an
+  issue with the log around the time it happened.
+- **"Dispatch command was not applied".** After you command **Force charge**/**Force
+  discharge**, the integration reads the inverter's Energy Management Mode back to
+  confirm it actually entered **Forced** mode. If the write was accepted but the inverter
+  stayed in **Self-consumption**, it re-sends the forced-mode command once; if it *still*
   hasn't switched, this Repair is raised — the command isn't taking effect. This can
-  happen on some models/firmware or API plans. Try **Stop** then **Charge**/**Discharge**
-  again; if it persists, your account/model may not support cloud dispatch (some
-  require External-EMS to be enabled). The Repair clears once a command is confirmed
-  applied or you Stop dispatch.
-- **Forced Charge/Discharge ends on its own.** That is intentional. **Forced Dispatch
-  Duration** (default **60 minutes**) auto-reverts a forced **Charge**/**Discharge** to
-  **Stop** so the command cannot silently persist across hours or restarts. Raise the
-  duration if you need a longer window, or set it to **0** only if you deliberately want
-  no auto-revert (not recommended).
+  happen on some models/firmware or API plans. Try **Self-consumption** then **Force
+  charge**/**Force discharge** again; if it persists, your account/model may not support
+  cloud dispatch (some require External-EMS to be enabled). The Repair clears once a
+  command is confirmed applied or you leave forced mode.
+- **Forced charge/discharge ends on its own.** That is intentional. **Forced Dispatch
+  Duration** (default **60 minutes**) auto-reverts a forced mode to **Self-consumption**
+  so the command cannot silently persist across hours or restarts. Raise the duration if
+  you need a longer window, or set it to **0** only if you deliberately want no
+  auto-revert (not recommended). The `sungrow.set_battery_mode` service can also pass a
+  one-shot `duration_minutes`.
 
 ---
 

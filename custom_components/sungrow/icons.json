@@ -41,9 +41,6 @@
       }
     },
     "select": {
-      "charge_discharge_command": {
-        "default": "mdi:battery-sync"
-      },
       "forced_charging": {
         "default": "mdi:battery-lock"
       },
@@ -58,6 +55,9 @@
       },
       "reactive_power_regulation_mode": {
         "default": "mdi:sine-wave"
+      },
+      "battery_mode": {
+        "default": "mdi:battery-sync"
       }
     }
   }

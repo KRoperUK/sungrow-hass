@@ -199,9 +199,6 @@
       }
     },
     "select": {
-      "charge_discharge_command": {
-        "name": "Commande de charge/décharge"
-      },
       "forced_charging": {
         "name": "Charge forcée"
       },
@@ -216,6 +213,9 @@
       },
       "reactive_power_regulation_mode": {
         "name": "Mode de puissance réactive"
+      },
+      "battery_mode": {
+        "name": "Mode batterie"
       }
     }
   },
@@ -236,6 +236,32 @@
         "start_date": {
           "name": "Date de début",
           "description": "Date la plus ancienne facultative à partir de laquelle importer (interprétée comme minuit UTC). Par défaut, la fenêtre de remplissage configurée."
+        }
+      }
+    },
+    "set_battery_mode": {
+      "name": "Définir le mode batterie",
+      "description": "Définit le mode batterie (Autoconsommation / Charge forcée / Décharge forcée / Arrêt). La durée optionnelle remplace Forced Dispatch Duration pour cette commande uniquement.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Mode batterie à appliquer."
+        },
+        "duration_minutes": {
+          "name": "Durée",
+          "description": "Minutes avant retour à l'autoconsommation (0 = pas d'auto-retour pour cette commande)."
+        },
+        "entity_id": {
+          "name": "Entité mode batterie",
+          "description": "L'entité select du mode batterie. Vide pour toutes les centrales avec batterie."
+        },
+        "device_id": {
+          "name": "Appareil",
+          "description": "Appareil de dispatch portant le select mode batterie."
+        },
+        "config_entry": {
+          "name": "Intégration",
+          "description": "Entrée de configuration Sungrow."
         }
       }
     }
