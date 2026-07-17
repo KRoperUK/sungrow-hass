@@ -116,9 +116,7 @@ async def test_backfill_service_with_start_date(hass: HomeAssistant):
     async_setup_services(hass)
 
     with patch.object(hass.config_entries, "async_entries", return_value=[entry]):
-        await hass.services.async_call(
-            DOMAIN, SERVICE_BACKFILL, {"start_date": date(2026, 1, 15)}, blocking=True
-        )
+        await hass.services.async_call(DOMAIN, SERVICE_BACKFILL, {"start_date": date(2026, 1, 15)}, blocking=True)
 
     call_kwargs = entry.runtime_data.backfill.async_run_on_demand.call_args.kwargs
     assert call_kwargs["start_date"].date() == date(2026, 1, 15)
@@ -147,6 +145,4 @@ async def test_set_battery_mode_no_selects_raises(hass: HomeAssistant):
     hass.data.setdefault(DOMAIN, {})["battery_mode_selects"] = {}
 
     with pytest.raises(ServiceValidationError, match="No Sungrow battery mode"):
-        await hass.services.async_call(
-            DOMAIN, SERVICE_SET_BATTERY_MODE, {"mode": "self_consumption"}, blocking=True
-        )
+        await hass.services.async_call(DOMAIN, SERVICE_SET_BATTERY_MODE, {"mode": "self_consumption"}, blocking=True)
