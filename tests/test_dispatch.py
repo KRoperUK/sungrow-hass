@@ -1470,9 +1470,8 @@ async def test_legacy_charge_state_restores_as_force_charge(hass: HomeAssistant)
 
 async def test_set_battery_mode_service_writes_and_overrides_duration(hass: HomeAssistant):
     """sungrow.set_battery_mode targets the battery-mode select and can override duration."""
-    from custom_components.sungrow.const import DOMAIN
-    from custom_components.sungrow.services import async_setup_services
     from custom_components.sungrow.select import BATTERY_MODE_FORCE_CHARGE
+    from custom_components.sungrow.services import async_setup_services
 
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)

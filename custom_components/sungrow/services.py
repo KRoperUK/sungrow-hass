@@ -116,18 +116,18 @@ def _resolve_battery_mode_selects(hass: HomeAssistant, call: ServiceCall) -> lis
 
     if not entity_ids:
         # No target: every registered battery-mode select (typical single-plant home).
-        selects = [s for s in registry.values() if isinstance(s, SungrowDispatchSelect)]
-        if not selects:
+        all_selects = [s for s in registry.values() if isinstance(s, SungrowDispatchSelect)]
+        if not all_selects:
             raise ServiceValidationError("No Sungrow battery mode select entities found")
-        return selects
+        return all_selects
 
-    selects: list[Any] = []
+    matched: list[Any] = []
     for eid in entity_ids:
         select = registry.get(eid)
         if not isinstance(select, SungrowDispatchSelect):
             raise ServiceValidationError(f"Entity '{eid}' is not a loaded Sungrow battery mode select")
-        selects.append(select)
-    return selects
+        matched.append(select)
+    return matched
 
 
 def async_setup_services(hass: HomeAssistant) -> None:

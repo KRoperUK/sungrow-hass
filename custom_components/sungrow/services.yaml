@@ -22,7 +22,6 @@ set_battery_mode:
             - force_charge
             - force_discharge
             - stop
-          translation_key: battery_mode
     duration_minutes:
       required: false
       example: 120
