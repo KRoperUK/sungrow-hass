@@ -969,6 +969,23 @@ async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
     data.control.async_update_parameters.assert_not_called()
 
 
+async def test_forced_dispatch_duration_defaults_to_safe_bound(hass: HomeAssistant):
+    """New installs default to a non-zero duration so forced commands auto-revert (#255)."""
+    from custom_components.sungrow.number import (
+        DEFAULT_FORCED_DISPATCH_DURATION,
+        SungrowForcedDispatchDurationNumber,
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    number = SungrowForcedDispatchDurationNumber(data.coordinators[0], {"uuid": "ess-1"})
+
+    assert DEFAULT_FORCED_DISPATCH_DURATION > 0
+    assert number.native_value == DEFAULT_FORCED_DISPATCH_DURATION
+    assert data.coordinators[0].forced_dispatch_duration_minutes == DEFAULT_FORCED_DISPATCH_DURATION
+
+
 async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
     """Selecting Charge arms the auto-revert (with a persisted deadline); Stop cancels it."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())

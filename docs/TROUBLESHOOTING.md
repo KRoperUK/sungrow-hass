@@ -140,6 +140,11 @@ when iSolarCloud rejects requests for a reason you can act on:
   again; if it persists, your account/model may not support cloud dispatch (some
   require External-EMS to be enabled). The Repair clears once a command is confirmed
   applied or you Stop dispatch.
+- **Forced Charge/Discharge ends on its own.** That is intentional. **Forced Dispatch
+  Duration** (default **60 minutes**) auto-reverts a forced **Charge**/**Discharge** to
+  **Stop** so the command cannot silently persist across hours or restarts. Raise the
+  duration if you need a longer window, or set it to **0** only if you deliberately want
+  no auto-revert (not recommended).
 
 ---
 
