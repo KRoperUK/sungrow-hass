@@ -227,7 +227,7 @@ GRID_SIDE_NUMBERS = {
     "q_t",
     "pf",
 }
-BATTERY_ONLY_SELECTS = {"charge_discharge_command", "forced_charging", "battery_first"}
+BATTERY_ONLY_SELECTS = {"battery_mode", "forced_charging", "battery_first"}
 GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch", "reactive_power_regulation_mode"}
 
 
@@ -497,9 +497,9 @@ async def test_select_setup_creates_entities_for_ess_device(hass: HomeAssistant)
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     assert len(added) == len(DISPATCH_SELECTS)
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     assert isinstance(command, SelectEntity)
-    assert set(command.options_map.keys()) == {"Stop", "Charge", "Discharge"}
+    assert set(command.options_map.keys()) == {"Self-consumption", "Force charge", "Force discharge", "Stop"}
 
 
 async def test_select_option_calls_control(hass: HomeAssistant):
@@ -511,11 +511,11 @@ async def test_select_option_calls_control(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
 
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
-        await command.async_select_option("Charge")
+        await command.async_select_option("Force charge")
     command._cancel_verify()  # cancel the scheduled actuation check (no lingering timer)
 
     # Charge/Discharge must also switch Energy Management Mode to Compulsory (10003=2)
@@ -535,7 +535,7 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
 
     command.hass = hass
     with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
@@ -558,11 +558,11 @@ async def test_select_discharge_switches_to_compulsory_mode(hass: HomeAssistant)
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
 
     with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
-        await command.async_select_option("Discharge")
+        await command.async_select_option("Force discharge")
     command._cancel_verify()  # cancel the scheduled actuation check (no lingering timer)
 
     entry_data.control.async_update_parameters.assert_awaited_once_with(
@@ -580,7 +580,7 @@ async def test_select_availability_follows_coordinator(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
 
     assert command.current_option is None
     assert command.available is True
@@ -868,7 +868,7 @@ async def test_select_forced_charging_is_config(hass: HomeAssistant):
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
     cats = {e.param: e._attr_entity_category for e in added}
 
-    assert cats["charge_discharge_command"] is None
+    assert cats["battery_mode"] is None
     assert cats["forced_charging"] == EntityCategory.CONFIG
 
 
@@ -905,7 +905,7 @@ async def test_select_restores_last_option(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     # Restore a non-dispatching option so this stays a pure restore test; the
     # Charge/Discharge heartbeat-resume path is covered separately (#112).
@@ -921,7 +921,7 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
     """A restored Charge command restarts the EMS heartbeat after a restart/reload (#112).
 
     Otherwise the inverter times out of External-EMS mode while the UI still shows
-    "Charge" — the command select must restore state AND resume the heartbeat.
+    "Force charge" — the battery-mode select must restore state AND resume the heartbeat.
     """
     from homeassistant.core import State
     from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -932,9 +932,9 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge"))
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Force charge"))
 
     with (
         patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
@@ -942,7 +942,7 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
     ):
         await command.async_added_to_hass()
 
-    assert command.current_option == "Charge"
+    assert command.current_option == "Force charge"
     mock_start.assert_awaited_once()
     # The heartbeat is started for the restored command's device.
     assert mock_start.call_args.args[3] == "ess-1"
@@ -995,14 +995,14 @@ async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
 
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
 
     with (
         patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
         patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()),
     ):
-        await command.async_select_option("Charge")
+        await command.async_select_option("Force charge")
         assert command._revert_deadline is not None
         assert command.extra_state_attributes == {"revert_at": command._revert_deadline}
 
@@ -1019,10 +1019,10 @@ async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
 
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command.async_write_ha_state = MagicMock()
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
 
     with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
         await command._do_revert()
@@ -1032,7 +1032,7 @@ async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
         {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
     mock_stop.assert_awaited_once()
-    assert command.current_option == "Stop"
+    assert command.current_option == "Self-consumption"
     assert command._revert_deadline is None
 
 
@@ -1050,10 +1050,10 @@ async def test_autorevert_after_removal_is_noop(hass: HomeAssistant):
 
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command.async_write_ha_state = MagicMock()
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
 
     # Removal (e.g. an entry reload) sets the guard flag.
     with patch.object(CoordinatorEntity, "async_will_remove_from_hass", new=AsyncMock()):
@@ -1082,10 +1082,12 @@ async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant
 
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command.async_write_ha_state = MagicMock()
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge", {"revert_at": time.time() - 10}))
+    command.async_get_last_state = AsyncMock(
+        return_value=State("select.x", "Force charge", {"revert_at": time.time() - 10})
+    )
 
     with (
         patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
@@ -1100,7 +1102,7 @@ async def test_restored_command_reverts_when_deadline_passed(hass: HomeAssistant
         {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
     mock_start.assert_not_awaited()
-    assert command.current_option == "Stop"
+    assert command.current_option == "Self-consumption"
 
 
 async def test_restored_command_rearms_when_deadline_future(hass: HomeAssistant):
@@ -1116,10 +1118,10 @@ async def test_restored_command_rearms_when_deadline_future(hass: HomeAssistant)
 
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     future = time.time() + 300
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge", {"revert_at": future}))
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Force charge", {"revert_at": future}))
 
     with (
         patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
@@ -1143,7 +1145,7 @@ async def test_restored_stop_command_leaves_heartbeat_off(hass: HomeAssistant):
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command.async_get_last_state = AsyncMock(return_value=State("select.x", "Stop"))
 
@@ -1251,17 +1253,17 @@ async def test_select_option_api_error_raises_translated_error(hass: HomeAssista
 
     added = []
     await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
 
     with (
         patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
         pytest.raises(HomeAssistantError) as exc,
     ):
-        await command.async_select_option("Charge")
+        await command.async_select_option("Force charge")
 
     assert exc.value.translation_key == "dispatch_write_failed"
     assert exc.value.translation_domain == DOMAIN
-    assert exc.value.translation_placeholders["param"] == "charge_discharge_command"
+    assert exc.value.translation_placeholders["param"] == "battery_mode"
 
 
 # ---------------------------------------------------------------------------
@@ -1327,9 +1329,9 @@ async def test_verify_flags_when_still_self_consumption(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
     data.control.async_read_parameters = AsyncMock(
         return_value=[{"id": "10003", "code": "energy_management_mode", "value": "0"}]
     )
@@ -1344,9 +1346,9 @@ async def test_verify_retry_recovers_no_issue(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
     # First read: still Self-consumption -> triggers a retry write; second read: Forced.
     data.control.async_read_parameters = AsyncMock(
         side_effect=[
@@ -1367,9 +1369,9 @@ async def test_verify_clears_issue_when_actuated(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
     ir.async_create_issue(
         hass,
         DOMAIN,
@@ -1393,9 +1395,9 @@ async def test_verify_skips_on_read_error(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command._attr_current_option = "Charge"
+    command._attr_current_option = "Force charge"
     data.control.async_read_parameters = AsyncMock(side_effect=PySolarCloudException("E900"))
 
     await command._verify_actuation()
@@ -1408,7 +1410,7 @@ async def test_verify_noop_when_not_charging(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     command._attr_current_option = "Stop"
     data.control.async_read_parameters = AsyncMock(return_value=[])
@@ -1424,15 +1426,108 @@ async def test_charge_schedules_check_and_stop_cancels(hass: HomeAssistant):
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
-    command = next(e for e in added if e.param == "charge_discharge_command")
+    command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
 
     with (
         patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
         patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()),
     ):
-        await command.async_select_option("Charge")
+        await command.async_select_option("Force charge")
         assert command._verify_cancel is not None  # a check is pending
 
         await command.async_select_option("Stop")
         assert command._verify_cancel is None  # cancelled, no lingering timer
+
+
+# ---------------------------------------------------------------------------
+# Unified battery mode + set_battery_mode service (#255)
+# ---------------------------------------------------------------------------
+
+
+async def test_legacy_charge_state_restores_as_force_charge(hass: HomeAssistant):
+    """Pre-#255 Charge/Discharge select states map onto the new battery mode options."""
+    from homeassistant.core import State
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "battery_mode")
+    command.hass = hass
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Charge"))
+
+    with (
+        patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()),
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+    ):
+        await command.async_added_to_hass()
+
+    assert command.current_option == "Force charge"
+    mock_start.assert_awaited_once()
+
+
+async def test_set_battery_mode_service_writes_and_overrides_duration(hass: HomeAssistant):
+    """sungrow.set_battery_mode targets the battery-mode select and can override duration."""
+    from custom_components.sungrow.select import BATTERY_MODE_FORCE_CHARGE
+    from custom_components.sungrow.services import async_setup_services
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    data.coordinators[0].forced_dispatch_duration_minutes = 60
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "battery_mode")
+    command.hass = hass
+    command.entity_id = "select.test_battery_mode"
+    # Simulate async_added_to_hass registration without full HA entity lifecycle.
+    hass.data.setdefault(DOMAIN, {}).setdefault("battery_mode_selects", {})[command.entity_id] = command
+
+    async_setup_services(hass)
+
+    with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_battery_mode",
+            {"mode": "force_charge", "duration_minutes": 15, "entity_id": command.entity_id},
+            blocking=True,
+        )
+    command._cancel_verify()
+
+    data.control.async_update_parameters.assert_awaited_with(
+        "ess-1",
+        {"charge_discharge_command": "170", "energy_management_mode": "2"},
+    )
+    assert command.current_option == BATTERY_MODE_FORCE_CHARGE
+    assert command._revert_deadline is not None
+    # ~15 minutes, not the coordinator default of 60.
+    import time
+
+    remaining = command._revert_deadline - time.time()
+    assert 14 * 60 < remaining <= 15 * 60
+    command._cancel_revert()
+
+
+async def test_self_consumption_and_stop_share_safe_payload(hass: HomeAssistant):
+    """Self-consumption and Stop both restore EMS self-consumption + stop command."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "battery_mode")
+    command.hass = hass
+
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()):
+        await command.async_select_option("Self-consumption")
+
+    data.control.async_update_parameters.assert_awaited_with(
+        "ess-1",
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+    )

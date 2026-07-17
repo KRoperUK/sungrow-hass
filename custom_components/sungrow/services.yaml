@@ -9,3 +9,41 @@ backfill:
       required: false
       selector:
         date:
+
+set_battery_mode:
+  fields:
+    mode:
+      required: true
+      example: force_charge
+      selector:
+        select:
+          options:
+            - self_consumption
+            - force_charge
+            - force_discharge
+            - stop
+    duration_minutes:
+      required: false
+      example: 120
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+    entity_id:
+      required: false
+      selector:
+        entity:
+          integration: sungrow
+          domain: select
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: sungrow
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: sungrow

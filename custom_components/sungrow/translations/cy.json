@@ -199,9 +199,6 @@
       }
     },
     "select": {
-      "charge_discharge_command": {
-        "name": "Gorchymyn Gwefru/Dadwefru"
-      },
       "forced_charging": {
         "name": "Gwefru Gorfodol"
       },
@@ -216,6 +213,9 @@
       },
       "reactive_power_regulation_mode": {
         "name": "Modd Pŵer Adweithiol"
+      },
+      "battery_mode": {
+        "name": "Modd batri"
       }
     }
   },
@@ -236,6 +236,32 @@
         "start_date": {
           "name": "Dyddiad dechrau",
           "description": "Dyddiad cynharaf dewisol i fewnforio ohono (dehonglir fel hanner nos UTC). Rhagosodiad yw'r ffenestr lenwi a ffurfweddwyd."
+        }
+      }
+    },
+    "set_battery_mode": {
+      "name": "Gosod modd batri",
+      "description": "Gosod modd batri (Hunan-ddefnydd / Gorfodi gwefru / Gorfodi rhyddhau / Stopio). Mae hyd dewisol yn diystyru Forced Dispatch Duration ar gyfer y gorchymyn hwn yn unig.",
+      "fields": {
+        "mode": {
+          "name": "Modd",
+          "description": "Modd batri i'w gymhwyso."
+        },
+        "duration_minutes": {
+          "name": "Hyd",
+          "description": "Munudau cyn dychwelyd i hunan-ddefnydd (0 = dim auto-ddychwelyd ar gyfer y gorchymyn hwn)."
+        },
+        "entity_id": {
+          "name": "Endid modd batri",
+          "description": "Yr endid select modd batri. Gadewch yn wag i dargedu pob planhigyn batri."
+        },
+        "device_id": {
+          "name": "Dyfais",
+          "description": "Dyfais dosbarthu sy'n berchen ar y select modd batri."
+        },
+        "config_entry": {
+          "name": "Integreiddio",
+          "description": "Cofnod cyfluniad Sungrow."
         }
       }
     }

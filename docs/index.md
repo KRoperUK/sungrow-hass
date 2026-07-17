@@ -37,12 +37,14 @@ inverters** through the **iSolarCloud** cloud API, using the
   import/export electricity prices, surfaced as sensors on the plant device.
 - **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery
   charge/discharge power or EV-charger values) from the options flow.
-- **Dispatch / control** — number and select entities for charge/discharge command, power, SOC
-  limits, forced charging and export/active-power limiting, with an automatic EMS heartbeat while
-  dispatching. Battery controls are hidden on PV-only plants.
+- **Dispatch / control** — a single **Battery Mode** select (Self-consumption / Force charge /
+  Force discharge / Stop), power and SOC numbers, forced charging and export/active-power
+  limiting, with an automatic EMS heartbeat while force-dispatching. Battery controls are hidden
+  on PV-only plants. Automations can call **`sungrow.set_battery_mode`**.
 - **Safer dispatch** — **Forced Dispatch Duration** (default **60 minutes**) auto-reverts a
-  forced charge/discharge to *Stop* after a set time (surviving restarts), so it can't silently
-  persist. Set the duration to `0` only if you intentionally want unbounded forced commands.
+  forced charge/discharge to *Self-consumption* after a set time (surviving restarts), so it can't
+  silently persist. Set the duration to `0` only if you intentionally want unbounded forced
+  commands.
 - **Resilient polling** — rides out brief API/network hiccups instead of flapping unavailable, and
   auto-backs-off when rate-limited.
 - **Guided repairs** — whitelist and rate-limit rejections, an unexpectedly-stopped

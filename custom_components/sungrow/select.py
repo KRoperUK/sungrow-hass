@@ -36,8 +36,34 @@ PARALLEL_UPDATES = 1
 _EMS_MODE_PARAM = "energy_management_mode"
 _EMS_MODE_SELF_CONSUMPTION = Control.encode_parameter("energy_management_mode", "self_consumption")
 _EMS_MODE_COMPULSORY = Control.encode_parameter("energy_management_mode", "compulsory")
+_CDC_PARAM = "charge_discharge_command"
 
-# Post-write actuation check (#254). After commanding Charge/Discharge we read Energy
+# Unified battery-mode select (#255). Replaces the raw charge/discharge command select.
+BATTERY_MODE_PARAM = "battery_mode"
+BATTERY_MODE_SELF_CONSUMPTION = "Self-consumption"
+BATTERY_MODE_FORCE_CHARGE = "Force charge"
+BATTERY_MODE_FORCE_DISCHARGE = "Force discharge"
+BATTERY_MODE_STOP = "Stop"
+BATTERY_MODE_FORCED = frozenset({BATTERY_MODE_FORCE_CHARGE, BATTERY_MODE_FORCE_DISCHARGE})
+BATTERY_MODE_SAFE = frozenset({BATTERY_MODE_SELF_CONSUMPTION, BATTERY_MODE_STOP})
+# Service / automation mode keys (snake_case) → display options.
+BATTERY_MODE_SERVICE_KEYS: dict[str, str] = {
+    "self_consumption": BATTERY_MODE_SELF_CONSUMPTION,
+    "force_charge": BATTERY_MODE_FORCE_CHARGE,
+    "force_discharge": BATTERY_MODE_FORCE_DISCHARGE,
+    "stop": BATTERY_MODE_STOP,
+}
+# Restore states from the pre-#255 charge_discharge_command select.
+_LEGACY_BATTERY_MODE_STATES: dict[str, str] = {
+    "Charge": BATTERY_MODE_FORCE_CHARGE,
+    "Discharge": BATTERY_MODE_FORCE_DISCHARGE,
+    "Stop": BATTERY_MODE_STOP,
+    "charge": BATTERY_MODE_FORCE_CHARGE,
+    "discharge": BATTERY_MODE_FORCE_DISCHARGE,
+    "stop": BATTERY_MODE_STOP,
+}
+
+# Post-write actuation check (#254). After commanding a forced mode we read Energy
 # Management Mode (10003) back and, if it is *still* Self-consumption, the inverter did
 # not enter Forced mode (the #231 failure) — the write was accepted but had no effect.
 # The read is deferred briefly so the device has time to apply the change.
@@ -47,11 +73,14 @@ _REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TR
 
 # Select parameters exposed as HA Select entities.
 DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
-    "charge_discharge_command": {
+    # Single battery mode (#255): Self-consumption / Force charge / Force discharge / Stop.
+    # Writes charge_discharge_command (10004) + energy_management_mode (10003) together.
+    BATTERY_MODE_PARAM: {
         "options_map": {
-            "Stop": Control.CHARGE_DISCHARGE_COMMANDS["stop"],
-            "Charge": Control.CHARGE_DISCHARGE_COMMANDS["charge"],
-            "Discharge": Control.CHARGE_DISCHARGE_COMMANDS["discharge"],
+            BATTERY_MODE_SELF_CONSUMPTION: "self_consumption",
+            BATTERY_MODE_FORCE_CHARGE: "force_charge",
+            BATTERY_MODE_FORCE_DISCHARGE: "force_discharge",
+            BATTERY_MODE_STOP: "stop",
         },
         # Battery actuation: meaningless (and harmful — see #148) without a battery.
         "battery_only": True,
@@ -188,6 +217,16 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # auto-revert task doesn't act on the plant after this instance is gone (#157).
         self._removed = False
 
+    def _normalize_restored_option(self, state: str) -> str | None:
+        """Map a restored state to a current option (including pre-#255 legacy names)."""
+        if state in self.options_map:
+            return state
+        if self.param == BATTERY_MODE_PARAM:
+            mapped = _LEGACY_BATTERY_MODE_STATES.get(state)
+            if mapped in self.options_map:
+                return mapped
+        return None
+
     async def async_added_to_hass(self) -> None:
         """Restore the last selected option across restarts.
 
@@ -195,40 +234,52 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         last option the user chose is restored from state rather than fetched.
         """
         await super().async_added_to_hass()
+        # Register battery-mode selects so ``sungrow.set_battery_mode`` can find them (#255).
+        if self.param == BATTERY_MODE_PARAM and self.entity_id:
+            registry = self.hass.data.setdefault(DOMAIN, {}).setdefault("battery_mode_selects", {})
+            registry[self.entity_id] = self
         last = await self.async_get_last_state()
-        if last is not None and last.state in self.options_map:
-            self._attr_current_option = last.state
-            # If we were mid-charge/discharge before the restart, resume the EMS
-            # heartbeat: restoring current_option alone would leave the UI showing
-            # Charge/Discharge while the inverter silently times out of External-EMS
-            # mode. Only the command select owns the heartbeat, so this restarts it
-            # exactly once per plant; async_start_heartbeat is idempotent (it stops
-            # any existing loop first), so a stale loop is never double-started (#112).
-            if self.param == "charge_discharge_command" and last.state in {"Charge", "Discharge"}:
-                entry = self.coordinator.config_entry
-                assert entry is not None
-                # Restore the auto-revert deadline first (#157): if the forced command
-                # already timed out while HA was down, revert to Stop instead of resuming
-                # dispatch; otherwise resume the heartbeat and re-arm for the time left.
-                deadline = self._restore_revert_deadline(last.attributes.get("revert_at"))
-                if deadline is not None and deadline <= time.time():
-                    await self._do_revert()
-                    return
-                await async_start_heartbeat(
-                    self.hass,
-                    entry,
-                    self.coordinator.plant_id,
-                    self.device_uuid,
-                    interval=60,
-                )
-                if deadline is not None:
-                    self._arm_revert(deadline=deadline)
+        if last is None:
+            return
+        restored = self._normalize_restored_option(last.state)
+        if restored is None:
+            return
+        self._attr_current_option = restored
+        # If we were mid force-charge/discharge before the restart, resume the EMS
+        # heartbeat: restoring current_option alone would leave the UI showing a
+        # forced mode while the inverter silently times out of External-EMS mode.
+        # Only the battery-mode select owns the heartbeat, so this restarts it
+        # exactly once per plant; async_start_heartbeat is idempotent (it stops
+        # any existing loop first), so a stale loop is never double-started (#112).
+        if self.param == BATTERY_MODE_PARAM and restored in BATTERY_MODE_FORCED:
+            entry = self.coordinator.config_entry
+            assert entry is not None
+            # Restore the auto-revert deadline first (#157): if the forced command
+            # already timed out while HA was down, revert to Self-consumption instead
+            # of resuming dispatch; otherwise resume the heartbeat and re-arm.
+            deadline = self._restore_revert_deadline(last.attributes.get("revert_at"))
+            if deadline is not None and deadline <= time.time():
+                await self._do_revert()
+                return
+            await async_start_heartbeat(
+                self.hass,
+                entry,
+                self.coordinator.plant_id,
+                self.device_uuid,
+                interval=60,
+            )
+            if deadline is not None:
+                self._arm_revert(deadline=deadline)
 
     async def async_will_remove_from_hass(self) -> None:
         """Cancel the auto-revert and actuation-check timers when the select is removed."""
         self._removed = True
         self._cancel_revert()
         self._cancel_verify()
+        if self.param == BATTERY_MODE_PARAM and self.entity_id:
+            registry = self.hass.data.get(DOMAIN, {}).get("battery_mode_selects")
+            if isinstance(registry, dict):
+                registry.pop(self.entity_id, None)
         await super().async_will_remove_from_hass()
 
     @staticmethod
@@ -242,24 +293,39 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             return None
 
     def _command_payload(self, option: str, value: str) -> dict[str, str]:
-        """Build the param write for a charge/discharge command, including EMS mode (#231).
+        """Build the param write for a select option.
 
-        Without switching Energy Management Mode out of Self-consumption, the inverter
-        accepts 10004/10005 writes but continues normal self-consumption operation.
-        Compulsory mode matches the portal "Forced mode" tile; Stop restores
-        Self-consumption so the plant returns to default behaviour.
+        Battery mode (#255) writes charge_discharge_command (10004) together with
+        Energy Management Mode (10003). Without leaving Self-consumption, the inverter
+        accepts 10004/10005 writes but continues normal self-consumption operation
+        (#231). Compulsory mode matches the portal "Forced mode" tile; safe modes
+        restore Self-consumption so the plant returns to default behaviour.
         """
-        payload: dict[str, str] = {self.param: value}
-        if self.param != "charge_discharge_command":
-            return payload
-        if option in {"Charge", "Discharge"}:
-            payload[_EMS_MODE_PARAM] = _EMS_MODE_COMPULSORY
-        elif option == "Stop":
-            payload[_EMS_MODE_PARAM] = _EMS_MODE_SELF_CONSUMPTION
-        return payload
+        if self.param == BATTERY_MODE_PARAM:
+            if option == BATTERY_MODE_FORCE_CHARGE:
+                return {
+                    _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["charge"],
+                    _EMS_MODE_PARAM: _EMS_MODE_COMPULSORY,
+                }
+            if option == BATTERY_MODE_FORCE_DISCHARGE:
+                return {
+                    _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["discharge"],
+                    _EMS_MODE_PARAM: _EMS_MODE_COMPULSORY,
+                }
+            # Self-consumption and Stop both return the plant to the safe default.
+            return {
+                _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["stop"],
+                _EMS_MODE_PARAM: _EMS_MODE_SELF_CONSUMPTION,
+            }
+        return {self.param: value}
 
-    async def async_select_option(self, option: str) -> None:
-        """Update the dispatch parameter on the inverter."""
+    async def async_select_option(self, option: str, *, duration_minutes: float | None = None) -> None:
+        """Update the dispatch parameter on the inverter.
+
+        ``duration_minutes`` (battery mode only) overrides the auto-revert timeout for
+        this forced command without changing the Forced Dispatch Duration number — used
+        by the ``sungrow.set_battery_mode`` service for tariff automations (#255).
+        """
         value = self.options_map[option]
         payload = self._command_payload(option, value)
         _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, payload, self.device_uuid)
@@ -274,10 +340,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # Remember the selected option so the UI reflects it and it survives restarts.
         self._attr_current_option = option
 
-        # Keep the inverter in dispatch mode while actively charging/discharging.
+        # Keep the inverter in dispatch mode while force-charging/discharging.
         entry = self.coordinator.config_entry
         assert entry is not None
-        if self.param == "charge_discharge_command" and option in {"Charge", "Discharge"}:
+        if self.param == BATTERY_MODE_PARAM and option in BATTERY_MODE_FORCED:
             await async_start_heartbeat(
                 self.hass,
                 entry,
@@ -285,12 +351,18 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 self.device_uuid,
                 interval=60,
             )
-            # Arm the auto-revert so this forced command can't silently persist (#157).
-            self._arm_revert()
+            # Arm the auto-revert so this forced command can't silently persist (#157/#255).
+            if duration_minutes is not None and duration_minutes > 0:
+                self._arm_revert(deadline=time.time() + float(duration_minutes) * 60)
+            elif duration_minutes is not None and duration_minutes <= 0:
+                # Explicit 0 from the service: no auto-revert for this command.
+                self._cancel_revert()
+            else:
+                self._arm_revert()
             # Verify the inverter actually entered Forced mode shortly after (#254): the
             # write can be accepted while the plant stays in Self-consumption (#231).
             self._schedule_actuation_check()
-        elif self.param == "charge_discharge_command" and option == "Stop":
+        elif self.param == BATTERY_MODE_PARAM and option in BATTERY_MODE_SAFE:
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
             self._cancel_revert()
             # Stopping dispatch clears any "not actuated" Repair and pending check (#254).
@@ -305,7 +377,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Expose the pending auto-revert deadline so it survives a restart (#157)."""
-        if self.param == "charge_discharge_command" and self._revert_deadline is not None:
+        if self.param == BATTERY_MODE_PARAM and self._revert_deadline is not None:
             return {"revert_at": self._revert_deadline}
         return None
 
@@ -341,30 +413,34 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         self.hass.async_create_task(self._do_revert())
 
     async def _do_revert(self) -> None:
-        """Revert a forced Charge/Discharge to Stop and stop the heartbeat (#157)."""
+        """Revert a forced mode to Self-consumption and stop the heartbeat (#157/#255)."""
         if self._removed:
             # The timer fired, but the entity was removed (e.g. an entry reload) before
             # this task ran. Acting now would stop a freshly-restored heartbeat and write
             # state on a dead entity, so bail out — the new instance owns the heartbeat.
             return
-        _LOGGER.info("Forced-dispatch timeout for %s: reverting to Stop", self.device_uuid)
-        stop_option = "Stop"
+        _LOGGER.info(
+            "Forced-dispatch timeout for %s: reverting to %s",
+            self.device_uuid,
+            BATTERY_MODE_SELF_CONSUMPTION,
+        )
+        safe_option = BATTERY_MODE_SELF_CONSUMPTION
         try:
             await self.control.async_update_parameters(
                 self.device_uuid,
-                self._command_payload(stop_option, self.options_map[stop_option]),
+                self._command_payload(safe_option, self.options_map[safe_option]),
             )
         except PySolarCloudException as err:
-            _LOGGER.warning("Auto-revert to Stop failed for %s: %s", self.device_uuid, err)
+            _LOGGER.warning("Auto-revert to %s failed for %s: %s", safe_option, self.device_uuid, err)
         entry = self.coordinator.config_entry
         if entry is not None:
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
         self._revert_deadline = None
         self._revert_cancel = None
-        # Reverting to Stop makes any "not actuated" Repair moot (#254).
+        # Reverting to a safe mode makes any "not actuated" Repair moot (#254).
         self._cancel_verify()
         self._clear_not_actuated_issue()
-        self._attr_current_option = stop_option
+        self._attr_current_option = safe_option
         self.async_write_ha_state()
 
     def _cancel_revert(self) -> None:
@@ -441,7 +517,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         and default to no action on an unknown/errored read-back (never a false alarm on a
         battery-control path). Only a positive Self-consumption read-back raises the Repair.
         """
-        if self._removed or self._attr_current_option not in {"Charge", "Discharge"}:
+        if self._removed or self._attr_current_option not in BATTERY_MODE_FORCED:
             return
         still_self = await self._read_still_self_consumption()
         if still_self is not True:
@@ -453,6 +529,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
 
         # Confirmed still in Self-consumption: retry the forced-mode write once.
         option = self._attr_current_option
+        assert option is not None
         _LOGGER.debug("Dispatch %s for %s not actuated; re-issuing forced mode", option, self.device_uuid)
         try:
             await self.control.async_update_parameters(

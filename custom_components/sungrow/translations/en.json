@@ -199,9 +199,6 @@
       }
     },
     "select": {
-      "charge_discharge_command": {
-        "name": "Charge/Discharge Command"
-      },
       "forced_charging": {
         "name": "Forced Charging"
       },
@@ -216,6 +213,9 @@
       },
       "reactive_power_regulation_mode": {
         "name": "Reactive Power Mode"
+      },
+      "battery_mode": {
+        "name": "Battery Mode"
       }
     }
   },
@@ -236,6 +236,32 @@
         "start_date": {
           "name": "Start date",
           "description": "Optional earliest date to import from (interpreted as UTC midnight). Defaults to the configured backfill window."
+        }
+      }
+    },
+    "set_battery_mode": {
+      "name": "Set battery mode",
+      "description": "Set the plant battery mode (Self-consumption / Force charge / Force discharge / Stop). Optional duration overrides Forced Dispatch Duration for this command only.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Battery mode to apply."
+        },
+        "duration_minutes": {
+          "name": "Duration",
+          "description": "Minutes before auto-revert to Self-consumption (0 = no auto-revert for this command). Omit to use Forced Dispatch Duration."
+        },
+        "entity_id": {
+          "name": "Battery mode entity",
+          "description": "The Battery Mode select entity. Leave empty to target every battery plant."
+        },
+        "device_id": {
+          "name": "Device",
+          "description": "Dispatch device that owns the battery mode select."
+        },
+        "config_entry": {
+          "name": "Integration",
+          "description": "Sungrow config entry to target."
         }
       }
     }

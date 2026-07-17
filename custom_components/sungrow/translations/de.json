@@ -199,9 +199,6 @@
       }
     },
     "select": {
-      "charge_discharge_command": {
-        "name": "Lade-/Entladebefehl"
-      },
       "forced_charging": {
         "name": "Erzwungenes Laden"
       },
@@ -216,6 +213,9 @@
       },
       "reactive_power_regulation_mode": {
         "name": "Blindleistungsmodus"
+      },
+      "battery_mode": {
+        "name": "Batteriemodus"
       }
     }
   },
@@ -236,6 +236,32 @@
         "start_date": {
           "name": "Startdatum",
           "description": "Optionales frühestes Datum, ab dem importiert wird (als UTC-Mitternacht interpretiert). Standard ist das konfigurierte Rückfüllfenster."
+        }
+      }
+    },
+    "set_battery_mode": {
+      "name": "Batteriemodus setzen",
+      "description": "Setzt den Batteriemodus (Eigenverbrauch / Erzwungenes Laden / Erzwungenes Entladen / Stopp). Optionale Dauer überschreibt die Forced-Dispatch-Dauer nur für diesen Befehl.",
+      "fields": {
+        "mode": {
+          "name": "Modus",
+          "description": "Anzuwendender Batteriemodus."
+        },
+        "duration_minutes": {
+          "name": "Dauer",
+          "description": "Minuten bis zur automatischen Rückkehr zu Eigenverbrauch (0 = kein Auto-Revert für diesen Befehl)."
+        },
+        "entity_id": {
+          "name": "Batteriemodus-Entität",
+          "description": "Die Batteriemodus-Select-Entität. Leer lassen, um alle Batterieanlagen anzusprechen."
+        },
+        "device_id": {
+          "name": "Gerät",
+          "description": "Dispatch-Gerät mit dem Batteriemodus-Select."
+        },
+        "config_entry": {
+          "name": "Integration",
+          "description": "Sungrow-Konfigurationseintrag."
         }
       }
     }

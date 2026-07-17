@@ -147,7 +147,7 @@ If your inverter / ESS supports parameter configuration, the integration also cr
 
 | Entity | Parameter | Range / options | Battery? |
 |---|---|---|---|
-| Charge/Discharge Command | `charge_discharge_command` | Stop / Charge / Discharge | ✅ |
+| Battery Mode | `battery_mode` | Self-consumption / Force charge / Force discharge / Stop | ✅ |
 | Charge/Discharge Power | `charge_discharge_power` | 0 W – device rating (fallback 5000 W) | ✅ |
 | SOC Upper Limit | `soc_upper_limit` | 70–100 % | ✅ |
 | SOC Lower Limit | `soc_lower_limit` | 0–50 % | ✅ |
@@ -163,25 +163,41 @@ If your inverter / ESS supports parameter configuration, the integration also cr
 | Reactive Power Mode | `reactive_power_regulation_mode` | Off / Power Factor / Q(t) / Q(P) / Q(U) | — |
 | Reactive Power Ratio Q(t) | `q_t` | −60–60 % | — |
 | Power Factor | `pf` | −1 to 1 | — |
-| Forced Dispatch Duration | *(local)* | 0–1440 min (0 = off) | ✅ |
+| Forced Dispatch Duration | *(local)* | 0–1440 min (default **60**; 0 = off) | ✅ |
 
 The power sliders (charge/discharge power, export limit power) are sized to the device's **rated power**, parsed from its model code (e.g. `SG3.6RS` → 3.6 kW), falling back to 5000 W when the rating can't be derived.
 
 The **reactive-power** controls work together: set **Reactive Power Mode** first, then the relevant value — **Power Factor** only takes effect in *Power Factor* mode, and **Reactive Power Ratio Q(t)** only in *Q(t)* mode. These are grid-quality controls and are available on PV-only plants too (they aren't battery-gated).
 
-When you set **Charge/Discharge Command** to *Charge* or *Discharge*, the integration:
+### Battery Mode (#255)
+
+**Battery Mode** is the single select for force charge/discharge (replacing the older Charge/Discharge Command entity). Options:
+
+| Option | What it does |
+|---|---|
+| **Self-consumption** | Safe default — EMS Self-consumption + stop command |
+| **Force charge** | Compulsory/Forced EMS mode + charge command + heartbeat |
+| **Force discharge** | Compulsory/Forced EMS mode + discharge command + heartbeat |
+| **Stop** | Same safe write as Self-consumption (ends a forced command) |
+
+When you select **Force charge** or **Force discharge**, the integration:
 
 1. Switches **Energy Management Mode** (param `10003`) to **Compulsory / Forced** — required for the command to take effect (writing charge/discharge alone is accepted by the device but ignored while the plant stays in Self-consumption).
-2. Starts the External EMS heartbeat (param `10017`) every 60 seconds.
+2. Writes **Charge/Discharge Command** (param `10004`).
+3. Starts the External EMS heartbeat (param `10017`) every 60 seconds.
+4. Arms **auto-revert** (see below).
 
-Selecting **Stop** restores Self-consumption mode and turns the heartbeat off. If you remove the dispatch entities, the heartbeat is also stopped.
+**Self-consumption** / **Stop** restore Self-consumption mode and turn the heartbeat off.
 
-If that heartbeat ever stops unexpectedly while a forced Charge/Discharge is active (so the inverter would silently time out of forced mode), the integration raises a **"Dispatch keepalive stopped"** Repair — see [Troubleshooting](TROUBLESHOOTING.md#a-repair-appeared-whitelist-rejection-or-rate-limit).
+Automations can use the **`sungrow.set_battery_mode`** service (with an optional per-call `duration_minutes`) instead of driving the select entity directly — useful for tariff schedules.
 
-After a Charge/Discharge command, the integration also reads the Energy Management Mode back to confirm the inverter actually entered **Forced** mode. If it was accepted but stayed in Self-consumption, the command is re-sent once; if it still hasn't switched, a **"Dispatch command was not applied"** Repair is raised so a silently-ignored command doesn't look successful.
+If that heartbeat ever stops unexpectedly while a forced mode is active (so the inverter would silently time out of forced mode), the integration raises a **"Dispatch keepalive stopped"** Repair — see [Troubleshooting](TROUBLESHOOTING.md#a-repair-appeared-whitelist-rejection-or-rate-limit).
 
-> **Auto-revert (safety).** Set **Forced Dispatch Duration** to a number of minutes and a forced *Charge*/*Discharge* automatically reverts to **Stop** after that long — so a forced command can't silently persist and curtail your solar (the [#148](https://github.com/KRoperUK/sungrow-hass/issues/148) footgun). The countdown survives a Home Assistant restart (if it expires while HA is down, the command reverts on startup). Leave it at **0** to keep the legacy behaviour (a forced command stays until you change it). It's a local control — it writes nothing to the inverter itself.
+After a forced command, the integration also reads the Energy Management Mode back to confirm the inverter actually entered **Forced** mode. If it was accepted but stayed in Self-consumption, the command is re-sent once; if it still hasn't switched, a **"Dispatch command was not applied"** Repair is raised so a silently-ignored command doesn't look successful.
 
+> **Auto-revert (safety).** **Forced Dispatch Duration** defaults to **60 minutes**. A forced *Force charge* / *Force discharge* automatically reverts to **Self-consumption** after that long — so a forced command can't silently persist and curtail your solar (the [#148](https://github.com/KRoperUK/sungrow-hass/issues/148) footgun). The countdown survives a Home Assistant restart (if it expires while HA is down, the command reverts on startup). Set it to **0** only if you deliberately want no auto-revert. The `set_battery_mode` service can override duration for a single call. It's a local control — it writes nothing to the inverter itself.
+
+> **Breaking change.** The old `select.*_charge_discharge_command` entity is replaced by `select.*_battery_mode` with options *Self-consumption / Force charge / Force discharge / Stop*. Update automations accordingly (or use `sungrow.set_battery_mode`). Restored *Charge*/*Discharge*/*Stop* states from the old entity map onto the new options.
 > Dispatch support requires the correct iSolarCloud API plan and firmware. The integration will only create dispatch entities if it can discover a compatible inverter or ESS device for the plant.
 
 > **⚠️ Battery controls are hidden on PV-only plants.** Charge/discharge, SOC, forced-charging and battery-first controls only appear when the plant has a battery/ESS. Sending a charge/discharge command to a **battery-less** inverter can force it into External-EMS mode and **suppress generation**, so these controls are withheld on PV-only systems. Export- and active-power-limiting controls remain available.
