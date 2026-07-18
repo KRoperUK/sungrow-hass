@@ -161,6 +161,21 @@
       },
       "device_fault": {
         "name": "Défaut"
+      },
+      "pv_generating": {
+        "name": "PV en production"
+      },
+      "battery_charging": {
+        "name": "Batterie en charge"
+      },
+      "battery_discharging": {
+        "name": "Batterie en décharge"
+      },
+      "exporting_power": {
+        "name": "Injection réseau"
+      },
+      "importing_power": {
+        "name": "Soutirage réseau"
       }
     },
     "number": {

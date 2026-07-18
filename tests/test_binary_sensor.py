@@ -1,5 +1,6 @@
 """Tests for the Sungrow binary_sensor platform (device fault, #151)."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -214,3 +215,156 @@ async def test_modbus_connectivity_binary_sensor(hass: HomeAssistant):
     # Toggle last_update_success
     coordinator.last_update_success = False
     assert conn.is_on is False
+
+
+# ---------------------------------------------------------------------------
+# power_flow_status bitfield -> per-flow binary sensors (#326)
+# ---------------------------------------------------------------------------
+# Wire register 13000 packs "is PV generating / is battery charging / is grid
+# importing / exporting" flags into a single u16. We expose each surfaced bit
+# as its own binary_sensor so users can automate on them directly. Only hybrid
+# (SH-RS/SH-RT) coordinators produce this register — the entities must NOT be
+# created on SG string inverters, and they must go unavailable when the raw
+# value drops out.
+
+
+def _modbus_hybrid_coordinator(power_flow_value: Any) -> Any:
+    """Build a Modbus-only coordinator with an SH inverter + optional power_flow data."""
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_name": "SH10RT",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SH10RT-20",
+            "device_sn": "SH1",
+            "factory_name": "SUNGROW",
+        }
+    ]
+    coordinator = _coordinator_with(devices)
+    coordinator.plants_service = None
+    coordinator.via_plant_id = None
+    coordinator.local_configuration_url = "http://10.0.0.9"
+    coordinator.modbus_diagnostics = {"device_family": "sh_rt", "skipped_blocks": [], "last_error": None}
+    if power_flow_value is None:
+        coordinator.data = {}
+    else:
+        coordinator.data = {
+            "power_flow_status": {
+                "code": "power_flow_status",
+                "value": power_flow_value,
+                "unit": None,
+                "source": "modbus",
+            }
+        }
+    return coordinator
+
+
+async def test_power_flow_binary_sensors_created_for_hybrid(hass: HomeAssistant):
+    """A hybrid Modbus-only coordinator with power_flow_status yields one sensor per surfaced bit."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+    from custom_components.sungrow.modbus_registers import POWER_FLOW_STATUS_BITS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_hybrid_coordinator(power_flow_value=0)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={"12345": coordinator.devices})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    flows = [e for e in added if isinstance(e, SungrowModbusPowerFlowBinarySensor)]
+    assert len(flows) == len(POWER_FLOW_STATUS_BITS)
+    keys = {e._attr_translation_key for e in flows}
+    assert keys == {key for _, key in POWER_FLOW_STATUS_BITS}
+
+
+async def test_power_flow_binary_sensors_not_created_for_string_inverter(hass: HomeAssistant):
+    """SG string inverters don't expose power_flow_status, so no bit sensors are created."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    # Same setup shape as hybrid but no power_flow_status in coordinator data.
+    coordinator = _modbus_hybrid_coordinator(power_flow_value=None)
+    coordinator.modbus_diagnostics["device_family"] = "sg_rs"
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={"12345": coordinator.devices})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert not any(isinstance(e, SungrowModbusPowerFlowBinarySensor) for e in added)
+
+
+def test_power_flow_bit_math_matches_documented_mask():
+    """Each bit-sensor's is_on reflects the corresponding bit in the raw register (#326)."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+    from custom_components.sungrow.modbus_registers import POWER_FLOW_STATUS_BITS
+
+    # Raw with only bit 1 (Battery Charging) and bit 5 (Importing) set.
+    raw = (1 << 1) | (1 << 5)
+    coordinator = _modbus_hybrid_coordinator(power_flow_value=raw)
+
+    sensors = {
+        key: SungrowModbusPowerFlowBinarySensor(coordinator, coordinator.devices[0], bit, key)
+        for bit, key in POWER_FLOW_STATUS_BITS
+    }
+    assert sensors["battery_charging"].is_on is True
+    assert sensors["importing_power"].is_on is True
+    # Every unset bit reads false, not None.
+    assert sensors["pv_generating"].is_on is False
+    assert sensors["battery_discharging"].is_on is False
+    assert sensors["exporting_power"].is_on is False
+
+
+def test_power_flow_binary_sensor_unavailable_when_register_missing():
+    """When power_flow_status drops out of the poll, every bit sensor is unavailable."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+    from custom_components.sungrow.modbus_registers import POWER_FLOW_STATUS_BITS
+
+    coordinator = _modbus_hybrid_coordinator(power_flow_value=None)
+    bit, key = POWER_FLOW_STATUS_BITS[0]
+    sensor = SungrowModbusPowerFlowBinarySensor(coordinator, coordinator.devices[0], bit, key)
+    assert sensor.available is False
+    assert sensor.is_on is None
+
+
+def test_power_flow_binary_sensor_device_classes():
+    """Bit-0 uses RUNNING, bit-1 uses BATTERY_CHARGING; the others rely on translation_key."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+    from custom_components.sungrow.modbus_registers import POWER_FLOW_STATUS_BITS
+
+    coordinator = _modbus_hybrid_coordinator(power_flow_value=0)
+    per_key = {
+        key: SungrowModbusPowerFlowBinarySensor(coordinator, coordinator.devices[0], bit, key)
+        for bit, key in POWER_FLOW_STATUS_BITS
+    }
+    assert per_key["pv_generating"]._attr_device_class == BinarySensorDeviceClass.RUNNING
+    assert per_key["battery_charging"]._attr_device_class == BinarySensorDeviceClass.BATTERY_CHARGING
+    for key in ("battery_discharging", "exporting_power", "importing_power"):
+        assert getattr(per_key[key], "_attr_device_class", None) is None
+
+
+def test_power_flow_binary_sensor_handles_string_value():
+    """The raw register may arrive as a string (some transports coerce int to str)."""
+    from custom_components.sungrow.binary_sensor import SungrowModbusPowerFlowBinarySensor
+
+    coordinator = _modbus_hybrid_coordinator(power_flow_value="34")  # bit1 + bit5
+    sensor = SungrowModbusPowerFlowBinarySensor(coordinator, coordinator.devices[0], 5, "importing_power")
+    assert sensor.is_on is True
+
+
+def test_decode_power_flow_status_returns_every_key():
+    """The pure helper mirrors the same bit math the entity uses."""
+    from custom_components.sungrow.modbus_registers import (
+        POWER_FLOW_STATUS_BITS,
+        decode_power_flow_status,
+    )
+
+    flags = decode_power_flow_status(0)
+    assert set(flags) == {key for _, key in POWER_FLOW_STATUS_BITS}
+    assert all(value is False for value in flags.values())
+
+    # A raw value with every surfaced bit set.
+    every_bit = sum(1 << bit for bit, _ in POWER_FLOW_STATUS_BITS)
+    all_on = decode_power_flow_status(every_bit)
+    assert all(value is True for value in all_on.values())

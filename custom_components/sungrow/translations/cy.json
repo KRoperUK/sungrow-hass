@@ -161,6 +161,21 @@
       },
       "device_fault": {
         "name": "Nam"
+      },
+      "pv_generating": {
+        "name": "PV yn cynhyrchu"
+      },
+      "battery_charging": {
+        "name": "Batri yn gwefru"
+      },
+      "battery_discharging": {
+        "name": "Batri yn dadwefru"
+      },
+      "exporting_power": {
+        "name": "Allforio i'r grid"
+      },
+      "importing_power": {
+        "name": "Mewnforio o'r grid"
       }
     },
     "number": {

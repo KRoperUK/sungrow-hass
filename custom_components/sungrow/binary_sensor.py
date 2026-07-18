@@ -21,6 +21,7 @@ from pysolarcloud.plants import DeviceType
 from . import build_device_info
 from .coordinator import SungrowPlantCoordinator
 from .measure_points import resolve_enum_value
+from .modbus_registers import POWER_FLOW_STATUS_BITS
 
 # Read-only, updated in bulk by the coordinator.
 PARALLEL_UPDATES = 0
@@ -71,9 +72,19 @@ def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySe
     sensors: list[BinarySensorEntity] = []
     if coordinator.plants_service is None:
         # Modbus-only path: the local inverter's connectivity is driven by the last poll.
+        data = coordinator.data or {}
+        has_power_flow = "power_flow_status" in data
         for device in coordinator.devices:
             if device.get("device_type") == DeviceType.INVERTER and device.get("uuid"):
                 sensors.append(SungrowModbusConnectivityBinarySensor(coordinator, device))
+                # Hybrid families expose power_flow_status; string inverters don't,
+                # so we only create the per-flow binary sensors when the register
+                # is actually present in the coordinator's data (#326).
+                if has_power_flow:
+                    sensors.extend(
+                        SungrowModbusPowerFlowBinarySensor(coordinator, device, bit, key)
+                        for bit, key in POWER_FLOW_STATUS_BITS
+                    )
         return sensors
 
     for device in coordinator.devices:
@@ -243,3 +254,77 @@ class SungrowModbusConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordi
         if diag.get("last_error"):
             attrs["last_error"] = diag["last_error"]
         return attrs
+
+
+# Bit-index -> HA device class for the power_flow_status flags. Only two of the
+# five surfaced bits have a natural HA device class; the rest present as plain
+# translated boolean sensors and get their name from strings.json.
+_POWER_FLOW_DEVICE_CLASSES: dict[int, BinarySensorDeviceClass] = {
+    0: BinarySensorDeviceClass.RUNNING,  # PV generating
+    1: BinarySensorDeviceClass.BATTERY_CHARGING,  # Battery charging
+}
+
+
+class SungrowModbusPowerFlowBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):
+    """A single bit of ``power_flow_status`` exposed as an on/off binary sensor (#326).
+
+    Decoded from wire register 13000, one entity per surfaced bit. This turns
+    the raw bitfield sensor into automation-friendly triggers like
+    ``binary_sensor.battery_charging`` and ``binary_sensor.exporting_power`` so
+    users don't have to write template sensors to make the same decisions the
+    inverter is already publishing.
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: SungrowPlantCoordinator,
+        device: dict[str, Any],
+        bit_index: int,
+        translation_key: str,
+    ) -> None:
+        """Initialize a power-flow bit sensor for a local Modbus inverter."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        self._bit_index = bit_index
+        self._attr_translation_key = translation_key
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_power_flow_{translation_key}"
+        device_class = _POWER_FLOW_DEVICE_CLASSES.get(bit_index)
+        if device_class is not None:
+            self._attr_device_class = device_class
+        local_url = getattr(coordinator, "local_configuration_url", None)
+        self._attr_device_info = build_device_info(
+            device,
+            coordinator.plant_id,
+            fallback_name=coordinator.plant_name,
+            via_plant_id=getattr(coordinator, "via_plant_id", None),
+            configuration_url=local_url if isinstance(local_url, str) else None,
+        )
+
+    def _raw(self) -> int | None:
+        """Return the current ``power_flow_status`` register value, or None if missing."""
+        data = self.coordinator.data or {}
+        point = data.get("power_flow_status")
+        if not isinstance(point, dict):
+            return None
+        val = point.get("value")
+        if val is None:
+            return None
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def available(self) -> bool:
+        """Unavailable if the last poll failed or ``power_flow_status`` isn't reported."""
+        return super().available and self._raw() is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether this power-flow bit is set."""
+        raw = self._raw()
+        if raw is None:
+            return None
+        return bool(raw & (1 << self._bit_index))

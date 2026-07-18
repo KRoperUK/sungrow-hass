@@ -461,6 +461,40 @@ MODBUS_ENUM_MAPS: dict[str, dict[int, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# power_flow_status bitfield decode (#326)
+# ---------------------------------------------------------------------------
+# Wire register 13000 (``power_flow_status``) is a u16 bitfield of live-flow
+# flags — "is PV generating?", "is the battery charging?", "are we importing
+# from grid?". Users writing "start EV charging when solar is exporting" or
+# "notify when battery starts discharging" want these as true/false triggers
+# rather than raw bits. Bit meanings from mkaiser SHx template bit decoders
+# (MIT). Reserved bit 6, and bits 3/7 (load-power sign duplicates of
+# ``load_power``) are intentionally omitted — surface via ``load_power``
+# directly if they're wanted.
+
+# (bit_index, translation_key) pairs. The translation key doubles as a stable
+# identifier for the unique_id suffix so entity IDs are portable across
+# translations.
+POWER_FLOW_STATUS_BITS: tuple[tuple[int, str], ...] = (
+    (0, "pv_generating"),
+    (1, "battery_charging"),
+    (2, "battery_discharging"),
+    (4, "exporting_power"),
+    (5, "importing_power"),
+)
+
+
+def decode_power_flow_status(raw: int) -> dict[str, bool]:
+    """Decode a raw ``power_flow_status`` register into named boolean flags.
+
+    ``raw`` is the u16 register value as read from wire register 13000. The
+    returned dict is keyed by the same translation keys the binary sensors use,
+    so callers can look up "is this flag set?" without duplicating bit math.
+    """
+    return {key: bool(raw & (1 << bit)) for bit, key in POWER_FLOW_STATUS_BITS}
+
+
 def decode_registers(
     points: tuple[ModbusPoint, ...], block_start: int, registers: list[int]
 ) -> dict[str, dict[str, Any]]:
