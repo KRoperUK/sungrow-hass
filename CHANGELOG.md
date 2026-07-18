@@ -34,6 +34,13 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.6.1](https://github.com/KRoperUK/sungrow-hass/compare/v5.6.0...v5.6.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **modbus:** cap read blocks at Modbus 125-register protocol limit ([#319](https://github.com/KRoperUK/sungrow-hass/issues/319)) ([49ed605](https://github.com/KRoperUK/sungrow-hass/commit/49ed605c3f0b04a6b341c26315197b630ac6cced))
+
 ## [5.6.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.5.0...v5.6.0) (2026-07-18)
 
 
