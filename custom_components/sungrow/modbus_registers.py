@@ -159,18 +159,63 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
 )
 
 # Register maps keyed by inverter family.
+# SG three-phase string inverters share the low-block layout with SG-RS (phase B/C
+# present when not NAN); hybrid SH-RS/RT share the expanded SH map (MIT mkaiser).
 REGISTER_MAPS: dict[str, tuple[ModbusPoint, ...]] = {
     "sg_rs": SG_RS_INPUT_POINTS,
+    "sg_rt": SG_RS_INPUT_POINTS,  # three-phase string — same low-block layout (#219)
     "sh_rt": SH_RT_INPUT_POINTS,
     "sh_rs": SH_RT_INPUT_POINTS,  # SH-RS shares the same input-register layout
 }
 
 # Map device-type codes reported in register 5000 to a register-map family.
-# Derived from Sungrow docs and cross-referenced with the mkaiser SHx mapping.
-# Unknown codes fall back to the configured model string.
+# SH codes from the mkaiser SHx YAML (MIT) device-type map; SG-RS validated live.
+# Unknown codes fall back to the configured model string / model_capabilities.
 DEVICE_TYPE_CODE_TO_FAMILY: dict[int, str] = {
     # SG-RS string inverters (single-phase, e.g. SG3.6RS)
-    9732: "sg_rs",
+    9732: "sg_rs",  # 0x2604
+    # SH single-phase hybrid (0x0Dxx) — mkaiser device-type map
+    3331: "sh_rs",  # SH5K-V13 (0x0D03)
+    3334: "sh_rs",  # SH3K6 (0x0D06)
+    3335: "sh_rs",  # SH4K6 (0x0D07)
+    3337: "sh_rs",  # SH5K-20 (0x0D09)
+    3338: "sh_rs",  # SH3K6-30 (0x0D0A)
+    3339: "sh_rs",  # SH4K6-30 (0x0D0B)
+    3340: "sh_rs",  # SH5K-30 (0x0D0C)
+    3341: "sh_rs",  # SH3.6RS (0x0D0D)
+    3343: "sh_rs",  # SH5.0RS (0x0D0F)
+    3344: "sh_rs",  # SH6.0RS (0x0D10)
+    3351: "sh_rs",  # SH3.0RS (0x0D17)
+    3352: "sh_rs",  # SH4.0RS (0x0D18)
+    3354: "sh_rs",  # SH8.0RS (0x0D1A)
+    3355: "sh_rs",  # SH10RS (0x0D1B)
+    3367: "sh_rs",  # MG5RL (0x0D27)
+    3368: "sh_rs",  # MG6RL (0x0D28)
+    # SH three-phase hybrid (0x0Exx)
+    3584: "sh_rt",  # SH5.0RT (0x0E00)
+    3585: "sh_rt",  # SH6.0RT (0x0E01)
+    3586: "sh_rt",  # SH8.0RT (0x0E02)
+    3587: "sh_rt",  # SH10RT (0x0E03)
+    3592: "sh_rt",  # SH5.0RT-V122 (0x0E08)
+    3593: "sh_rt",  # SH6.0RT-V122 (0x0E09)
+    3594: "sh_rt",  # SH8.0RT-V122 (0x0E0A)
+    3595: "sh_rt",  # SH10RT-V122 (0x0E0B)
+    3596: "sh_rt",  # SH5.0RT-V112 (0x0E0C)
+    3597: "sh_rt",  # SH6.0RT-V112 (0x0E0D)
+    3598: "sh_rt",  # SH8.0RT-V112 (0x0E0E)
+    3599: "sh_rt",  # SH10RT-V112 (0x0E0F)
+    3600: "sh_rt",  # SH5.0RT-20 (0x0E10)
+    3601: "sh_rt",  # SH6.0RT-20 (0x0E11)
+    3602: "sh_rt",  # SH8.0RT-20 (0x0E12)
+    3603: "sh_rt",  # SH10RT-20 (0x0E13)
+    3616: "sh_rt",  # SH5T (0x0E20)
+    3617: "sh_rt",  # SH6T (0x0E21)
+    3618: "sh_rt",  # SH8T (0x0E22)
+    3619: "sh_rt",  # SH10T (0x0E23)
+    3620: "sh_rt",  # SH12T (0x0E24)
+    3621: "sh_rt",  # SH15T (0x0E25)
+    3622: "sh_rt",  # SH20T (0x0E26)
+    3624: "sh_rt",  # SH25T (0x0E28)
 }
 
 
