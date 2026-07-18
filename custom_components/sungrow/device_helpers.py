@@ -57,12 +57,18 @@ def resolve_point_device(point_code: str, devices: list[dict[str, Any]]) -> dict
     return matches[0] if len(matches) == 1 else None
 
 
+# Sentinel: omit ``via_plant_id`` to nest under ``plant_id`` (cloud default). Pass
+# ``via_plant_id=None`` explicitly for a local Modbus inverter with no cloud plant so
+# we do **not** invent a non-existent parent (HA 2025.12 warns / breaks).
+_VIA_PLANT_UNSET: object = object()
+
+
 def build_device_info(
     device: dict[str, Any],
     plant_id: str,
     *,
     fallback_name: str | None = None,
-    via_plant_id: str | None = None,
+    via_plant_id: str | None | object = _VIA_PLANT_UNSET,
     configuration_url: str | None = None,
 ) -> DeviceInfo:
     """Build a device-registry entry for a physical device, nested under its plant.
@@ -73,17 +79,23 @@ def build_device_info(
     via ``via_device``. The uuid is stringified so the identifier matches
     ``_known_device_ids`` (which keys on ``str(uuid)``) and the device isn't pruned.
 
-    ``via_plant_id`` overrides the parent plant identifier (used by a local Modbus
-    inverter that nests under a matching cloud plant without merging data).
+    ``via_plant_id`` overrides the parent plant identifier (local Modbus nesting under a
+    matching cloud plant). Pass ``None`` to leave the device un-nested when no plant
+    parent exists yet — never point ``via_device`` at a missing identifier.
     """
+    if via_plant_id is _VIA_PLANT_UNSET:
+        parent_id: str | None = plant_id
+    else:
+        parent_id = via_plant_id  # type: ignore[assignment]
     info = DeviceInfo(
         identifiers={(DOMAIN, str(device["uuid"]))},
         name=device.get("device_name") or device.get("device_model_name") or fallback_name,
         manufacturer=device.get("factory_name") or "Sungrow",
         model=device.get("device_model_code") or device.get("device_model_name"),
         serial_number=device.get("device_sn"),
-        via_device=(DOMAIN, via_plant_id or plant_id),
     )
+    if parent_id is not None:
+        info["via_device"] = (DOMAIN, parent_id)
     if configuration_url:
         info["configuration_url"] = configuration_url
     return info

@@ -274,6 +274,13 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
     # No synthetic local plant device is created when nesting under a cloud plant.
     registry = dr.async_get(hass)
     assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
+    # Local inverter nests under the real cloud plant.
+    inv = registry.async_get_device(identifiers={(DOMAIN, "SNLINK_inv")})
+    assert inv is not None
+    assert inv.via_device_id is not None
+    parent = registry.async_get(inv.via_device_id)
+    assert parent is not None
+    assert (DOMAIN, "plant-99") in parent.identifiers
 
 
 async def test_setup_modbus_only_cleans_stale_local_plant_when_cloud_present(hass: HomeAssistant):
@@ -361,9 +368,13 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    # No cloud plant yet, so no synthetic local plant device is created.
+    # No cloud plant yet: no synthetic plant, and inverter is un-nested (no bogus via_device).
     registry = dr.async_get(hass)
     assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
+    inv = registry.async_get_device(identifiers={(DOMAIN, "SNLINK_inv")})
+    assert inv is not None
+    assert inv.via_device_id is None
+    assert entry.runtime_data.coordinators[0].via_plant_id is None
 
     # Now the cloud entry/device appears before HA finishes startup.
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")

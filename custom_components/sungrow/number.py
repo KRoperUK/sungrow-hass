@@ -265,9 +265,21 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # Entity name comes from translations (entity.number.<param>.name).
         self._attr_translation_key = param
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_{param}"
-        # Nest the dispatch device under the plant device the sensors created,
-        # enriched with the model/serial the cloud reports.
-        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+        # Cloud: default via_device = plant_id. Local Modbus: nest only under a real cloud
+        # plant (via_plant_id set); otherwise omit parent (via_plant_id=None).
+        local_url = getattr(coordinator, "local_configuration_url", None)
+        if isinstance(local_url, str):
+            self._attr_device_info = build_device_info(
+                device,
+                coordinator.plant_id,
+                fallback_name=coordinator.plant_name,
+                via_plant_id=getattr(coordinator, "via_plant_id", None),
+                configuration_url=local_url or None,
+            )
+        else:
+            self._attr_device_info = build_device_info(
+                device, coordinator.plant_id, fallback_name=coordinator.plant_name
+            )
         self._attr_device_class = meta.get("device_class")
         self._attr_native_unit_of_measurement = meta.get("native_unit_of_measurement")
         self._attr_native_min_value = meta["native_min_value"]
