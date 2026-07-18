@@ -34,6 +34,13 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.4.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.3.0...v5.4.0) (2026-07-18)
+
+
+### Features
+
+* **modbus:** expand family auto-detect for SH hybrids and SG three-phase ([#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) ([#308](https://github.com/KRoperUK/sungrow-hass/issues/308)) ([68ee9cd](https://github.com/KRoperUK/sungrow-hass/commit/68ee9cddc8cd5701f336dc4ae88cc227eb96318d))
+
 ## [5.3.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.2.0...v5.3.0) (2026-07-18)
 
 
