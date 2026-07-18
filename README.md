@@ -4,6 +4,7 @@
 [![CI][ci-badge]][ci-url]
 [![codecov][codecov-badge]][codecov-url]
 [![GitHub Release][release-badge]][release-url]
+[![Contributor Covenant][coc-badge]][coc-url]
 
 Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`sungrow-isolarcloud`](https://github.com/KRoperUK/pysolarcloud) library (a maintained fork of `pysolarcloud`).
 
@@ -209,6 +210,7 @@ unavailable-after-reboot problem.
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer setup and guidelines.
+By participating, you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ### Running Tests
 
@@ -264,6 +266,8 @@ Found a bug or have a feature request? [Open an issue][issues-url].
 [codecov-url]: https://codecov.io/gh/KRoperUK/sungrow-hass
 [release-badge]: https://img.shields.io/github/v/release/KRoperUK/sungrow-hass
 [release-url]: https://github.com/KRoperUK/sungrow-hass/releases/latest
+[coc-badge]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
+[coc-url]: CODE_OF_CONDUCT.md
 [hacs-my-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [hacs-my-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=KRoperUK&repository=sungrow-hass&category=integration
 [issues-url]: https://github.com/KRoperUK/sungrow-hass/issues
