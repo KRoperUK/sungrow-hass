@@ -26,6 +26,11 @@ _MAP_RE = re.compile(r"^p(\d+)_map$")
 _NAMED_DICT_FIELDS: dict[str, str] = {
     "curr_power": "current_power",
     "month_energy": "month_energy",
+    "today_energy": "today_energy",
+    "total_energy": "total_energy",
+    "co2_reduce_total": "co2_reduce_total",
+    "today_income": "today_income",
+    "total_income": "total_income",
 }
 # Named scalar diagnostic fields exposed as plain (unitless) sensors.
 _NAMED_SCALAR_FIELDS: dict[str, str] = {
