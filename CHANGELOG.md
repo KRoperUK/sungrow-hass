@@ -34,6 +34,19 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.6.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.5.0...v5.6.0) (2026-07-18)
+
+
+### Features
+
+* **modbus:** local active-power control via ModbusControl ([#220](https://github.com/KRoperUK/sungrow-hass/issues/220)) ([#315](https://github.com/KRoperUK/sungrow-hass/issues/315)) ([a0e800b](https://github.com/KRoperUK/sungrow-hass/commit/a0e800b428f5867fd447afcc79155dd088a7ca49))
+
+
+### Bug Fixes
+
+* **modbus:** omit phantom via_device when no cloud plant ([#316](https://github.com/KRoperUK/sungrow-hass/issues/316)) ([9eba9d2](https://github.com/KRoperUK/sungrow-hass/commit/9eba9d274413ff8982febfe808bba28358ef70ef))
+* **modbus:** recreate client and free WiNet-S socket so reloads heal ([#312](https://github.com/KRoperUK/sungrow-hass/issues/312)) ([10441e6](https://github.com/KRoperUK/sungrow-hass/commit/10441e65a97168dc5197effc9c1f38ffe9650d44))
+
 ## [5.5.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.4.0...v5.5.0) (2026-07-18)
 
 
