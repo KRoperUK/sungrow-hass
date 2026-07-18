@@ -393,26 +393,51 @@ def block_bounds(points: tuple[ModbusPoint, ...]) -> tuple[int, int]:
     return start, end - start
 
 
-def block_partitions(points: tuple[ModbusPoint, ...], max_gap: int = 256) -> list[tuple[int, int]]:
-    """Split ``points`` into contiguous read blocks separated by gaps > ``max_gap``.
+# Modbus function 4 (read input registers) is capped by the protocol at 125
+# registers per request. pymodbus enforces this client-side and the WiNet-S
+# dongle is happier with even smaller reads; the default keeps some headroom.
+# See issue #318 — the SH-RT/SH-RS map collapsed 4999..5241 into a single
+# 243-register block and pymodbus rejected the request with
+# ``1 < count 243 < 125 !`` before it ever hit the wire.
+MODBUS_MAX_READ_COUNT = 125
+DEFAULT_MAX_BLOCK_SIZE = 100
 
-    Modbus limits the number of registers per read; reading one huge block from
-    4999 to 13045 would fail. This partitions the map into nearby groups so each
-    read stays small and efficient.
+
+def block_partitions(
+    points: tuple[ModbusPoint, ...],
+    max_gap: int = 256,
+    max_block_size: int = DEFAULT_MAX_BLOCK_SIZE,
+) -> list[tuple[int, int]]:
+    """Split ``points`` into contiguous read blocks small enough for one Modbus read.
+
+    Modbus limits the number of registers per read (spec max = 125, and WiNet-S
+    dongles are happier with less). This partitions the map so each block:
+
+    * is separated from the next by more than ``max_gap`` registers, and
+    * never exceeds ``max_block_size`` registers (defaults to
+      :data:`DEFAULT_MAX_BLOCK_SIZE`, leaving headroom under the 125 hard cap).
+
+    Reading one huge block from 4999 to 13045 would fail; this yields a handful
+    of small reads instead. ``max_block_size`` is clamped to
+    :data:`MODBUS_MAX_READ_COUNT` because pymodbus rejects anything larger.
     """
     if not points:
         return []
+    cap = min(max_block_size, MODBUS_MAX_READ_COUNT)
     sorted_points = sorted(points, key=lambda p: p.address)
     blocks: list[tuple[int, int]] = []
     block_start = sorted_points[0].address
     block_end = sorted_points[0].address + sorted_points[0].register_count
     for point in sorted_points[1:]:
-        if point.address > block_end + max_gap:
+        point_end = point.address + point.register_count
+        would_exceed_cap = (point_end - block_start) > cap
+        gap_too_wide = point.address > block_end + max_gap
+        if gap_too_wide or would_exceed_cap:
             blocks.append((block_start, block_end - block_start))
             block_start = point.address
-            block_end = point.address + point.register_count
+            block_end = point_end
         else:
-            block_end = max(block_end, point.address + point.register_count)
+            block_end = max(block_end, point_end)
     blocks.append((block_start, block_end - block_start))
     return blocks
 
