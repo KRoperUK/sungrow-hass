@@ -27,6 +27,7 @@ from .const import (
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
+    CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_TRANSPORT,
     DEFAULT_MODBUS_PORT,
@@ -257,11 +258,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not host:
             return None
         from .modbus import SungrowModbusClient
+        from .model_capabilities import ModelFamily, resolve_model_family
+
+        # Prefer a register-map family derived from the configured model code (e.g.
+        # SH10RT-20 → sh_rt) so hybrids don't start on the SG-RS map before reg 5000
+        # auto-detect runs (#219). Unknown models keep the sg_rs default.
+        model_code = config_entry.data.get(CONF_MODEL) or config_entry.options.get(CONF_MODEL)
+        family = resolve_model_family(str(model_code) if model_code else None)
+        model = family.value if family is not ModelFamily.UNKNOWN else "sg_rs"
 
         return SungrowModbusClient(
             str(host),
             port=int(config_entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)),
             unit=int(config_entry.options.get(CONF_MODBUS_UNIT, DEFAULT_MODBUS_UNIT)),
+            model=model,
         )
 
     async def _async_update_data(self) -> dict[str, Any]:

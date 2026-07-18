@@ -897,6 +897,8 @@ async def test_plant_detail_best_effort_on_error(hass: HomeAssistant):
 
 async def test_build_modbus_client_only_for_modbus_only_entry(hass: HomeAssistant):
     """Modbus client is built for transport=modbus_only with a host, never for cloud entries."""
+    from custom_components.sungrow.const import CONF_MODEL
+
     local = _make_entry(
         options={CONF_MODBUS_PORT: 1502, CONF_MODBUS_UNIT: 2},
         data={
@@ -907,6 +909,18 @@ async def test_build_modbus_client_only_for_modbus_only_entry(hass: HomeAssistan
     client = SungrowPlantCoordinator._build_modbus_client(local)
     assert client is not None
     assert (client.host, client.port, client.unit) == ("10.0.0.5", 1502, 2)
+    assert client.model == "sg_rs"  # unknown/blank model → default
+
+    hybrid = _make_entry(
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_MODBUS_HOST: "10.0.0.6",
+            CONF_MODEL: "SH10RT-20",
+        }
+    )
+    hybrid_client = SungrowPlantCoordinator._build_modbus_client(hybrid)
+    assert hybrid_client is not None
+    assert hybrid_client.model == "sh_rt"  # model string seeds the register map (#219)
 
     # Cloud entry with leftover hybrid host must NOT get a client.
     hybrid_leftover = _make_entry({CONF_MODBUS_HOST: "10.0.0.5"})
