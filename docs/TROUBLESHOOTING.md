@@ -274,6 +274,61 @@ sensors are unavailable:
 - If the dongle's IP changed, rediscovery updates the stored host, or use **Reconfigure**
   on the local entry.
 
+### The Ethernet port on the inverter appears dead
+
+On several Sungrow inverter models the **internal LAN port is disabled by default**
+and has to be turned on from the iSolarCloud app before Modbus TCP is reachable:
+
+1. Open the **iSolarCloud** mobile app.
+2. **Support** → **Local Access** and sign in with the installer credentials
+   (`admin` / `pw8888` — these are fixed by Sungrow and the same for every unit).
+3. **More** → **Communication Settings** → toggle **Inverter ETH port** on.
+4. Give the inverter a minute to acquire an IP, then check your router for the
+   new lease. Discovery in Home Assistant should pick it up on the next scan.
+
+For stability, **the internal LAN port is preferred over the WiNet-S dongle** where
+both are available — the dongle's firmware is still catching up with the LAN path
+in Sungrow's own tooling.
+
+*(Documented by the community for the yaml-based
+[Sungrow SHx Modbus project](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/blob/main/doc/faq.md);
+same procedure applies here since the underlying protocol is Modbus TCP.)*
+
+### WiNet-S drops connections or reads flap in and out
+
+The WiNet-S dongle is known to close idle Modbus TCP sessions, and pymodbus does not
+always recover cleanly on the next poll. The integration reconnects once per read and
+serialises requests over one socket to keep the dongle happy — but if reads still
+flap in and out, a stateful **Modbus proxy** in front of the dongle is the standard
+community workaround:
+
+- Install [`Akulatraxas/ha-modbusproxy`](https://github.com/Akulatraxas/ha-modbusproxy)
+  from HACS (Add-on Store on HAOS / Supervised, or as a Docker sidecar on Container).
+- Point the proxy `upstreamhost` at the WiNet-S IP, leave the port at `502`.
+- **Reconfigure** the local Sungrow entry to point at the proxy's host/port instead
+  of the WiNet-S. The proxy holds one persistent connection to the dongle and
+  multiplexes clients cleanly.
+
+If reads recover with the proxy but not without it, the fault is in the dongle's
+TCP handling — nothing the integration can fix on its own.
+
+*(Approach borrowed from the same
+[community FAQ](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/blob/main/doc/faq.md#modbus-connection-issues).)*
+
+### After a power cut the inverter has no IP address
+
+Some inverters only acquire a DHCP lease after a **full cold-boot**, not just an AC
+cycle. If the LAN port is enabled but the router shows no lease:
+
+1. Switch **AC** off at the isolator, wait 10 seconds.
+2. Switch the **battery** off (if fitted), wait 10 seconds.
+3. Switch the **DC** disconnect on the side of the inverter, wait **two minutes**
+   for the capacitors to bleed down.
+4. Restore power **in reverse order** — DC → battery → AC — and give the
+   inverter about 5 minutes to boot before checking your router.
+
+*(Sequence from the [community FAQ](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/blob/main/doc/faq.md#properly-restart-your-inverter).)*
+
 ### Local `daily_yield` vs cloud daily yield
 
 Local SG-RS firmware often does not reset the daily register at midnight. The local entry
@@ -288,10 +343,15 @@ file a register-map issue.
 
 ### My inverter model isn't read over Modbus
 
-Local Modbus currently maps only the **SG-RS single-phase string inverters**. Other models
-(SH hybrids, three-phase SG, standalone battery/meter) aren't in the register map yet
-([#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) — use the **cloud** entry for
-those metrics.
+Local Modbus maps the **SG-RS / SG-RT** single- and three-phase string inverters and
+the **SH-RS / SH-RT** hybrid families. Family is auto-detected from the device-type
+register (5000) or the configured model string. Standalone SBR battery and dedicated
+meter maps aren't wired yet ([#219](https://github.com/KRoperUK/sungrow-hass/issues/219))
+— use the **cloud** entry for those metrics.
+
+If a model in a supported family isn't detected, the diagnostics dump for the local
+entry includes the raw `device_type_code` and the resolved family; that's the fastest
+way to file a mapping issue.
 
 ---
 
