@@ -25,6 +25,7 @@ from .modbus_registers import (
     decode_registers,
     family_for_device_type_code,
 )
+from .model_capabilities import ModelFamily, resolve_model_family
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +123,9 @@ class SungrowModbusClient:
         if self._family_detected:
             return
         self._family_detected = True
+        # Prefer a known device-type code; else resolve the configured model string
+        # (e.g. SH10RT-20 → sh_rt) when it already names a register map (#219).
+        configured = self.model
         try:
             async with self._lock:
                 registers = await self._read_input(4999, 1)
@@ -131,9 +135,14 @@ class SungrowModbusClient:
                 _LOGGER.debug("Device-type code %s mapped to Modbus family %s", code, family)
                 self.model = family
                 return
-            _LOGGER.debug("Unknown device-type code %s; keeping configured model %s", code, self.model)
+            _LOGGER.debug("Unknown device-type code %s; trying model string %s", code, configured)
         except Exception as err:  # pylint: disable=broad-except
-            _LOGGER.debug("Could not auto-detect Modbus family: %s", err)
+            _LOGGER.debug("Could not auto-detect Modbus family from register: %s", err)
+
+        resolved = resolve_model_family(configured)
+        if resolved is not ModelFamily.UNKNOWN and resolved.value in REGISTER_MAPS:
+            _LOGGER.debug("Model string %s resolved to Modbus family %s", configured, resolved.value)
+            self.model = resolved.value
 
     async def _read_input(self, address: int, count: int) -> list[int]:
         """Read a contiguous input-register block, connecting/reconnecting as needed."""

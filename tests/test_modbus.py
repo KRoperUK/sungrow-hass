@@ -10,6 +10,7 @@ from custom_components.sungrow.modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
     DEVICE_TYPE_CODE_TO_FAMILY,
+    REGISTER_MAPS,
     SG_RS_INPUT_POINTS,
     SH_RT_INPUT_POINTS,
     ModbusPoint,
@@ -139,12 +140,23 @@ def test_family_for_device_type_code_maps_known_codes():
     """Known device-type codes resolve to a register-map family."""
     for code, family in DEVICE_TYPE_CODE_TO_FAMILY.items():
         assert family_for_device_type_code(code) == family
+    # Spot-check SH hybrids from the mkaiser device-type map (#219).
+    assert family_for_device_type_code(0x0E03) == "sh_rt"  # SH10RT
+    assert family_for_device_type_code(0x0D0F) == "sh_rs"  # SH5.0RS
+    assert family_for_device_type_code(9732) == "sg_rs"
 
 
 def test_family_for_device_type_code_returns_none_for_unknown():
     """Unknown codes return None so callers can fall back."""
     assert family_for_device_type_code(99999) is None
     assert family_for_device_type_code(None) is None
+
+
+def test_register_maps_cover_all_model_families():
+    """Every ModelFamily that has a map key is registered (#219)."""
+    assert set(REGISTER_MAPS) >= {"sg_rs", "sg_rt", "sh_rs", "sh_rt"}
+    assert REGISTER_MAPS["sg_rt"] is REGISTER_MAPS["sg_rs"]
+    assert REGISTER_MAPS["sh_rs"] is REGISTER_MAPS["sh_rt"]
 
 
 # ---------------------------------------------------------------------------
