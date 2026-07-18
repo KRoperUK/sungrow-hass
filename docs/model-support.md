@@ -61,10 +61,10 @@ differs by family. See [Local Modbus](local-modbus.md) for setup.
 
 | Family | Cloud API | Local Modbus (WiNet-S) |
 |---|:--:|:--:|
-| SG single-phase string | ✅ | ✅ (SG-RS register map) |
-| SG three-phase string | ✅ | ⚠️ not yet mapped — see [#219](https://github.com/KRoperUK/sungrow-hass/issues/219) |
-| SH single-phase hybrid | ✅ | ✅ (SH register map) |
-| SH three-phase hybrid | ✅ | ✅ (SH register map) |
+| SG single-phase string | ✅ | ✅ (`sg_rs` map) |
+| SG three-phase string | ✅ | ✅ (`sg_rt` map — same low-block layout; commercial CX gaps → [#219](https://github.com/KRoperUK/sungrow-hass/issues/219)) |
+| SH single-phase hybrid | ✅ | ✅ (`sh_rs` map) |
+| SH three-phase hybrid | ✅ | ✅ (`sh_rt` map) |
 
 Local Modbus is currently **read-only**; dispatch/control still goes through the cloud
 ([#220](https://github.com/KRoperUK/sungrow-hass/issues/220)).

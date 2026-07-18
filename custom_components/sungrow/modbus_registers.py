@@ -71,6 +71,9 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5011, "mppt1_current", "u16", 0.1, "A"),
     ModbusPoint(5012, "mppt2_voltage", "u16", 0.1, "V"),
     ModbusPoint(5013, "mppt2_current", "u16", 0.1, "A"),
+    # MPPT3 present on some multi-tracker string inverters; NAN when unsupported (#219).
+    ModbusPoint(5014, "mppt3_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
+    ModbusPoint(5015, "mppt3_current", "u16", 0.1, "A", nan_value=NAN_U16),
     ModbusPoint(5016, "total_dc_power", "u32", 1, "W"),
     ModbusPoint(5018, "phase_a_voltage", "u16", 0.1, "V"),
     ModbusPoint(5019, "phase_b_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
@@ -106,7 +109,8 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5114, "mppt4_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
     ModbusPoint(5115, "mppt4_current", "u16", 0.1, "A", nan_value=NAN_U16),
     ModbusPoint(5213, "battery_power", "s32", 1, "W", nan_value=NAN_S32),
-    ModbusPoint(5241, "grid_frequency", "u16", 0.1, "Hz"),
+    # Preferred grid-frequency register on hybrids (mkaiser/SHx scale 0.01 Hz).
+    ModbusPoint(5241, "grid_frequency", "u16", 0.01, "Hz"),
     ModbusPoint(5600, "meter_active_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5602, "meter_phase_a_active_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5604, "meter_phase_b_active_power", "s32", 1, "W", nan_value=NAN_S32),

@@ -14,11 +14,15 @@ sensors. If both exist for the same inverter serial, the local device is nested 
 the cloud plant in the device registry (`via_device`) — a soft “related to” link only.
 
 !!! info "What's supported today"
-    Local Modbus currently maps the **SG-RS single-phase string inverters** (e.g. SG3.6RS)
-    and is **read-only**. Wider model coverage and local control are tracked in
-    [#219](https://github.com/KRoperUK/sungrow-hass/issues/219) and
-    [#220](https://github.com/KRoperUK/sungrow-hass/issues/220) — see
-    [Current limitations](#current-limitations).
+    Local Modbus is **read-only** and maps:
+
+    - **SG-RS / SG-RT** string inverters (single- and three-phase low-block layout)
+    - **SH-RS / SH-RT** hybrid inverters (battery SOC/power, house load, meter points)
+
+    Family is auto-detected from register 5000 (device-type code) or the configured
+    model string. Local **control** (writes) is tracked in
+    [#220](https://github.com/KRoperUK/sungrow-hass/issues/220); remaining map gaps in
+    [#219](https://github.com/KRoperUK/sungrow-hass/issues/219).
 
 ## What you need
 
@@ -27,7 +31,7 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
   Modbus port and unit ID (`1`) are used automatically.
 - **No iSolarCloud account** for a Modbus-only setup. (A cloud entry is independent and
   still needs credentials for its own sensors and dispatch.)
-- A supported inverter — **SG-RS** today (see [limitations](#current-limitations)).
+- A supported inverter family — **SG string** or **SH hybrid** (see [Model support](model-support.md#cloud-vs-local-modbus)).
 
 !!! tip "mDNS discovery must be able to reach Home Assistant"
     The dongle is found via **mDNS/zeroconf**, which doesn't cross subnets or VLANs by
