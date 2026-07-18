@@ -84,6 +84,79 @@ def test_enum_value_none_for_non_enum():
     assert mp.resolve_enum_value("8018", 5) is None
 
 
+# ---------------------------------------------------------------------------
+# Local-Modbus enum decoders (#322)
+# ---------------------------------------------------------------------------
+# Two register values only make sense as human-readable strings:
+#  - ``running_state_raw`` (wire 12999) -> inverter state name
+#  - ``device_type_code`` (wire 4999)   -> device model name
+# Rather than open-coding decode on the sensor side, these get registered into
+# ENUM_MAPS keyed by the Modbus point *code* (Modbus values arrive without a
+# numeric point ID, so ``point_id`` falls back to the code — see sensor.py).
+
+
+def test_running_state_enum_maps_documented_codes():
+    """Selected raw states from the Sungrow spec resolve to their documented names."""
+    assert mp.resolve_enum_value("running_state_raw", 0x0000) == "Running"
+    assert mp.resolve_enum_value("running_state_raw", 0x0008) == "Standby"
+    assert mp.resolve_enum_value("running_state_raw", 0x0100) == "Fault"
+    assert mp.resolve_enum_value("running_state_raw", 0x2501) == "Restarting"
+    assert mp.resolve_enum_value("running_state_raw", 0x4000) == "Running in External EMS mode"
+
+
+def test_running_state_enum_returns_none_for_unknown_code():
+    """An unlisted firmware code must yield None so HA doesn't reject the state."""
+    result = mp.resolve_enum_value("running_state_raw", 0xFFFF)
+    assert result is None
+
+
+def test_running_state_enum_classifies_and_exposes_options():
+    """``running_state_raw`` is an ENUM point and its options include the common states."""
+    assert mp.resolve_classification(None, "running_state_raw", "running_state_raw") == (
+        SensorDeviceClass.ENUM,
+        None,
+    )
+    options = mp.resolve_enum_options("running_state_raw")
+    assert options is not None
+    for expected in ("Running", "Standby", "Fault", "Stop"):
+        assert expected in options
+
+
+def test_device_type_code_enum_maps_known_models():
+    """Device-type codes resolve to model-family display names."""
+    assert mp.resolve_enum_value("device_type_code", 3355) == "SH10RS"
+    assert mp.resolve_enum_value("device_type_code", 3603) == "SH10RT-20"
+    assert mp.resolve_enum_value("device_type_code", 9732) == "SG-RS string inverter"
+
+
+def test_device_type_code_enum_returns_none_for_unknown_code():
+    """A new/unknown device-type code must yield None (options list is fixed)."""
+    result = mp.resolve_enum_value("device_type_code", 4242)
+    assert result is None
+
+
+def test_every_device_type_family_code_has_a_display_name():
+    """Every code we recognise as a family must also have a display name (#322).
+
+    Without this coverage a user with a supported SH inverter would see the raw
+    integer in the ``device_type_code`` sensor because it isn't in the options
+    list. Regenerating one map without the other would silently regress it.
+    """
+    from custom_components.sungrow.modbus_registers import (
+        DEVICE_MODEL_NAMES,
+        DEVICE_TYPE_CODE_TO_FAMILY,
+    )
+
+    missing = set(DEVICE_TYPE_CODE_TO_FAMILY) - set(DEVICE_MODEL_NAMES)
+    assert not missing, f"family-mapped codes without a model name: {sorted(missing)}"
+
+
+def test_modbus_enum_codes_get_friendly_names():
+    """`Inverter State` and `Device Model` beat the generic title-caser (#322)."""
+    assert mp.resolve_name("running_state_raw", "running_state_raw", None) == "Inverter State"
+    assert mp.resolve_name("device_type_code", "device_type_code", None) == "Device Model"
+
+
 @pytest.mark.parametrize("point_id", ["29", "13146"])
 def test_operating_status_enum_classifies_and_maps(point_id):
     """The operating-status points (29/13146) are ENUM, map a known code, and drop unknowns.
@@ -198,7 +271,16 @@ def test_catalog_entry_names_and_classes():
 
 
 def test_enum_maps_reference_real_catalog_points():
+    # Cloud enum points must exist in the transcribed iSolarCloud catalog so
+    # sensor entities pick up their documented options. Local-Modbus enum keys
+    # (#322) are code-string keys (``running_state_raw``, ``device_type_code``)
+    # decoded from register maps and deliberately have no catalog entry — check
+    # only the numeric cloud IDs.
+    from custom_components.sungrow.modbus_registers import MODBUS_ENUM_MAPS
+
     for pid in mp.ENUM_MAPS:
+        if pid in MODBUS_ENUM_MAPS:
+            continue
         assert pid in mp.POINT_CATALOG, f"enum point {pid} not in catalog"
         assert mp.POINT_CATALOG[pid].options, f"enum point {pid} missing options"
 
