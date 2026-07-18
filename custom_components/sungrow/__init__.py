@@ -16,7 +16,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
-from pysolarcloud import UserAuth
+from pysolarcloud import UserAuth, UserControl
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -84,9 +84,9 @@ PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.S
 # list — unloading a platform that was never set up fails the unload, which breaks the
 # options-change reload and takes every entity unavailable.
 MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
-# A cloud user-account entry has no dispatch (no Control) and, in Phase 2, no realtime
-# points yet — only the sensor platform is forwarded; data lands in Phase 3 (#268/#269).
-CLOUD_USER_PLATFORMS: list[Platform] = [Platform.SENSOR]
+# cloud_user has sensors plus dispatch (UserControl over the app/web API, #271). No
+# binary sensors (device fault/connectivity come from the OAuth device list shape).
+CLOUD_USER_PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
 
 
 def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
@@ -107,13 +107,18 @@ SETUP_TIMEOUT = 60
 _LOGGER = logging.getLogger(__name__)
 
 
+# Dispatch client: OAuth ``Control`` or user-account ``UserControl`` (#271).
+type DispatchControl = Control | UserControl
+
+
 @dataclass
 class SungrowData:
     """Runtime data stored on the config entry (``entry.runtime_data``)."""
 
     coordinators: list[SungrowPlantCoordinator]
     # None for a Modbus-only (cloud-free) entry, which has no dispatch/control (#159).
-    control: Control | None
+    # OAuth entries use ``Control``; cloud_user uses ``UserControl`` (#271).
+    control: DispatchControl | None
     devices: dict[str, list[dict[str, Any]]]
     # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
     heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task[None]]] = field(default_factory=dict)
@@ -124,7 +129,7 @@ class SungrowData:
 type SungrowConfigEntry = ConfigEntry[SungrowData]
 
 
-async def _async_dispatch_supported(control: Control, devices: list[dict[str, Any]]) -> bool:
+async def _async_dispatch_supported(control: DispatchControl, devices: list[dict[str, Any]]) -> bool:
     """Return whether the plant's dispatch device accepts parameter writes.
 
     Fail-open: returns True unless the API explicitly reports the device does not
@@ -297,11 +302,11 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
 
 
 async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
-    """Set up a cloud entry authenticated with a user account (email/password) (#268).
+    """Set up a cloud entry authenticated with a user account (email/password) (#268/#271).
 
     Uses the unofficial app/web API via ``UserAuth`` instead of the developer OAuth app.
-    Phase 2 authenticates, discovers plants and registers each plant device; realtime
-    sensor data is Phase 3 (#269), so the coordinator produces no measure points yet.
+    Discovers plants, maps realtime points, and attaches dispatch via ``UserControl``
+    (same number/select entities and safety rails as OAuth when the device accepts writes).
     Isolated from the OAuth path so the unofficial transport can't destabilise it.
     """
     session = async_get_clientsession(hass)
@@ -312,6 +317,7 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         entry.data[CONF_USER_PASSWORD],
         websession=session,
     )
+    control_service: DispatchControl = UserControl(user_auth)
 
     try:
         async with asyncio.timeout(SETUP_TIMEOUT):
@@ -322,10 +328,21 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         raise ConfigEntryNotReady(f"Unable to reach iSolarCloud (user account): {err}") from err
 
     coordinators: list[SungrowPlantCoordinator] = []
+    devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
         plant_name = plant_info.get("ps_name") or f"Plant {plant_id}"
-        coordinator = SungrowPlantCoordinator(hass, entry, None, plant_id, plant_name, user_auth=user_auth)
+
+        # Device list powers dispatch targeting and battery gating (#271). Failures are
+        # non-fatal — plant sensors still work; controls appear when devices are known.
+        try:
+            async with asyncio.timeout(SETUP_TIMEOUT):
+                devices = await user_auth.async_get_devices(plant_id)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Could not fetch devices for plant %s (user account): %s", plant_name, err)
+            devices = []
+
+        coordinator = SungrowPlantCoordinator(hass, entry, None, plant_id, plant_name, devices, user_auth=user_auth)
         try:
             await coordinator.async_config_entry_first_refresh()
         except ConfigEntryAuthFailed:
@@ -333,13 +350,22 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         except ConfigEntryNotReady as err:
             _LOGGER.warning("Plant %s failed its initial user-account refresh, skipping: %s", plant_name, err)
             continue
+
+        coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        # User API has no design_capacity_battery plant-detail field in this path; gate
+        # battery-only controls on ESS/battery device presence (same fail-open default).
+        coordinator.has_battery = _has_battery_device(devices) if devices else True
+        devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
 
     if plant_list and not coordinators:
         raise ConfigEntryNotReady("No plants could be set up; all initial refreshes failed")
 
-    # No Control client: dispatch is not supported over the user-account API in Phase 2.
-    entry.runtime_data = SungrowData(coordinators=coordinators, control=None, devices={})
+    entry.runtime_data = SungrowData(
+        coordinators=coordinators,
+        control=control_service,
+        devices=devices_by_plant,
+    )
 
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
     device_registry = dr.async_get(hass)

@@ -49,10 +49,10 @@ being present — the dispatch battery controls are hidden on PV-only plants for
 
 Any model can be connected through one of several transports (see
 [transport modes](local-modbus.md#transport-modes)): the official **developer Cloud** (OAuth,
-full sensors + dispatch), an **unofficial user-account Cloud** login (email/password, read-only
-plant-level data, [experimental](local-modbus.md#cloud-user-account-unofficial)), and **local
-Modbus**. The matrix below describes what a model reports; which of those datapoints you actually
-get also depends on the transport.
+full sensors + dispatch), an **unofficial user-account Cloud** login (email/password, plant
+sensors + experimental dispatch, [details](local-modbus.md#cloud-user-account-unofficial)), and
+**local Modbus**. The matrix below describes what a model reports; which of those datapoints you
+actually get also depends on the transport.
 
 ## Cloud vs local Modbus
 

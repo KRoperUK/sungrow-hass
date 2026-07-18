@@ -40,7 +40,7 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
 | Mode | Data source | Cloud account | Control (dispatch) | Best for |
 | --- | --- | --- | --- | --- |
 | **Cloud-only** | iSolarCloud OpenAPI | Developer app (App Key/Secret/ID) | ✅ Yes | Full plant sensors and battery/dispatch controls. |
-| **Cloud (user account)** *(unofficial)* | iSolarCloud app/web API | Just email + password | ❌ Not yet | No developer app — quickest cloud setup. See caveats below. |
+| **Cloud (user account)** *(unofficial)* | iSolarCloud app/web API | Just email + password | ✅ Yes (experimental) | No developer app — sensors + dispatch. See caveats below. |
 | **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ❌ Read-only | Fast local metrics, offline / privacy-first. |
 | **Both** *(two entries)* | Each entry its own source | Cloud entry only | Via **cloud** entry | Compare or use cloud + local side by side. |
 
@@ -53,8 +53,9 @@ If you don't have (or don't want to register) an iSolarCloud **developer applica
 
 Current limitations:
 
-- **Plant-level data only** so far (e.g. current power, daily/total yield, alarm/fault counts) — from the `getPsDetail` endpoint. Per-device and richer measure points may follow.
-- **No dispatch/control** — read-only. Use the developer Cloud-only transport for charge/discharge and other controls.
+- **Plant-level realtime** from `getPsDetail` (power, yield, alarm/fault counts, …). Device discovery is used for dispatch targeting; per-device sensor parity with OAuth may still differ by model.
+- **Dispatch** uses the same number/select entities and safety rails as the developer Cloud transport (battery gating, forced-mode verification, EMS heartbeat). Some EMS modes (e.g. Energy Management Mode on PV-only plants) may report “template not configured” — that is a plant capability limit, not a missing feature.
+- Prefer the developer **Cloud-only** transport when you need the official OpenAPI path or full OAuth device metrics.
 - If login fails with "account or password incorrect", it's most often the **wrong region** — pick the region your account actually uses.
 
 ```mermaid
