@@ -34,6 +34,14 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [5.2.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.1.0...v5.2.0) (2026-07-18)
+
+
+### Features
+
+* periodic EMS dispatch state read-back ([#286](https://github.com/KRoperUK/sungrow-hass/issues/286)) ([#298](https://github.com/KRoperUK/sungrow-hass/issues/298)) ([156f6c1](https://github.com/KRoperUK/sungrow-hass/commit/156f6c1bd71ef56956ee70db33054af11fc07b20))
+* select tests, cloud_user sensors, device_helpers refactor ([#297](https://github.com/KRoperUK/sungrow-hass/issues/297)) ([cae3a59](https://github.com/KRoperUK/sungrow-hass/commit/cae3a59b6538b8653aabb357407873fe42dedac9))
+
 ## [5.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.0.0...v5.1.0) (2026-07-17)
 
 
