@@ -20,6 +20,7 @@ from . import DispatchControl, build_device_info, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .modbus_control import ModbusControlError
+from .model_specs import spec_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,8 +168,38 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
     },
 }
 
-# Watt-valued power parameters whose slider maximum is sized to the device's rating.
-_RATED_POWER_PARAMS = frozenset({"charge_discharge_power", "feed_in_limitation_value"})
+# Watt-valued power parameters whose slider maximum is sized from the device.
+# ``feed_in_limitation_value`` follows the AC nameplate rating (an export limit
+# cannot exceed what the inverter can push to the grid). ``charge_discharge_power``
+# is a *battery-side* number and can exceed the AC rating: SH-RS single-phase
+# hybrids top out around 3–6 kW AC but drive 6.6–10.6 kW to the battery. The
+# spec catalog (#332) provides both numbers per model; entities fall back to the
+# AC rating and finally to :data:`DEFAULT_MAX_DISPATCH_POWER` when the model
+# isn't in the catalog, so behaviour is unchanged for unknown models.
+_AC_RATED_POWER_PARAMS = frozenset({"feed_in_limitation_value"})
+_BATTERY_POWER_PARAMS = frozenset({"charge_discharge_power"})
+
+
+def _resolve_param_max_power(
+    param: str,
+    target: dict[str, Any],
+    ac_rated_power: int,
+) -> int:
+    """Return the slider ceiling for a watt-valued dispatch parameter.
+
+    Battery-side params consult the datasheet catalog for the model's
+    ``max_charge_power`` (larger of charge/discharge, since the same slider drives
+    both directions). AC-side params keep the historic AC-nameplate ceiling.
+    ``ac_rated_power`` is the caller's already-resolved fallback so the
+    conservative default is applied in exactly one place.
+    """
+    if param in _BATTERY_POWER_PARAMS:
+        spec = spec_for(str(target.get("device_model_code") or ""))
+        if spec is not None:
+            battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
+            if battery_limits:
+                return max(battery_limits)
+    return ac_rated_power
 
 
 def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchControl | None) -> list[NumberEntity]:
@@ -189,9 +220,9 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
         return []
     if not target.get("uuid"):
         return []
-    # Size the power sliders to the device's rated power when it can be derived
-    # from the model code; otherwise use the conservative default.
-    max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
+    # Fallback ceiling used when the model isn't in the datasheet catalog (#332):
+    # parse the model code's kW rating and clamp; else the conservative default.
+    ac_rated_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
     # Local ModbusControl only maps a subset of Appendix-10 params (#220).
     # Require a real collection so MagicMock control clients in tests are unaffected.
     raw_supported = getattr(control, "supported_parameters", None)
@@ -203,8 +234,10 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
             continue
         if supported is not None and param not in supported:
             continue
-        if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
-            meta = {**meta, "native_max_value": max_power}
+        if param in _AC_RATED_POWER_PARAMS or param in _BATTERY_POWER_PARAMS:
+            max_power = _resolve_param_max_power(param, target, ac_rated_power)
+            if max_power != meta["native_max_value"]:
+                meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
     # The forced-dispatch auto-revert timeout only makes sense alongside the battery
     # charge/discharge controls, so gate it on the same has_battery check (#157/#148).

@@ -655,8 +655,13 @@ def test_rated_power_w_parses_model_codes():
     assert rated_power_w({"device_model_code": "SG9999"}) is None  # parses to >1000 kW
 
 
-async def test_charge_power_max_from_model_code(hass: HomeAssistant):
-    """The charge/discharge power slider is sized to the device's rated power."""
+async def test_charge_power_max_from_model_spec_battery_limit(hass: HomeAssistant):
+    """charge/discharge slider uses the battery ceiling from the datasheet catalog (#332).
+
+    Before #332 the slider was clamped to the AC nameplate rating (10000 W on
+    SH10RT-V112). The battery on that model actually accepts 10600 W in either
+    direction per the Sungrow datasheet, so the slider must lift to match.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
@@ -666,10 +671,59 @@ async def test_charge_power_max_from_model_code(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     power = next(e for e in added if e.param == "charge_discharge_power")
-    assert power._attr_native_max_value == 10000
+    assert power._attr_native_max_value == 10600  # battery limit, not the 10 kW AC rating
     # Percentage-based params are unaffected.
     soc = next(e for e in added if e.param == "soc_upper_limit")
     assert soc._attr_native_max_value == 100
+
+
+async def test_charge_power_max_lifts_sh_rs_above_ac_rating(hass: HomeAssistant):
+    """SH-RS models have battery-side limits much higher than the AC nameplate (#332).
+
+    Concrete example: SH3.0RS is a 3 kW AC inverter that drives 6.6 kW to the
+    battery. Before this fix the slider was hard-capped at 3 kW, silently
+    clipping the useful range users depend on.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH3.0RS"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 6600
+
+
+async def test_feed_in_limitation_stays_on_ac_rating(hass: HomeAssistant):
+    """The export limit is AC-side and must stay clamped to the inverter's AC rating (#332)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
+    assert export_limit._attr_native_max_value == 10000  # AC nameplate, not battery
+
+
+async def test_charge_power_max_falls_back_to_ac_rated_when_spec_missing(hass: HomeAssistant):
+    """A model outside the ModelSpec catalog falls back to the parsed AC rating (#332)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    # SG250HX is a commercial inverter deliberately not in the catalog; the
+    # parsed AC rating (250 kW) must still drive the slider ceiling.
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SG250HX"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 250000  # falls back to rated_power_w()
 
 
 async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
