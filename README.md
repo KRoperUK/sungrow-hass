@@ -260,14 +260,14 @@ Found a bug or have a feature request? [Open an issue][issues-url].
 
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://hacs.xyz
-[ci-badge]: https://github.com/KRoperUK/sungrow-hass/actions/workflows/ci.yml/badge.svg
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/KRoperUK/sungrow-hass/ci.yml?branch=main&label=CI
 [ci-url]: https://github.com/KRoperUK/sungrow-hass/actions/workflows/ci.yml
-[codecov-badge]: https://codecov.io/gh/KRoperUK/sungrow-hass/branch/main/graph/badge.svg
+[codecov-badge]: https://img.shields.io/codecov/c/github/KRoperUK/sungrow-hass/main
 [codecov-url]: https://codecov.io/gh/KRoperUK/sungrow-hass
 [release-badge]: https://img.shields.io/github/v/release/KRoperUK/sungrow-hass
 [release-url]: https://github.com/KRoperUK/sungrow-hass/releases/latest
 [coc-badge]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
 [coc-url]: CODE_OF_CONDUCT.md
-[hacs-my-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
+[hacs-my-badge]: https://img.shields.io/badge/HACS-Install-41BDF5?logo=homeassistant&logoColor=white
 [hacs-my-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=KRoperUK&repository=sungrow-hass&category=integration
 [issues-url]: https://github.com/KRoperUK/sungrow-hass/issues
