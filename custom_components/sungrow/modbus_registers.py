@@ -344,6 +344,123 @@ def family_for_device_type_code(device_type_code: int | None) -> str | None:
     return DEVICE_TYPE_CODE_TO_FAMILY.get(device_type_code)
 
 
+# ---------------------------------------------------------------------------
+# Enum decoders for local Modbus values (#322)
+# ---------------------------------------------------------------------------
+# The register maps expose three raw integer registers that are only useful as
+# human-readable state names / model names / power-flow flags. Rather than
+# hard-code the decoding inside each entity class, define the lookup tables here
+# and register them into ``ENUM_MAPS`` in ``measure_points_data`` so the existing
+# enum sensor pipeline (options, translation, resolve_enum_value) handles the
+# rest uniformly for cloud and Modbus points.
+
+# Inverter running state (wire register 12999).
+# Source: mkaiser SHx YAML ``sg_inverter_state`` template map (MIT).
+# Some raw codes deliberately share a display name (e.g. 0x0000 and 0x0040 both
+# "Running") — that reflects Sungrow's own mapping and is preserved verbatim.
+RUNNING_STATE_NAMES: dict[int, str] = {
+    0x0000: "Running",
+    0x0001: "Stop",
+    0x0002: "Key stop",
+    0x0004: "Emergency Stop",
+    0x0008: "Standby",
+    0x0010: "Initial standby",
+    0x0014: "Microgrid Operation",
+    0x0020: "Starting",
+    0x0040: "Running",
+    0x0041: "Off-grid Charge",
+    0x0080: "Derating Running",
+    0x0100: "Fault",
+    0x0200: "Update Failed",
+    0x0400: "Running in maintain mode",
+    0x0800: "Running in compulsory (forced) mode",
+    0x1000: "Running (off-grid)",
+    0x1111: "Uninitialized",
+    0x1200: "Initial standby",
+    0x1300: "Key stop",
+    0x1400: "Standby",
+    0x1500: "Emergency Stop",
+    0x1600: "Starting",
+    0x1700: "AFCI self-test shutdown",
+    0x1800: "Intelligent Station Building Status",
+    0x1900: "Safe Mode",
+    0x2000: "Open loop",
+    0x2500: "Communicate fault",
+    0x2501: "Restarting",
+    0x4000: "Running in External EMS mode",
+    0x4001: "Emergency Charging Operation",
+    0x5500: "Fault",
+    0x8000: "Stop",
+    0x8100: "Derating Running",
+    0x8200: "Dispatch Running",
+    0x9100: "Warn Running",
+}
+
+# Device model name (wire register 4999, ``device_type_code``).
+# SH codes from the mkaiser SHx YAML ``sg_device_type`` template map (MIT).
+# The SG string code 9732 (0x2604) is shared across the SG-RS single-phase family
+# (SG3.0RS / SG3.6RS / SG5.0RS all report the same code in field reports); use
+# the generic family name so the sensor's option list doesn't imply a specific
+# wattage that can't be verified from Modbus alone.
+DEVICE_MODEL_NAMES: dict[int, str] = {
+    # SG string inverters — Sungrow does not distinguish specific SG-RS variants
+    # in this register, so the option is family-generic.
+    9732: "SG-RS string inverter",  # 0x2604
+    # SH single-phase hybrid (0x0Dxx)
+    3331: "SH5K-V13",
+    3334: "SH3K6",
+    3335: "SH4K6",
+    3337: "SH5K-20",
+    3338: "SH3K6-30",
+    3339: "SH4K6-30",
+    3340: "SH5K-30",
+    3341: "SH3.6RS",
+    3343: "SH5.0RS",
+    3344: "SH6.0RS",
+    3351: "SH3.0RS",
+    3352: "SH4.0RS",
+    3354: "SH8.0RS",
+    3355: "SH10RS",
+    3367: "MG5RL",
+    3368: "MG6RL",
+    # SH three-phase hybrid (0x0Exx)
+    3584: "SH5.0RT",
+    3585: "SH6.0RT",
+    3586: "SH8.0RT",
+    3587: "SH10RT",
+    3592: "SH5.0RT-V122",
+    3593: "SH6.0RT-V122",
+    3594: "SH8.0RT-V122",
+    3595: "SH10RT-V122",
+    3596: "SH5.0RT-V112",
+    3597: "SH6.0RT-V112",
+    3598: "SH8.0RT-V112",
+    3599: "SH10RT-V112",
+    3600: "SH5.0RT-20",
+    3601: "SH6.0RT-20",
+    3602: "SH8.0RT-20",
+    3603: "SH10RT-20",
+    3616: "SH5T",
+    3617: "SH6T",
+    3618: "SH8T",
+    3619: "SH10T",
+    3620: "SH12T",
+    3621: "SH15T",
+    3622: "SH20T",
+    3624: "SH25T",
+}
+
+# Modbus point-code -> enum table, consumed by ``measure_points_data.ENUM_MAPS``.
+# Each entry turns a raw integer register value into a documented display string
+# (see :func:`resolve_enum_value`). Keys are the local Modbus point codes as
+# emitted by :func:`decode_registers`, so the enum pipeline picks them up
+# automatically for any Modbus point whose value hits one of these codes.
+MODBUS_ENUM_MAPS: dict[str, dict[int, str]] = {
+    "running_state_raw": RUNNING_STATE_NAMES,
+    "device_type_code": DEVICE_MODEL_NAMES,
+}
+
+
 def decode_registers(
     points: tuple[ModbusPoint, ...], block_start: int, registers: list[int]
 ) -> dict[str, dict[str, Any]]:

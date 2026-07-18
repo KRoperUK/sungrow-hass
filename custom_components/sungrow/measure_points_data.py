@@ -6,6 +6,8 @@ No logic here — see ``measure_points.py``.
 
 from __future__ import annotations
 
+from .modbus_registers import MODBUS_ENUM_MAPS
+
 # --- Enum value tables (point_id -> {int_code: label}) ------------------------
 
 _CHARGER_STATUS: dict[int, str] = {
@@ -81,6 +83,10 @@ ENUM_MAPS: dict[str, dict[int, str]] = {
     "29": _OPERATING_STATUS,
     "13146": _OPERATING_STATUS,
     "51301": _MICROINVERTER_STATUS,
+    # Local-Modbus point-code enum tables (running_state_raw, device_type_code)
+    # merged in from ``modbus_registers`` so the existing enum sensor pipeline
+    # (options, resolve_enum_value) handles cloud and Modbus points uniformly (#322).
+    **MODBUS_ENUM_MAPS,
 }
 
 # --- Catalog rows: (point_id, english_name, unit). Blank unit = "". -----------
@@ -815,6 +821,11 @@ CODE_ALIASES: dict[str, str] = {
     "micro_yield_today": "Microinverter Yield Today",
     "micro_power_factor": "Microinverter Power Factor",
     "micro_running_status": "Microinverter Running Status",
+    # Local Modbus enum sensors (#322): raw register-code sensors are decoded
+    # to display strings via ENUM_MAPS. These aliases give them clear names
+    # instead of the fallback title-cased "Running State Raw" / "Device Type Code".
+    "running_state_raw": "Inverter State",
+    "device_type_code": "Device Model",
     # Per-device diagnostic codes whose acronyms/initialisms the generic
     # title-caser would mangle ("Mppt1", "Wlan", "Afci", "Dc", "Id").
     "mppt1_voltage": "MPPT1 Voltage",
