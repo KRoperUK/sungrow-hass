@@ -28,6 +28,7 @@ from . import (
 )
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
+from .modbus_control import ModbusControlError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,10 +151,13 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: DispatchContro
     if not target.get("uuid"):
         return []
     # Hide battery-only controls on PV-only plants — see #148.
+    # Local ModbusControl only maps a subset of Appendix-10 params (#220).
+    raw_supported = getattr(control, "supported_parameters", None)
+    supported = raw_supported if isinstance(raw_supported, (set, frozenset)) else None
     return [
         SungrowDispatchSelect(coordinator, control, target, param, meta)
         for param, meta in DISPATCH_SELECTS.items()
-        if coordinator.has_battery or not meta.get("battery_only")
+        if (coordinator.has_battery or not meta.get("battery_only")) and (supported is None or param in supported)
     ]
 
 
@@ -395,7 +399,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, payload, self.device_uuid)
         try:
             await self.control.async_update_parameters(self.device_uuid, payload)
-        except PySolarCloudException as err:
+        except (PySolarCloudException, ModbusControlError) as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",

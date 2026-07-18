@@ -45,8 +45,8 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
 | --- | --- | --- | --- | --- |
 | **Cloud-only** | iSolarCloud OpenAPI | Developer app (App Key/Secret/ID) | ✅ Yes | Full plant sensors and battery/dispatch controls. |
 | **Cloud (user account)** *(unofficial)* | iSolarCloud app/web API | Just email + password | ✅ Yes (experimental) | No developer app — sensors + dispatch. See caveats below. |
-| **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ❌ Read-only | Fast local metrics, offline / privacy-first. |
-| **Both** *(two entries)* | Each entry its own source | Cloud entry only | Via **cloud** entry | Compare or use cloud + local side by side. |
+| **Modbus-only** *(local)* | Local Modbus only | **Not needed** | ✅ Active power limit (SG string) | Fast local metrics + limited local control; offline / privacy-first. |
+| **Both** *(two entries)* | Each entry its own source | Cloud entry only | Full dispatch via **cloud**; local active-power on local entry | Compare or use cloud + local side by side. |
 
 ### Cloud user account (unofficial)
 
@@ -121,8 +121,21 @@ entry **derives** calendar-day yield from lifetime `total_yield` (baseline store
 Cloud daily yield remains whatever iSolarCloud reports — they can differ; that is expected
 with two independent sources.
 
+## Local control (active power limit)
+
+On **SG string** local entries (validated on SG3.6RS), the integration can write
+WiNet-S **holding registers** for:
+
+- **Limited power switch** (enable/disable active power limiting)
+- **Active power limit ratio** (% of rated, 0–100%)
+
+These use the same number/select entities as cloud dispatch. Battery EMS
+(charge/discharge, SOC, heartbeat) is **not** available over local Modbus on
+string inverters — use a **cloud** entry for hybrid/battery control
+([#220](https://github.com/KRoperUK/sungrow-hass/issues/220)).
+
 ## Current limitations
 
-- **SG-RS register map** only (see issues above for other models).
-- **Read-only** — charge/dispatch stays on the cloud API when you have a cloud entry.
+- **SG-RS / SG-RT** holding control is limited to active-power limiting for now.
+- Hybrid EMS / battery dispatch over Modbus is not implemented yet.
 - Local and cloud **do not share** entities; configure Energy/dashboards explicitly.
