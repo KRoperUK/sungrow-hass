@@ -79,11 +79,15 @@ from .oauth_view import SungrowAuthCallbackView
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
-# A cloud-free Modbus-only entry has no cloud device status or dispatch, but it does
-# get a local connectivity binary sensor (#159). Setup and unload MUST use the same
-# list — unloading a platform that was never set up fails the unload, which breaks the
-# options-change reload and takes every entity unavailable.
-MODBUS_ONLY_PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+# Modbus-only: sensors + connectivity binary sensor + local active-power controls (#220).
+# Setup and unload MUST use the same list — unloading a platform that was never set up
+# fails the unload, which breaks options-change reload.
+MODBUS_ONLY_PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 # cloud_user has sensors plus dispatch (UserControl over the app/web API, #271). No
 # binary sensors (device fault/connectivity come from the OAuth device list shape).
 CLOUD_USER_PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
@@ -107,7 +111,9 @@ SETUP_TIMEOUT = 60
 _LOGGER = logging.getLogger(__name__)
 
 
-# Dispatch client: OAuth ``Control`` or user-account ``UserControl`` (#271).
+# Dispatch client: OAuth ``Control``, user-account ``UserControl`` (#271), or local
+# ``ModbusControl`` (#220). Imported lazily in setup for ModbusControl to avoid
+# circular imports at module load.
 type DispatchControl = Control | UserControl
 
 
@@ -116,8 +122,8 @@ class SungrowData:
     """Runtime data stored on the config entry (``entry.runtime_data``)."""
 
     coordinators: list[SungrowPlantCoordinator]
-    # None for a Modbus-only (cloud-free) entry, which has no dispatch/control (#159).
-    # OAuth entries use ``Control``; cloud_user uses ``UserControl`` (#271).
+    # OAuth: ``Control``; cloud_user: ``UserControl`` (#271); modbus_only: ``ModbusControl``
+    # when holding maps are available (#220); None only if local control cannot attach.
     control: DispatchControl | None
     devices: dict[str, list[dict[str, Any]]]
     # plant_id -> (stop_event, task) for the running EMS heartbeat loops.
@@ -272,6 +278,9 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
     coordinator.via_plant_id = via_plant_id
     coordinator.local_configuration_url = winet_url
+    # Local entries never expose battery EMS controls until hybrid holding maps ship (#220).
+    # Hiding battery_only entities avoids charge/discharge footguns on PV-only string units.
+    coordinator.has_battery = False
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:
@@ -280,12 +289,34 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         coordinator.close_modbus()
         raise
 
-    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={serial: [inverter]})
+    control: DispatchControl | None = None
+    modbus_client = getattr(coordinator, "_modbus_client", None)
+    if modbus_client is not None:
+        from .modbus_control import ModbusControl
+
+        modbus_control = ModbusControl(modbus_client, family=getattr(modbus_client, "model", None))
+        if modbus_control.supported_parameters:
+            # Probe once; fail-open to True only if the map is non-empty and readable.
+            try:
+                coordinator.dispatch_update_supported = await modbus_control.async_check_update_support(
+                    str(inverter["uuid"])
+                )
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.debug("Modbus control support probe failed: %s", err)
+                coordinator.dispatch_update_supported = False
+            if coordinator.dispatch_update_supported:
+                control = modbus_control  # type: ignore[assignment]
+            else:
+                _LOGGER.info(
+                    "Local Modbus control map not readable on %s; dispatch entities disabled",
+                    host or serial,
+                )
+
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=control, devices={serial: [inverter]})
     # Local Modbus sensors now live on the single inverter device (which is nested under
     # a matching cloud plant when one exists). Remove any legacy synthetic local plant
     # anchor left over from earlier builds so the UI does not show two plant devices.
     _remove_synthetic_local_plant_device(hass, entry, serial)
-    # Only the sensor platform: a Modbus-only entry has no cloud device status or dispatch.
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
 
     # If no cloud plant was found at setup time, the local entry may have set up before

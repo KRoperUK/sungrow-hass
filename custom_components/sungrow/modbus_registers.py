@@ -20,6 +20,112 @@ from typing import Any
 # Modbus function codes.
 FUNC_INPUT = 4  # read input registers (readings)
 FUNC_HOLDING = 3  # read holding registers (config/control)
+FUNC_WRITE_SINGLE = 6  # write single holding register
+
+
+# ---------------------------------------------------------------------------
+# #220 local control — holding maps (wire addresses = doc − 1)
+# ---------------------------------------------------------------------------
+# Validated live on SG3.6RS + WiNet-S (2026-07-18): wire 5006=0xAA enable,
+# 5007=1000 (100%), FC6 no-op write+readback ok; hybrid EMS 13049 unsupported.
+# Never write start/stop (wire 5005) or hybrid EMS without a separate SH map.
+
+
+@dataclass(frozen=True)
+class HoldingProbePoint:
+    """One holding register considered for local control probing (#220)."""
+
+    name: str
+    wire_address: int
+    description: str
+    family: str  # "sg_rs" | "sh_rt" | "probe_negative"
+    scale: float = 1.0
+    unit: str | None = None
+    # If True, the live probe may attempt a gated no-op / restore write.
+    write_candidate: bool = False
+
+
+@dataclass(frozen=True)
+class HoldingControlPoint:
+    """Production holding register mapped to a cloud dispatch parameter name (#220).
+
+    Values written via ``async_update_parameters`` are already cloud-encoded strings
+    (e.g. active power ratio 100% → ``"1000"``, enable → ``"170"``). The holding
+    path stores that integer in a single U16 register.
+    """
+
+    param: str
+    wire_address: int
+    description: str
+    # Cloud Appendix-10 param_code when known (for read-back id field).
+    param_code: str | None = None
+
+
+# Active power limit on string inverters (doc 5007 enable / 5008 ratio → wire −1).
+SG_RS_ACTIVE_POWER_LIMIT_ENABLE = HoldingProbePoint(
+    name="active_power_limit_enable",
+    wire_address=5006,
+    description="Active power limitation switch (0xAA enable / 0x55 disable)",
+    family="sg_rs",
+    write_candidate=False,
+)
+SG_RS_ACTIVE_POWER_LIMIT_RATIO = HoldingProbePoint(
+    name="active_power_limit_ratio",
+    wire_address=5007,
+    description="Active power limit ratio (0.1 % units; 1000 = 100%)",
+    family="sg_rs",
+    scale=0.1,
+    unit="%",
+    write_candidate=True,
+)
+
+# Hybrid EMS block — expected illegal/unsupported on pure SG-RS (negative control).
+SH_EMS_MODE = HoldingProbePoint(
+    name="energy_management_mode",
+    wire_address=13049,
+    description="Hybrid EMS mode (doc 13050); SH-only negative probe on SG-RS",
+    family="probe_negative",
+    write_candidate=False,
+)
+
+# Absolute no-write list for the spike and production SG-RS control.
+HOLDING_WRITE_DENYLIST_WIRE: frozenset[int] = frozenset(
+    {
+        5005,  # start/stop (0xCF/0xCE)
+        13049,  # EMS mode
+        13050,  # charge/discharge command
+        13051,  # charge/discharge power
+        13079,  # external EMS heartbeat
+    }
+)
+
+SG_RS_HOLDING_PROBE_POINTS: tuple[HoldingProbePoint, ...] = (
+    SG_RS_ACTIVE_POWER_LIMIT_ENABLE,
+    SG_RS_ACTIVE_POWER_LIMIT_RATIO,
+    SH_EMS_MODE,
+)
+
+# Cloud param names → holding wires for ModbusControl (family-keyed).
+SG_RS_HOLDING_CONTROL_POINTS: tuple[HoldingControlPoint, ...] = (
+    HoldingControlPoint(
+        param="limited_power_switch",
+        wire_address=5006,
+        description="Active power limitation enable (0xAA/0x55 = 170/85)",
+        param_code="10007",
+    ),
+    HoldingControlPoint(
+        param="active_power_limit_ratio",
+        wire_address=5007,
+        description="Active power limit ratio (0.1 %; 1000 = 100%)",
+        param_code="10008",
+    ),
+)
+
+HOLDING_CONTROL_MAPS: dict[str, tuple[HoldingControlPoint, ...]] = {
+    "sg_rs": SG_RS_HOLDING_CONTROL_POINTS,
+    # Three-phase string maps share the low holding block on community maps.
+    "sg_rt": SG_RS_HOLDING_CONTROL_POINTS,
+}
 
 # Sentinel values a register can return when the point is not supported by the
 # attached hardware/firmware.

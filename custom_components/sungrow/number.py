@@ -19,6 +19,7 @@ from pysolarcloud.control import Control
 from . import DispatchControl, build_device_info, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
+from .modbus_control import ModbusControlError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -191,10 +192,16 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
     # Size the power sliders to the device's rated power when it can be derived
     # from the model code; otherwise use the conservative default.
     max_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
+    # Local ModbusControl only maps a subset of Appendix-10 params (#220).
+    # Require a real collection so MagicMock control clients in tests are unaffected.
+    raw_supported = getattr(control, "supported_parameters", None)
+    supported = raw_supported if isinstance(raw_supported, (set, frozenset)) else None
     entities: list[NumberEntity] = []
     for param, meta in DISPATCH_NUMBERS.items():
         # Hide battery-only controls on PV-only plants — see #148.
         if meta.get("battery_only") and not coordinator.has_battery:
+            continue
+        if supported is not None and param not in supported:
             continue
         if param in _RATED_POWER_PARAMS and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
@@ -288,7 +295,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         wire_value = Control.encode_parameter(self.param, value)
         try:
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
-        except PySolarCloudException as err:
+        except (PySolarCloudException, ModbusControlError) as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",

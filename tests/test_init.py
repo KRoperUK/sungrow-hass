@@ -139,7 +139,7 @@ async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_pla
 
 
 async def test_setup_modbus_only_entry(hass: HomeAssistant):
-    """A Modbus-only entry sets up cloud-free: one coordinator, no cloud/dispatch, sensors only."""
+    """A Modbus-only entry sets up cloud-free with local active-power control (#220)."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -154,9 +154,13 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     entry.add_to_hass(hass)
 
     client = MagicMock()
+    client.model = "sg_rs"
     client.async_read_realtime = AsyncMock(
         return_value={"grid_frequency": {"code": "grid_frequency", "value": 49.9, "unit": "Hz", "source": "modbus"}}
     )
+    # Holding support probe for ModbusControl (#220).
+    client.async_read_holding = AsyncMock(return_value=[1000])
+    client.async_write_holding = AsyncMock()
     with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -164,15 +168,19 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     assert entry.state is ConfigEntryState.LOADED
     data = entry.runtime_data
     assert len(data.coordinators) == 1
-    # No cloud service and no dispatch controller on a Modbus-only entry.
+    # No cloud service; local ModbusControl for active-power params.
     assert data.coordinators[0].plants_service is None
-    assert data.control is None
+    assert data.control is not None
+    assert data.coordinators[0].has_battery is False
+    assert data.coordinators[0].dispatch_update_supported is True
     # The local client supplied the realtime data.
     assert data.coordinators[0].data["grid_frequency"]["value"] == 49.9
+    # Active power limit number should exist; battery mode select must not.
+    assert hass.states.get("number.sg3_6rs_local_active_power_limit_ratio") is not None or any(
+        s.entity_id.startswith("number.") and "active_power" in s.entity_id for s in hass.states.async_all("number")
+    )
+    assert not any("battery_mode" in s.entity_id for s in hass.states.async_all("select"))
 
-    # A Modbus-only entry must unload ONLY the platform it set up (sensor). Unloading
-    # number/select/binary_sensor — never forwarded — fails the unload in production,
-    # which breaks the options-change reload and takes every entity unavailable.
     orig = hass.config_entries.async_unload_platforms
     seen: dict[str, list[Platform]] = {}
 
@@ -183,7 +191,7 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
     with patch.object(hass.config_entries, "async_unload_platforms", side_effect=_spy):
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
-    assert seen["platforms"] == [Platform.BINARY_SENSOR, Platform.SENSOR]
+    assert seen["platforms"] == [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
     assert entry.state is ConfigEntryState.NOT_LOADED
     # WiNet-S single-connection slot must be released on unload (options reload heal).
     client.close.assert_called()
