@@ -281,9 +281,6 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
     coordinator.via_plant_id = via_plant_id
     coordinator.local_configuration_url = winet_url
-    # Local entries never expose battery EMS controls until hybrid holding maps ship (#220).
-    # Hiding battery_only entities avoids charge/discharge footguns on PV-only string units.
-    coordinator.has_battery = False
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:
@@ -291,6 +288,16 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         # exhaust the dongle's single-connection slot and reload never recovers.
         coordinator.close_modbus()
         raise
+    # Derive whether battery-gated dispatch controls should surface from the family
+    # resolved by first_refresh's device-type detection (falling back to the config's
+    # model code). Only SH hybrids have batteries — SG string inverters must stay
+    # gated off to avoid the charge/discharge footguns on PV-only units (#148, #331).
+    from .model_capabilities import resolve_capabilities
+
+    modbus_client = getattr(coordinator, "_modbus_client", None)
+    resolved_model_code = getattr(modbus_client, "model", None) or model
+    caps = resolve_capabilities(resolved_model_code)
+    coordinator.has_battery = bool(caps.has_battery)
 
     control: DispatchControl | None = None
     modbus_client = getattr(coordinator, "_modbus_client", None)
