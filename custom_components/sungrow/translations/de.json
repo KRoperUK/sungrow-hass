@@ -161,6 +161,21 @@
       },
       "device_fault": {
         "name": "Störung"
+      },
+      "pv_generating": {
+        "name": "PV erzeugt"
+      },
+      "battery_charging": {
+        "name": "Batterie lädt"
+      },
+      "battery_discharging": {
+        "name": "Batterie entlädt"
+      },
+      "exporting_power": {
+        "name": "Netzeinspeisung"
+      },
+      "importing_power": {
+        "name": "Netzbezug"
       }
     },
     "number": {

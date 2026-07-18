@@ -161,6 +161,21 @@
       },
       "device_fault": {
         "name": "Fault"
+      },
+      "pv_generating": {
+        "name": "PV Generating"
+      },
+      "battery_charging": {
+        "name": "Battery Charging"
+      },
+      "battery_discharging": {
+        "name": "Battery Discharging"
+      },
+      "exporting_power": {
+        "name": "Exporting to Grid"
+      },
+      "importing_power": {
+        "name": "Importing from Grid"
       }
     },
     "number": {

@@ -161,6 +161,21 @@
       },
       "device_fault": {
         "name": "Fallo"
+      },
+      "pv_generating": {
+        "name": "FV generando"
+      },
+      "battery_charging": {
+        "name": "Batería cargando"
+      },
+      "battery_discharging": {
+        "name": "Batería descargando"
+      },
+      "exporting_power": {
+        "name": "Exportando a la red"
+      },
+      "importing_power": {
+        "name": "Importando de la red"
       }
     },
     "number": {
