@@ -241,14 +241,21 @@ class ModbusPoint:
 
     ``address`` is the on-the-wire register address (documented number - 1).
     ``code`` matches the cloud transport's measure-point code so both sources feed
-    the same entity. ``data_type`` is one of ``u16``/``s16``/``u32``/``s32``;
-    32-bit types consume two registers (low word first). The displayed value is the
-    raw register value multiplied by ``scale``.
+    the same entity. ``data_type`` is one of ``u16``/``s16``/``u32``/``s32``/``string``;
+    32-bit types consume two registers (low word first), string types consume
+    ``length`` registers with two ASCII bytes per register (high byte first).
+    The displayed value is the raw register value multiplied by ``scale`` (numeric)
+    or the decoded UTF-8 text (string).
+
+    ``length`` is the width in 16-bit registers for a ``string`` point; ignored for
+    numeric types. Set it to match the documented Sungrow field width (serial
+    number = 10 registers, firmware version = 15 registers).
 
     ``nan_value`` is the raw sentinel that means "not available on this hardware"
     (e.g. 0xFFFF for an MPPT that the inverter does not have). When the raw value
     equals this sentinel the point is omitted, so unsupported registers do not
-    surface as bogus sensors.
+    surface as bogus sensors. For string points, an empty decoded string counts as
+    "not available" too.
 
     ``omit_zero`` drops a raw zero when the firmware reports 0 instead of the NAN
     sentinel for an absent channel (e.g. phase B/C voltage and MPPT3 on SG3.6RS).
@@ -263,10 +270,19 @@ class ModbusPoint:
     unit: str | None = None
     nan_value: int | None = None
     omit_zero: bool = False
+    length: int = 0
 
     @property
     def register_count(self) -> int:
-        """Number of 16-bit registers this point occupies (1 or 2)."""
+        """Number of 16-bit registers this point occupies.
+
+        Numeric types are one register (u16/s16) or two (u32/s32); string types
+        take ``length`` registers packing two ASCII bytes each.
+        """
+        if self.data_type == "string":
+            if self.length <= 0:
+                raise ValueError(f"string point {self.code!r} needs length > 0")
+            return self.length
         return 2 if self.data_type in ("u32", "s32") else 1
 
 
@@ -276,6 +292,10 @@ class ModbusPoint:
 # Register definitions validated against a live SG3.6RS; additional common
 # single/three-phase string points from the mkaiser SHx mapping (see module doc).
 SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # Sungrow packs the unit's serial in 10 registers of ASCII starting at wire
+    # 4989 (doc 4990). Present on every family we've validated; low-address so
+    # it merges into the first block.
+    ModbusPoint(4989, "inverter_serial", "string", 1, None, length=10),
     ModbusPoint(4999, "device_type_code", "u16", 1, None),
     ModbusPoint(5002, "daily_yield", "u16", 0.1, "kWh"),
     ModbusPoint(5003, "total_yield", "u32", 1, "kWh"),
@@ -303,6 +323,8 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
 # Derived from the mkaiser SHx YAML mapping (MIT license) with on-the-wire
 # addresses and low-word-first 32-bit decoding.
 SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # Serial number — 10 registers of ASCII (see SG-RS map).
+    ModbusPoint(4989, "inverter_serial", "string", 1, None, length=10),
     ModbusPoint(4999, "device_type_code", "u16", 1, None),
     ModbusPoint(5002, "daily_pv_gen_battery_discharge", "u16", 0.1, "kWh"),
     ModbusPoint(5003, "total_pv_gen_battery_discharge", "u32", 0.1, "kWh"),
@@ -375,6 +397,14 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(13040, "total_battery_charge", "u32", 0.1, "kWh"),
     ModbusPoint(13044, "daily_exported_energy", "u16", 0.1, "kWh", nan_value=NAN_U16),
     ModbusPoint(13045, "total_exported_energy", "u32", 0.1, "kWh", nan_value=NAN_U16),
+    # Firmware version strings (15 registers each, doc registers 13250 / 13265 /
+    # 13280). Per mkaiser these are supported on SH*T hybrids and MG hybrid
+    # models but not on the SH single-phase RS family; the decoder returns
+    # nothing when the register is empty / zero-padded, so entities go
+    # unavailable rather than showing garbage on unsupported models (#323).
+    ModbusPoint(13249, "inverter_firmware_version", "string", 1, None, length=15),
+    ModbusPoint(13264, "communication_module_firmware_version", "string", 1, None, length=15),
+    ModbusPoint(13279, "battery_firmware_version", "string", 1, None, length=15),
 )
 
 # Register maps keyed by inverter family.
@@ -602,6 +632,19 @@ MODBUS_ENUM_MAPS: dict[str, dict[int, str]] = {
 }
 
 
+# Point codes that identify the inverter / installation rather than measure state.
+# The sensor platform categorises them as Diagnostic so they don't clutter the
+# main dashboard (#323).
+LOCAL_IDENTITY_CODES: frozenset[str] = frozenset(
+    {
+        "inverter_serial",
+        "inverter_firmware_version",
+        "communication_module_firmware_version",
+        "battery_firmware_version",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # power_flow_status bitfield decode (#326)
 # ---------------------------------------------------------------------------
@@ -651,6 +694,19 @@ def decode_registers(
         offset = point.address - block_start
         if offset < 0 or offset + point.register_count > len(registers):
             continue
+        if point.data_type == "string":
+            text = _decode_string(registers, offset, point.length)
+            # Empty / all-NUL strings mean the register isn't populated on this
+            # firmware — surface nothing rather than an empty diagnostic sensor.
+            if not text:
+                continue
+            out[point.code] = {
+                "code": point.code,
+                "value": text,
+                "unit": None,
+                "source": "modbus",
+            }
+            continue
         raw = _combine(registers, offset, point.data_type)
         if point.nan_value is not None and raw == point.nan_value:
             continue
@@ -676,6 +732,25 @@ def _combine(registers: list[int], offset: int, data_type: str) -> int:
     if data_type in ("s16", "s32") and value >= (1 << (bits - 1)):
         value -= 1 << bits
     return value
+
+
+def _decode_string(registers: list[int], offset: int, length: int) -> str:
+    """Decode ``length`` consecutive registers as a big-endian ASCII string.
+
+    Sungrow packs two ASCII bytes per register with the high byte first
+    (register 0x5341 -> "SA"). Trailing NUL padding is stripped, and any embedded
+    control chars are dropped so a partially-populated field returns clean text.
+    Undecodable bytes are silently ignored — support snapshots need firmware/serial
+    values to *round-trip* even when a byte is corrupted by an intermediate proxy.
+    """
+    raw = bytearray()
+    for i in range(length):
+        reg = registers[offset + i] & 0xFFFF
+        raw.append((reg >> 8) & 0xFF)
+        raw.append(reg & 0xFF)
+    text = raw.decode("ascii", errors="ignore").rstrip("\x00").strip()
+    # Strip any remaining control chars (some firmware zero-pads mid-string).
+    return "".join(ch for ch in text if ch.isprintable() or ch.isspace()).strip()
 
 
 def block_bounds(points: tuple[ModbusPoint, ...]) -> tuple[int, int]:

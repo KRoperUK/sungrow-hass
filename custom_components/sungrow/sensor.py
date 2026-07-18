@@ -31,6 +31,7 @@ from .measure_points import (
     resolve_enum_value,
     resolve_name,
 )
+from .modbus_registers import LOCAL_IDENTITY_CODES
 
 # Sensors are read-only and updated in bulk by the coordinator, so no per-entity
 # write parallelism limit is needed.
@@ -45,6 +46,7 @@ _DIAGNOSTIC_CODES = (
     | frozenset(ESS_MPPT_DIAGNOSTIC_POINTS.values())
     | BATTERY_DIAGNOSTIC_CODES
     | frozenset(COMM_MODULE_POINTS.values())
+    | LOCAL_IDENTITY_CODES
 )
 
 # Sentinel unit: tariff sensors take their unit from the plant's currency at runtime.
@@ -355,8 +357,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         if point_code in _INTEGER_COUNT_CODES:
             self._attr_suggested_display_precision = 0
 
-        # Local Modbus device-type register is useful for map selection, not the main UI.
-        if point_code == "device_type_code":
+        # Local Modbus device-type register + identity strings (serial number,
+        # firmware versions) are useful for triage, not the main UI. Keep them
+        # under the device page's Diagnostic section.
+        if point_code == "device_type_code" or point_code in LOCAL_IDENTITY_CODES:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _current_point(self) -> dict[str, Any] | None:

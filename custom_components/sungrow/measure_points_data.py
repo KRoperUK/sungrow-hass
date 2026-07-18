@@ -826,6 +826,12 @@ CODE_ALIASES: dict[str, str] = {
     # instead of the fallback title-cased "Running State Raw" / "Device Type Code".
     "running_state_raw": "Inverter State",
     "device_type_code": "Device Model",
+    # Local Modbus identity strings (#323): pretty labels for the ASCII fields
+    # the inverter/comm-module/battery expose over Modbus.
+    "inverter_serial": "Serial Number",
+    "inverter_firmware_version": "Firmware Version",
+    "communication_module_firmware_version": "Communication Module Firmware",
+    "battery_firmware_version": "Battery Firmware Version",
     # Per-device diagnostic codes whose acronyms/initialisms the generic
     # title-caser would mangle ("Mppt1", "Wlan", "Afci", "Dc", "Id").
     "mppt1_voltage": "MPPT1 Voltage",
