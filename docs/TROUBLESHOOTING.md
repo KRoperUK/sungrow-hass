@@ -162,8 +162,9 @@ via the unofficial app/web API. If setup (or reauth) fails:
 - **Confirm the credentials** are exactly what works in the official app (no stray spaces).
 - If it worked before and suddenly fails, the unofficial API may have changed — the
   transport is experimental. The developer **Cloud-only** transport is the robust option.
-- This transport is **read-only** and surfaces plant-level data only; for dispatch/control
-  or per-device sensors, use the developer Cloud-only transport.
+- Dispatch (number/select) is available on this transport when the plant’s devices accept
+  parameter writes; battery-only controls still require an ESS/battery device. Prefer the
+  developer Cloud-only transport for the official OpenAPI path and fullest device metrics.
 
 ---
 
