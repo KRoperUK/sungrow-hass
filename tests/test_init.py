@@ -1025,7 +1025,7 @@ async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup
 
 
 async def test_setup_cloud_user_entry(hass: HomeAssistant):
-    """A cloud_user entry authenticates, discovers plants and sets up one coordinator (#268)."""
+    """A cloud_user entry authenticates, discovers plants, devices, and UserControl (#268/#271)."""
     from custom_components.sungrow.const import (
         CONF_GATEWAY,
         CONF_USER_ACCOUNT,
@@ -1048,13 +1048,59 @@ async def test_setup_cloud_user_entry(hass: HomeAssistant):
     client.async_get_plants = AsyncMock(return_value=[{"ps_id": 5, "ps_name": "Home"}])
     client.async_get_token = AsyncMock(return_value="T")
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "3200", "unit": "W"}})
+    client.async_get_devices = AsyncMock(
+        return_value=[
+            {
+                "uuid": "inv-1",
+                "device_type": 1,
+                "device_name": "Inverter",
+                "device_model_code": "SG3.6RS",
+                "device_sn": "SN1",
+            }
+        ]
+    )
 
-    with patch("custom_components.sungrow.UserAuth", return_value=client):
+    control = MagicMock()
+    control.async_check_update_support = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sungrow.UserAuth", return_value=client),
+        patch("custom_components.sungrow.UserControl", return_value=control),
+    ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
     data = entry.runtime_data
     assert len(data.coordinators) == 1
     assert data.coordinators[0].plant_id == "5"
-    # No dispatch/Control over the user-account API in Phase 2.
-    assert data.control is None
+    # Phase 5: UserControl is attached for dispatch (#271).
+    assert data.control is control
+    assert data.devices["5"][0]["uuid"] == "inv-1"
+    assert data.coordinators[0].dispatch_update_supported is True
+    # PV-only device list → battery-only controls gated off.
+    assert data.coordinators[0].has_battery is False
+    client.async_get_devices.assert_awaited()
+    control.async_check_update_support.assert_awaited()
+
+
+async def test_heartbeat_loop_uses_update_parameters_without_native_loop(hass: HomeAssistant):
+    """UserControl-style clients without heartbeat_loop still keep EMS alive (#271)."""
+    entry = MockConfigEntry(domain=DOMAIN, data={"tokens": {}})
+    entry.add_to_hass(hass)
+    # spec= so getattr(..., "heartbeat_loop", None) falls through to update_parameters path.
+    control = MagicMock(spec=["async_update_parameters"])
+    control.async_update_parameters = AsyncMock(return_value=[])
+    entry.runtime_data = SungrowData(coordinators=[], control=control, devices={})
+
+    await async_start_heartbeat(hass, entry, "plant-1", "dev-1", interval=1)
+    # Let the background task run one heartbeat write.
+    for _ in range(20):
+        if control.async_update_parameters.await_count:
+            break
+        await asyncio.sleep(0)
+    await async_stop_heartbeat(hass, entry, "plant-1")
+    await hass.async_block_till_done()
+
+    assert control.async_update_parameters.await_count >= 1
+    payload = control.async_update_parameters.await_args.args[1]
+    assert "external_ems_heartbeat" in payload

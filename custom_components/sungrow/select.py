@@ -19,7 +19,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import async_start_heartbeat, async_stop_heartbeat, build_device_info, select_dispatch_device
+from . import (
+    DispatchControl,
+    async_start_heartbeat,
+    async_stop_heartbeat,
+    build_device_info,
+    select_dispatch_device,
+)
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 
@@ -125,13 +131,15 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
 }
 
 
-def _build_selects(coordinator: SungrowPlantCoordinator, control: Control) -> list[SelectEntity]:
+def _build_selects(coordinator: SungrowPlantCoordinator, control: DispatchControl | None) -> list[SelectEntity]:
     """Build the dispatch select entities for a coordinator's target device.
 
     Returns an empty list when no dispatch-capable device is present. Reads the
     coordinator's live device list so a dispatchable device that appears after
     setup gets its controls at runtime (dynamic-devices).
     """
+    if control is None:
+        return []
     # Skip entirely if the device reported that it doesn't accept parameter writes.
     if not coordinator.dispatch_update_supported:
         return []
@@ -186,7 +194,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
     def __init__(
         self,
         coordinator: SungrowPlantCoordinator,
-        control: Control,
+        control: DispatchControl,
         device: dict[str, Any],
         param: str,
         meta: dict[str, Any],

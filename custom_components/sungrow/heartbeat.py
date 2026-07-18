@@ -96,6 +96,39 @@ def _on_heartbeat_done(
     )
 
 
+async def _heartbeat_loop(control: object, device_uuid: str, interval: int, stop_event: asyncio.Event) -> None:
+    """Run an EMS heartbeat loop on either OAuth ``Control`` or user ``UserControl``.
+
+    OAuth ``Control`` exposes ``heartbeat_loop``; ``UserControl`` (0.14+) shares the same
+    param write surface, so we drive param 10017 via ``async_update_parameters`` (#271).
+    """
+    loop = getattr(control, "heartbeat_loop", None)
+    if callable(loop):
+        await loop(device_uuid, interval, stop_event)
+        return
+
+    # UserControl (and any duck-typed client with async_update_parameters).
+    from pysolarcloud.control import Control
+
+    update = getattr(control, "async_update_parameters", None)
+    if not callable(update):
+        raise TypeError(f"control client has no heartbeat_loop or async_update_parameters: {type(control)!r}")
+
+    if not 1 <= interval <= 1000:
+        raise ValueError("heartbeat interval must be between 1 and 1000 seconds")
+    wire = Control.encode_parameter("external_ems_heartbeat", interval)
+    while not stop_event.is_set():
+        try:
+            await update(device_uuid, {"external_ems_heartbeat": wire})
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("EMS heartbeat failed for %s: %s", device_uuid, err)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except TimeoutError:
+            continue
+        return
+
+
 async def async_start_heartbeat(
     hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str, device_uuid: str, interval: int
 ) -> None:
@@ -112,7 +145,7 @@ async def async_start_heartbeat(
     # Tracked by the config entry so HA cancels it automatically on unload.
     task = entry.async_create_background_task(
         hass,
-        control.heartbeat_loop(device_uuid, interval, stop_event),
+        _heartbeat_loop(control, device_uuid, interval, stop_event),
         name=f"sungrow-heartbeat-{plant_id}",
     )
     # Surface an unexpected exit (the #231 silent-death bug) as a Repair. A requested
