@@ -178,7 +178,7 @@ class SungrowModbusClient:
 
     async def _read_input(self, address: int, count: int) -> list[int]:
         """Read a contiguous input-register block, reconnecting once on connection loss."""
-        return await self._transact_registers(
+        return await self._transact_read(
             "input",
             address,
             count,
@@ -188,7 +188,7 @@ class SungrowModbusClient:
     async def async_read_holding(self, address: int, count: int = 1) -> list[int]:
         """Read holding registers (FC3) for config/control probes and future #220 writes."""
         async with self._lock:
-            return await self._transact_registers(
+            return await self._transact_read(
                 "holding",
                 address,
                 count,
@@ -208,16 +208,37 @@ class SungrowModbusClient:
             return await self._client.write_register(address, int(value), device_id=self.unit)
 
         async with self._lock:
-            await self._transact_registers("holding_write", address, 1, _do_write, expect_registers=False)
+            await self._transact_write("holding_write", address, _do_write)
 
-    async def _transact_registers(
+    async def _transact_read(
         self,
         kind: str,
         address: int,
         count: int,
         operation: Callable[[], Awaitable[Any]],
-        *,
-        expect_registers: bool = True,
+    ) -> list[int]:
+        """Run a register read with one reconnect+retry; return raw 16-bit values."""
+        result = await self._transact(kind, address, count, operation)
+        registers = getattr(result, "registers", None)
+        if registers is None:
+            raise SungrowModbusError(f"Modbus {kind} at {address} returned no registers: {result}")
+        return [int(r) for r in registers]
+
+    async def _transact_write(
+        self,
+        kind: str,
+        address: int,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> None:
+        """Run a single-register write with one reconnect+retry."""
+        await self._transact(kind, address, 1, operation)
+
+    async def _transact(
+        self,
+        kind: str,
+        address: int,
+        count: int,
+        operation: Callable[[], Awaitable[Any]],
     ) -> Any:
         """Run a Modbus operation with one reconnect+retry on connection loss.
 
@@ -242,8 +263,6 @@ class SungrowModbusClient:
                         continue
                     self._recreate_client()
                     raise last_error
-                if expect_registers:
-                    return list(result.registers)
                 return result
             except SungrowModbusError:
                 raise
