@@ -216,6 +216,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # Set once the entity is removed (e.g. an entry reload) so an already-fired
         # auto-revert task doesn't act on the plant after this instance is gone (#157).
         self._removed = False
+        # Throttle counter for the periodic EMS-mode read-back (#286). Only the battery-
+        # mode select reads back; other selects leave this at 0.
+        self._readback_counter: int = 0
 
     def _normalize_restored_option(self, state: str) -> str | None:
         """Map a restored state to a current option (including pre-#255 legacy names)."""
@@ -281,6 +284,59 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             if isinstance(registry, dict):
                 registry.pop(self.entity_id, None)
         await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle a coordinator update — includes throttled EMS-mode read-back (#286).
+
+        Every 3rd coordinator update (~15 min at default 5-min poll), the battery-mode
+        select reads the inverter's actual EMS mode back. If the portal or an external
+        automation changed the mode, the entity reflects the device truth instead of the
+        stale assumed state.
+        """
+        super()._handle_coordinator_update()
+        if self.param != BATTERY_MODE_PARAM:
+            return
+        self._readback_counter += 1
+        if self._readback_counter < 3:
+            return
+        self._readback_counter = 0
+        self.hass.async_create_task(self._async_dispatch_readback())
+
+    async def _async_dispatch_readback(self) -> None:
+        """Read the inverter's EMS mode and reconcile with the assumed state (#286)."""
+        if self._removed:
+            return
+        still_self = await self._read_still_self_consumption()
+        if still_self is None:
+            return  # Unknown — don't change anything.
+        current = self._attr_current_option
+        if still_self and current in BATTERY_MODE_FORCED:
+            # The inverter is in Self-consumption but we think it's forced — the portal
+            # or a timeout reverted it externally. Sync the entity state.
+            _LOGGER.info(
+                "EMS read-back for %s shows Self-consumption; updating from assumed %s",
+                self.device_uuid,
+                current,
+            )
+            self._attr_current_option = BATTERY_MODE_SELF_CONSUMPTION
+            self._cancel_revert()
+            entry = self.coordinator.config_entry
+            if entry is not None:
+                await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
+            self._clear_not_actuated_issue()
+            self.async_write_ha_state()
+        elif not still_self and current in BATTERY_MODE_SAFE:
+            # The inverter is in a forced/compulsory mode but we think it's safe — an
+            # external tool forced it. We can't know which forced option, so just note
+            # it in the log. The entity stays at its current option (Self-consumption/Stop)
+            # since we don't know if it's charge or discharge.
+            _LOGGER.debug(
+                "EMS read-back for %s shows Forced mode but entity shows %s; "
+                "an external tool may have changed the mode",
+                self.device_uuid,
+                current,
+            )
 
     @staticmethod
     def _restore_revert_deadline(raw: Any) -> float | None:
