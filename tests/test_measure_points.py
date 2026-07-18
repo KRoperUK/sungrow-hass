@@ -126,7 +126,10 @@ def test_device_type_code_enum_maps_known_models():
     """Device-type codes resolve to model-family display names."""
     assert mp.resolve_enum_value("device_type_code", 3355) == "SH10RS"
     assert mp.resolve_enum_value("device_type_code", 3603) == "SH10RT-20"
-    assert mp.resolve_enum_value("device_type_code", 9732) == "SG-RS string inverter"
+    assert mp.resolve_enum_value("device_type_code", 9732) == "SG3.6RS"
+    assert mp.resolve_enum_value("device_type_code", 9737) == "SG10RS"
+    assert mp.resolve_enum_value("device_type_code", 9267) == "SG10RT"
+    assert mp.resolve_enum_value("device_type_code", 3370) == "MG10RL"
 
 
 def test_device_type_code_enum_returns_none_for_unknown_code():

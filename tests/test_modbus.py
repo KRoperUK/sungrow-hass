@@ -253,7 +253,16 @@ def test_family_for_device_type_code_maps_known_codes():
     # Spot-check SH hybrids from the mkaiser device-type map (#219).
     assert family_for_device_type_code(0x0E03) == "sh_rt"  # SH10RT
     assert family_for_device_type_code(0x0D0F) == "sh_rs"  # SH5.0RS
-    assert family_for_device_type_code(9732) == "sg_rs"
+    # SG family — every documented SG-RS / SG-RT variant now resolves (#330).
+    assert family_for_device_type_code(0x2603) == "sg_rs"  # SG3.0RS
+    assert family_for_device_type_code(0x2604) == "sg_rs"  # SG3.6RS
+    assert family_for_device_type_code(0x2609) == "sg_rs"  # SG10RS
+    assert family_for_device_type_code(0x2430) == "sg_rt"  # SG5.0RT
+    assert family_for_device_type_code(0x2433) == "sg_rt"  # SG10RT
+    assert family_for_device_type_code(0x2437) == "sg_rt"  # SG20RT
+    # MG hybrids fill out the small-hybrid family (#330).
+    assert family_for_device_type_code(0x0D29) == "sh_rs"  # MG8RL
+    assert family_for_device_type_code(0x0D2A) == "sh_rs"  # MG10RL
 
 
 def test_family_for_device_type_code_returns_none_for_unknown():

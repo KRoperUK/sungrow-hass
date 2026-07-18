@@ -290,8 +290,28 @@ REGISTER_MAPS: dict[str, tuple[ModbusPoint, ...]] = {
 # SH codes from the mkaiser SHx YAML (MIT) device-type map; SG-RS validated live.
 # Unknown codes fall back to the configured model string / model_capabilities.
 DEVICE_TYPE_CODE_TO_FAMILY: dict[int, str] = {
-    # SG-RS string inverters (single-phase, e.g. SG3.6RS)
-    9732: "sg_rs",  # 0x2604
+    # SG-RS single-phase string inverters (0x2603..0x2609). Codes for the full
+    # SG-RS residential lineup cross-referenced against Sungrow datasheets in
+    # the TCzerny/ha-modbus-manager templates (#330).
+    9731: "sg_rs",  # SG3.0RS (0x2603)
+    9732: "sg_rs",  # SG3.6RS (0x2604) — validated live
+    9733: "sg_rs",  # SG4.0RS (0x2605)
+    9734: "sg_rs",  # SG5.0RS (0x2606)
+    9735: "sg_rs",  # SG6.0RS (0x2607)
+    9736: "sg_rs",  # SG8.0RS (0x2608)
+    9737: "sg_rs",  # SG10RS  (0x2609)
+    # SG-RT three-phase string inverters (0x2430..0x243E). Reuse the sg_rt map
+    # which shares the SG-RS low-block layout (#219).
+    9264: "sg_rt",  # SG5.0RT  (0x2430)
+    9265: "sg_rt",  # SG6.0RT  (0x2431)
+    9266: "sg_rt",  # SG8.0RT  (0x2432)
+    9267: "sg_rt",  # SG10RT   (0x2433)
+    9268: "sg_rt",  # SG12RT   (0x2434)
+    9269: "sg_rt",  # SG15RT   (0x2435)
+    9271: "sg_rt",  # SG20RT   (0x2437)
+    9276: "sg_rt",  # SG7.0RT  (0x243C)
+    9277: "sg_rt",  # SG3.0RT  (0x243D)
+    9278: "sg_rt",  # SG4.0RT  (0x243E)
     # SH single-phase hybrid (0x0Dxx) — mkaiser device-type map
     3331: "sh_rs",  # SH5K-V13 (0x0D03)
     3334: "sh_rs",  # SH3K6 (0x0D06)
@@ -309,6 +329,8 @@ DEVICE_TYPE_CODE_TO_FAMILY: dict[int, str] = {
     3355: "sh_rs",  # SH10RS (0x0D1B)
     3367: "sh_rs",  # MG5RL (0x0D27)
     3368: "sh_rs",  # MG6RL (0x0D28)
+    3369: "sh_rs",  # MG8RL (0x0D29)
+    3370: "sh_rs",  # MG10RL (0x0D2A)
     # SH three-phase hybrid (0x0Exx)
     3584: "sh_rt",  # SH5.0RT (0x0E00)
     3585: "sh_rt",  # SH6.0RT (0x0E01)
@@ -397,15 +419,31 @@ RUNNING_STATE_NAMES: dict[int, str] = {
 }
 
 # Device model name (wire register 4999, ``device_type_code``).
-# SH codes from the mkaiser SHx YAML ``sg_device_type`` template map (MIT).
-# The SG string code 9732 (0x2604) is shared across the SG-RS single-phase family
-# (SG3.0RS / SG3.6RS / SG5.0RS all report the same code in field reports); use
-# the generic family name so the sensor's option list doesn't imply a specific
-# wattage that can't be verified from Modbus alone.
+# SH codes from mkaiser's SHx YAML ``sg_device_type`` template map; SG-RS and
+# SG-RT codes and specific model names cross-referenced against the Sungrow
+# datasheets cited inline in TCzerny/ha-modbus-manager's SG dynamic template
+# (#330). Each SG-RS variant reports a distinct code — the previous
+# family-generic name for 9732 was wrong.
 DEVICE_MODEL_NAMES: dict[int, str] = {
-    # SG string inverters — Sungrow does not distinguish specific SG-RS variants
-    # in this register, so the option is family-generic.
-    9732: "SG-RS string inverter",  # 0x2604
+    # SG-RS single-phase string inverters (0x2603..0x2609)
+    9731: "SG3.0RS",
+    9732: "SG3.6RS",
+    9733: "SG4.0RS",
+    9734: "SG5.0RS",
+    9735: "SG6.0RS",
+    9736: "SG8.0RS",
+    9737: "SG10RS",
+    # SG-RT three-phase string inverters (0x2430..0x243E)
+    9264: "SG5.0RT",
+    9265: "SG6.0RT",
+    9266: "SG8.0RT",
+    9267: "SG10RT",
+    9268: "SG12RT",
+    9269: "SG15RT",
+    9271: "SG20RT",
+    9276: "SG7.0RT",
+    9277: "SG3.0RT",
+    9278: "SG4.0RT",
     # SH single-phase hybrid (0x0Dxx)
     3331: "SH5K-V13",
     3334: "SH3K6",
@@ -423,6 +461,8 @@ DEVICE_MODEL_NAMES: dict[int, str] = {
     3355: "SH10RS",
     3367: "MG5RL",
     3368: "MG6RL",
+    3369: "MG8RL",
+    3370: "MG10RL",
     # SH three-phase hybrid (0x0Exx)
     3584: "SH5.0RT",
     3585: "SH6.0RT",
