@@ -2,6 +2,10 @@
 
 Thanks for your interest in improving the Sungrow iSolarCloud integration!
 
+By participating in this project, you agree to abide by our
+[Code of Conduct](CODE_OF_CONDUCT.md). Please report unacceptable behavior
+privately to the maintainer as described there — do not open a public issue.
+
 ## Development setup
 
 This project targets Python 3.13 and Home Assistant's custom-component test
