@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
@@ -176,24 +177,63 @@ class SungrowModbusClient:
         self._client = self._new_tcp_client()
 
     async def _read_input(self, address: int, count: int) -> list[int]:
-        """Read a contiguous input-register block, reconnecting once on connection loss.
+        """Read a contiguous input-register block, reconnecting once on connection loss."""
+        return await self._transact_registers(
+            "input",
+            address,
+            count,
+            lambda: self._client.read_input_registers(address, count=count, device_id=self.unit),
+        )
+
+    async def async_read_holding(self, address: int, count: int = 1) -> list[int]:
+        """Read holding registers (FC3) for config/control probes and future #220 writes."""
+        async with self._lock:
+            return await self._transact_registers(
+                "holding",
+                address,
+                count,
+                lambda: self._client.read_holding_registers(address, count=count, device_id=self.unit),
+            )
+
+    async def async_write_holding(self, address: int, value: int) -> None:
+        """Write a single holding register (FC6).
+
+        Callers must enforce family maps and the write denylist; this method only
+        performs the transport. Serialised with the same lock as reads.
+        """
+        if not 0 <= int(value) <= 0xFFFF:
+            raise SungrowModbusError(f"Holding write value out of U16 range: {value}")
+
+        async def _do_write() -> Any:
+            return await self._client.write_register(address, int(value), device_id=self.unit)
+
+        async with self._lock:
+            await self._transact_registers("holding_write", address, 1, _do_write, expect_registers=False)
+
+    async def _transact_registers(
+        self,
+        kind: str,
+        address: int,
+        count: int,
+        operation: Callable[[], Awaitable[Any]],
+        *,
+        expect_registers: bool = True,
+    ) -> Any:
+        """Run a Modbus operation with one reconnect+retry on connection loss.
 
         WiNet-S sockets drop after idle, options reload, or a mid-poll error. A stale
         ``connected`` flag or a closed transport that never recovers from ``connect()``
-        produces ``ConnectionException: Not connected[...]`` on every subsequent setup
-        retry until the client is recreated.
+        produces ``ConnectionException: Not connected[...]`` until the client is recreated.
         """
         last_error: SungrowModbusError | None = None
         for attempt in range(_READ_ATTEMPTS):
             try:
                 await self._async_ensure_connected()
-                result = await self._client.read_input_registers(address, count=count, device_id=self.unit)
-                if result.isError():
-                    msg = f"Modbus read at {address} (count {count}) failed: {result}"
+                result = await operation()
+                if hasattr(result, "isError") and result.isError():
+                    msg = f"Modbus {kind} at {address} (count {count}) failed: {result}"
                     # Illegal address is permanent for this block — do not retry.
                     if _is_exception_code(str(result), 2):
-                        # Drop the socket so a later block starts clean, but do not
-                        # burn a reconnect attempt on a firmware map gap.
                         self._recreate_client()
                         raise SungrowModbusError(msg)
                     last_error = SungrowModbusError(msg)
@@ -202,11 +242,13 @@ class SungrowModbusClient:
                         continue
                     self._recreate_client()
                     raise last_error
-                return list(result.registers)
+                if expect_registers:
+                    return list(result.registers)
+                return result
             except SungrowModbusError:
                 raise
             except (ConnectionException, ModbusException, OSError, TimeoutError) as err:
-                last_error = SungrowModbusError(f"Modbus read at {address} (count {count}) failed: {err}")
+                last_error = SungrowModbusError(f"Modbus {kind} at {address} (count {count}) failed: {err}")
                 if attempt + 1 < _READ_ATTEMPTS:
                     _LOGGER.debug(
                         "Modbus connection error on %s:%s (attempt %s); reconnecting: %s",
@@ -220,9 +262,8 @@ class SungrowModbusClient:
                 self._recreate_client()
                 raise last_error from err
             except Exception as err:  # pylint: disable=broad-except
-                # Unexpected pymodbus failures: still drop the socket so the next poll heals.
                 self._recreate_client()
-                raise SungrowModbusError(f"Modbus read at {address} (count {count}) failed: {err}") from err
+                raise SungrowModbusError(f"Modbus {kind} at {address} (count {count}) failed: {err}") from err
         assert last_error is not None
         raise last_error
 
