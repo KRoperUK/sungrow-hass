@@ -98,13 +98,123 @@ def test_block_partitions_keeps_nearby_points_together():
     assert blocks == [(10, 7)]
 
 
-def test_sh_rt_map_partitions_around_large_gaps():
-    """The SH-RT map is split around gaps > 256 registers."""
+def test_sh_rt_map_partitions_stay_under_modbus_count_cap():
+    """The SH-RT map partitions into reads small enough for a single Modbus request (#318).
+
+    Before this fix, points 4999..5241 collapsed into a single 243-register block
+    that pymodbus refuses to send (spec cap = 125). Every block must now fit and
+    the low PV/mppt/AC section must still start at register 4999.
+    """
     blocks = block_partitions(SH_RT_INPUT_POINTS)
-    assert len(blocks) == 3
+    # Every read must be within the Modbus function-4 protocol limit.
+    assert blocks, "expected at least one block"
+    assert all(count <= 125 for _, count in blocks), blocks
+    # Low PV/AC block still starts at the device-type register.
     assert blocks[0][0] == 4999
-    assert blocks[1][0] == 5600
-    assert blocks[2][0] == 12999
+    # Full range still covered: last block must reach the high hybrid registers.
+    assert max(start + count for start, count in blocks) >= 13046
+
+
+def test_block_partitions_enforces_max_block_size():
+    """A cluster larger than ``max_block_size`` is split into multiple reads."""
+    # 200 contiguous u16 points would be one block by gap alone, but must be
+    # split when ``max_block_size`` is enforced.
+    points = tuple(ModbusPoint(1000 + i, f"p{i}", "u16", 1) for i in range(200))
+    blocks = block_partitions(points, max_block_size=100)
+    assert len(blocks) >= 2
+    assert all(count <= 100 for _, count in blocks)
+    # No point is dropped: registers [1000, 1200) are all covered.
+    covered = {addr for start, count in blocks for addr in range(start, start + count)}
+    assert covered == {1000 + i for i in range(200)}
+
+
+def test_block_partitions_clamps_to_modbus_protocol_max():
+    """``max_block_size`` cannot exceed the 125-register Modbus function-4 cap."""
+    # Ask for a huge cap; the function must still keep every block <= 125.
+    points = tuple(ModbusPoint(1000 + i, f"p{i}", "u16", 1) for i in range(300))
+    blocks = block_partitions(points, max_block_size=10_000)
+    assert all(count <= 125 for _, count in blocks), blocks
+
+
+# ---------------------------------------------------------------------------
+# Register-map safety (regression guard for #318)
+# ---------------------------------------------------------------------------
+# These tests are parametrized over every family in ``REGISTER_MAPS`` so a new
+# map added later cannot silently reintroduce the 243-register block that
+# pymodbus refuses to send. If someone extends SH-RT with points that widen the
+# 4999..5241 cluster past 125 again, the guard here trips before it ever hits
+# a user's WiNet-S.
+
+
+@pytest.mark.parametrize("family", sorted(REGISTER_MAPS.keys()))
+def test_every_register_map_partitions_within_modbus_cap(family):
+    """Every family's map splits into reads that fit a single Modbus request (#318)."""
+    points = REGISTER_MAPS[family]
+    blocks = block_partitions(points)
+    for start, count in blocks:
+        assert 1 <= count <= 125, f"{family}: block {(start, count)} exceeds Modbus cap"
+
+
+@pytest.mark.parametrize("family", sorted(REGISTER_MAPS.keys()))
+def test_every_register_map_point_is_covered_by_a_block(family):
+    """Partitioning never drops a point: each address range sits inside one block (#318)."""
+    points = REGISTER_MAPS[family]
+    blocks = block_partitions(points)
+    for point in points:
+        point_end = point.address + point.register_count
+        covered = any(start <= point.address and point_end <= start + count for start, count in blocks)
+        assert covered, f"{family}: point {point.code}@{point.address} not covered by any block"
+
+
+def _capped_modbus_client_cls(*, cap: int = 125):
+    """Fake pymodbus client that mirrors the real 125-register-per-request cap.
+
+    Any read whose ``count`` exceeds ``cap`` is returned as an error response with
+    the exact message shape pymodbus surfaces (``1 < count N < 125 !``), so the
+    end-to-end test reproduces the failure users hit in #318 rather than silently
+    passing when a map explodes.
+    """
+    inner = MagicMock()
+    inner.connected = True
+    inner.connect = AsyncMock(return_value=True)
+    inner.close = MagicMock()
+    inner.requested = []
+
+    async def _read(address, count, device_id):
+        inner.requested.append((address, count))
+        result = MagicMock()
+        if count > cap:
+            result.isError.return_value = True
+            result.__str__ = lambda _s: f"1 < count {count} < {cap} !"
+        else:
+            result.isError.return_value = False
+            result.registers = [0] * count
+        return result
+
+    inner.read_input_registers = AsyncMock(side_effect=_read)
+    cls = MagicMock(return_value=inner)
+    return cls, inner
+
+
+@pytest.mark.parametrize("family", sorted(REGISTER_MAPS.keys()))
+async def test_read_realtime_never_asks_pymodbus_for_more_than_the_cap(family):
+    """End-to-end: reading each family never triggers pymodbus's 125-register rejection (#318).
+
+    This is the regression that would have caught the SH10RS crash before release:
+    on the buggy code path the SH-RT/SH-RS map produced a 243-register read that
+    a cap-enforcing fake pymodbus rejects with ``1 < count 243 < 125 !`` — exactly
+    the error users reported.
+    """
+    cls, inner = _capped_modbus_client_cls(cap=125)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", model=family)
+        _skip_family_detect(client)
+        # Should not raise: every block read must fit under 125 registers.
+        await client.async_read_realtime()
+    assert inner.requested, f"{family}: expected at least one read"
+    assert all(count <= 125 for _, count in inner.requested), (
+        f"{family}: pymodbus would reject reads {[c for _, c in inner.requested if c > 125]}"
+    )
 
 
 def test_sg_rs_low_block_decodes_a_realistic_frame():
