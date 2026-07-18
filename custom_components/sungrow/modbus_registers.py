@@ -42,6 +42,11 @@ class ModbusPoint:
     (e.g. 0xFFFF for an MPPT that the inverter does not have). When the raw value
     equals this sentinel the point is omitted, so unsupported registers do not
     surface as bogus sensors.
+
+    ``omit_zero`` drops a raw zero when the firmware reports 0 instead of the NAN
+    sentinel for an absent channel (e.g. phase B/C voltage and MPPT3 on SG3.6RS).
+    Do not set this on points where zero is a legitimate night-time reading with a
+    live sibling channel (e.g. MPPT1 current at 0 A while voltage is non-zero).
     """
 
     address: int
@@ -50,6 +55,7 @@ class ModbusPoint:
     scale: float
     unit: str | None = None
     nan_value: int | None = None
+    omit_zero: bool = False
 
     @property
     def register_count(self) -> int:
@@ -71,13 +77,15 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5011, "mppt1_current", "u16", 0.1, "A"),
     ModbusPoint(5012, "mppt2_voltage", "u16", 0.1, "V"),
     ModbusPoint(5013, "mppt2_current", "u16", 0.1, "A"),
-    # MPPT3 present on some multi-tracker string inverters; NAN when unsupported (#219).
-    ModbusPoint(5014, "mppt3_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
-    ModbusPoint(5015, "mppt3_current", "u16", 0.1, "A", nan_value=NAN_U16),
+    # MPPT3 present on some multi-tracker string inverters; omit when firmware
+    # returns 0 / 0xFFFF on 2-tracker models such as SG3.6RS.
+    ModbusPoint(5014, "mppt3_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
+    ModbusPoint(5015, "mppt3_current", "u16", 0.1, "A", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5016, "total_dc_power", "u32", 1, "W"),
     ModbusPoint(5018, "phase_a_voltage", "u16", 0.1, "V"),
-    ModbusPoint(5019, "phase_b_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
-    ModbusPoint(5020, "phase_c_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
+    # Single-phase inverters often report B/C as 0 rather than 0xFFFF.
+    ModbusPoint(5019, "phase_b_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
+    ModbusPoint(5020, "phase_c_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5030, "total_active_power", "s32", 1, "W"),
     ModbusPoint(5032, "reactive_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5034, "power_factor", "s16", 0.001, None, nan_value=NAN_S16),
@@ -96,18 +104,18 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5011, "mppt1_current", "u16", 0.1, "A"),
     ModbusPoint(5012, "mppt2_voltage", "u16", 0.1, "V"),
     ModbusPoint(5013, "mppt2_current", "u16", 0.1, "A"),
-    ModbusPoint(5014, "mppt3_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
-    ModbusPoint(5015, "mppt3_current", "u16", 0.1, "A", nan_value=NAN_U16),
+    ModbusPoint(5014, "mppt3_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
+    ModbusPoint(5015, "mppt3_current", "u16", 0.1, "A", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5016, "total_dc_power", "u32", 1, "W"),
     ModbusPoint(5018, "phase_a_voltage", "u16", 0.1, "V"),
-    ModbusPoint(5019, "phase_b_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
-    ModbusPoint(5020, "phase_c_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
+    ModbusPoint(5019, "phase_b_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
+    ModbusPoint(5020, "phase_c_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5030, "total_active_power", "s32", 1, "W"),
     ModbusPoint(5032, "reactive_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5034, "power_factor", "s16", 0.001, None, nan_value=NAN_S16),
     ModbusPoint(5035, "grid_frequency", "u16", 0.1, "Hz"),
-    ModbusPoint(5114, "mppt4_voltage", "u16", 0.1, "V", nan_value=NAN_U16),
-    ModbusPoint(5115, "mppt4_current", "u16", 0.1, "A", nan_value=NAN_U16),
+    ModbusPoint(5114, "mppt4_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
+    ModbusPoint(5115, "mppt4_current", "u16", 0.1, "A", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5213, "battery_power", "s32", 1, "W", nan_value=NAN_S32),
     # Preferred grid-frequency register on hybrids (mkaiser/SHx scale 0.01 Hz).
     ModbusPoint(5241, "grid_frequency", "u16", 0.01, "Hz"),
@@ -247,6 +255,8 @@ def decode_registers(
             continue
         raw = _combine(registers, offset, point.data_type)
         if point.nan_value is not None and raw == point.nan_value:
+            continue
+        if point.omit_zero and raw == 0:
             continue
         out[point.code] = {
             "code": point.code,

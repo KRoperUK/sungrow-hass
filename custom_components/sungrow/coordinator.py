@@ -274,6 +274,21 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             model=model,
         )
 
+    def close_modbus(self) -> None:
+        """Release the WiNet-S Modbus TCP session (unload or failed setup).
+
+        WiNet-S typically accepts only one concurrent client. Leaving a socket open
+        after options reload / failed first_refresh causes every subsequent setup to
+        fail with connection errors until HA or the dongle is restarted.
+        """
+        client = self._modbus_client
+        if client is None:
+            return
+        self._modbus_client = None
+        close = getattr(client, "close", None)
+        if close is not None:
+            close()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
         # Cloud-free entries have no Plants service: user-account (app/web) or Modbus.

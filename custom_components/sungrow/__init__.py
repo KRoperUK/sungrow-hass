@@ -272,7 +272,13 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
     coordinator.via_plant_id = via_plant_id
     coordinator.local_configuration_url = winet_url
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        # Release the WiNet-S socket before HA retries setup; otherwise orphan clients
+        # exhaust the dongle's single-connection slot and reload never recovers.
+        coordinator.close_modbus()
+        raise
 
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={serial: [inverter]})
     # Local Modbus sensors now live on the single inverter device (which is nested under
@@ -570,6 +576,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
         for heartbeat in list(heartbeats.values()):
             await _stop_heartbeat(heartbeat)
         heartbeats.clear()
+        # Free the WiNet-S Modbus TCP slot so options reload / reconfigure can reconnect.
+        for coordinator in entry.runtime_data.coordinators:
+            close_modbus = getattr(coordinator, "close_modbus", None)
+            if close_modbus is not None:
+                close_modbus()
     return unloaded
 
 

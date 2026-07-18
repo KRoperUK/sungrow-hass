@@ -11,10 +11,12 @@ sources feed the same entities.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.exceptions import ConnectionException, ModbusException
 
 from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
@@ -32,6 +34,8 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_PORT = 502
 DEFAULT_UNIT = 1
 CONNECT_TIMEOUT = 5
+# One reconnect+retry after a dropped WiNet-S socket (common after options reload).
+_READ_ATTEMPTS = 2
 
 
 class SungrowModbusError(Exception):
@@ -54,7 +58,7 @@ class SungrowModbusClient:
         self.port = port
         self.unit = unit
         self.model = model
-        self._client = AsyncModbusTcpClient(host, port=port, timeout=CONNECT_TIMEOUT)
+        self._client = self._new_tcp_client()
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
         self._family_detected = False
@@ -63,6 +67,9 @@ class SungrowModbusClient:
             "skipped_blocks": [],
             "last_error": None,
         }
+
+    def _new_tcp_client(self) -> AsyncModbusTcpClient:
+        return AsyncModbusTcpClient(self.host, port=self.port, timeout=CONNECT_TIMEOUT)
 
     async def async_read_realtime(self) -> dict[str, dict[str, Any]]:
         """Read and decode the model's realtime input registers.
@@ -144,23 +151,107 @@ class SungrowModbusClient:
             _LOGGER.debug("Model string %s resolved to Modbus family %s", configured, resolved.value)
             self.model = resolved.value
 
-    async def _read_input(self, address: int, count: int) -> list[int]:
-        """Read a contiguous input-register block, connecting/reconnecting as needed."""
-        if not self._client.connected and not await self._client.connect():
+    async def _async_ensure_connected(self) -> None:
+        """Connect if needed; recreate the TCP client when a prior session is dead."""
+        if self._client.connected:
+            return
+        if await self._client.connect():
+            return
+        # pymodbus can leave a closed client in a state where connect() never recovers;
+        # drop it and open a fresh socket (observed after options reload / diag dump).
+        _LOGGER.debug("Modbus connect failed for %s:%s; recreating client", self.host, self.port)
+        self._recreate_client()
+        if not await self._client.connect():
             raise SungrowModbusError(f"Could not connect to {self.host}:{self.port}")
-        result = await self._client.read_input_registers(address, count=count, device_id=self.unit)
-        if result.isError():
-            # Drop the connection so the next read reconnects cleanly.
+
+    def _recreate_client(self) -> None:
+        """Close the socket and replace the pymodbus client.
+
+        Always construct a new client: after ``close()`` some pymodbus builds still report
+        ``connected=True``, which would skip reconnect forever and leave setup stuck on
+        ``Not connected`` after options reload (e.g. toggling the daily-yield diagnostic).
+        """
+        with contextlib.suppress(Exception):
             self._client.close()
-            raise SungrowModbusError(f"Modbus read at {address} (count {count}) failed: {result}")
-        return list(result.registers)
+        self._client = self._new_tcp_client()
+
+    async def _read_input(self, address: int, count: int) -> list[int]:
+        """Read a contiguous input-register block, reconnecting once on connection loss.
+
+        WiNet-S sockets drop after idle, options reload, or a mid-poll error. A stale
+        ``connected`` flag or a closed transport that never recovers from ``connect()``
+        produces ``ConnectionException: Not connected[...]`` on every subsequent setup
+        retry until the client is recreated.
+        """
+        last_error: SungrowModbusError | None = None
+        for attempt in range(_READ_ATTEMPTS):
+            try:
+                await self._async_ensure_connected()
+                result = await self._client.read_input_registers(address, count=count, device_id=self.unit)
+                if result.isError():
+                    msg = f"Modbus read at {address} (count {count}) failed: {result}"
+                    # Illegal address is permanent for this block — do not retry.
+                    if _is_exception_code(str(result), 2):
+                        # Drop the socket so a later block starts clean, but do not
+                        # burn a reconnect attempt on a firmware map gap.
+                        self._recreate_client()
+                        raise SungrowModbusError(msg)
+                    last_error = SungrowModbusError(msg)
+                    if attempt + 1 < _READ_ATTEMPTS and _is_connection_error(str(result)):
+                        self._recreate_client()
+                        continue
+                    self._recreate_client()
+                    raise last_error
+                return list(result.registers)
+            except SungrowModbusError:
+                raise
+            except (ConnectionException, ModbusException, OSError, TimeoutError) as err:
+                last_error = SungrowModbusError(f"Modbus read at {address} (count {count}) failed: {err}")
+                if attempt + 1 < _READ_ATTEMPTS:
+                    _LOGGER.debug(
+                        "Modbus connection error on %s:%s (attempt %s); reconnecting: %s",
+                        self.host,
+                        self.port,
+                        attempt + 1,
+                        err,
+                    )
+                    self._recreate_client()
+                    continue
+                self._recreate_client()
+                raise last_error from err
+            except Exception as err:  # pylint: disable=broad-except
+                # Unexpected pymodbus failures: still drop the socket so the next poll heals.
+                self._recreate_client()
+                raise SungrowModbusError(f"Modbus read at {address} (count {count}) failed: {err}") from err
+        assert last_error is not None
+        raise last_error
 
     def close(self) -> None:
-        """Close the underlying connection."""
-        self._client.close()
+        """Close the underlying connection (entry unload / failed setup cleanup)."""
+        self._recreate_client()
+
+
+def _is_exception_code(message: str, code: int) -> bool:
+    return f"exception_code={code}" in message
 
 
 def _is_unsupported_address(err: SungrowModbusError) -> bool:
     """Return True when ``err`` is a Modbus 'Illegal Data Address' exception."""
-    # pymodbus renders ExceptionResponse with exception_code=2 in its repr.
-    return "exception_code=2" in str(err)
+    return _is_exception_code(str(err), 2)
+
+
+def _is_connection_error(message: str) -> bool:
+    """Return True when a failure looks like a dropped TCP session."""
+    lower = message.lower()
+    return any(
+        token in lower
+        for token in (
+            "not connected",
+            "connection",
+            "broken pipe",
+            "connection reset",
+            "timed out",
+            "timeout",
+            "eof",
+        )
+    )
