@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -264,7 +265,9 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "")
     winet_url = f"http://{host}" if host else None
     cloud_plant_id = find_related_cloud_plant_id(hass, serial)
-    via_plant_id = cloud_plant_id or serial
+    # Only nest under a *real* cloud plant device. Falling back to ``serial`` invented a
+    # via_device parent that does not exist and trips HA 2025.12 warnings (live SG3.6RS).
+    via_plant_id = cloud_plant_id
 
     # One inverter device. Distinct identifiers so the plant and inverter don't collide.
     inverter = {
@@ -333,7 +336,16 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         if hass.is_running:
             entry.async_on_unload(async_call_later(hass, 5, _async_recheck_nesting))
         else:
-            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_recheck_nesting))
+            # listen_once auto-removes after fire; wrap so unload after start does not
+            # raise "Unable to remove unknown job listener" (seen on dell-serve reloads).
+            remove = hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_recheck_nesting)
+
+            @callback
+            def _cancel_recheck() -> None:
+                with contextlib.suppress(ValueError, KeyError, TypeError):
+                    remove()
+
+            entry.async_on_unload(_cancel_recheck)
 
     return True
 

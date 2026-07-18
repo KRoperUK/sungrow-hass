@@ -217,12 +217,13 @@ class SungrowModbusConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordi
         super().__init__(coordinator)
         self.device_uuid = str(device["uuid"])
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_online"
+        local_url = getattr(coordinator, "local_configuration_url", None)
         self._attr_device_info = build_device_info(
             device,
             coordinator.plant_id,
             fallback_name=coordinator.plant_name,
             via_plant_id=getattr(coordinator, "via_plant_id", None),
-            configuration_url=getattr(coordinator, "local_configuration_url", None),
+            configuration_url=local_url if isinstance(local_url, str) else None,
         )
 
     @property
