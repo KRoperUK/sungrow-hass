@@ -88,14 +88,15 @@ SH_EMS_MODE = HoldingProbePoint(
     write_candidate=False,
 )
 
-# Absolute no-write list for the spike and production SG-RS control.
+# Absolute no-write list. Writing these registers can disconnect the inverter
+# from the grid (start/stop) or hijack the external-EMS heartbeat owned by
+# ``heartbeat.py``, so they are guarded regardless of family. The hybrid EMS /
+# charge-discharge block (13049/13050/13051) is *supported* for controlled
+# writes via ``HOLDING_CONTROL_MAPS`` — see #331 — so it is NOT denylisted.
 HOLDING_WRITE_DENYLIST_WIRE: frozenset[int] = frozenset(
     {
-        5005,  # start/stop (0xCF/0xCE)
-        13049,  # EMS mode
-        13050,  # charge/discharge command
-        13051,  # charge/discharge power
-        13079,  # external EMS heartbeat
+        5005,  # start/stop (0xCF boot / 0xCE shutdown) — never write from dispatch
+        13079,  # external EMS heartbeat — owned by heartbeat.py, not the dispatch entities
     }
 )
 
@@ -126,6 +127,106 @@ HOLDING_CONTROL_MAPS: dict[str, tuple[HoldingControlPoint, ...]] = {
     # Three-phase string maps share the low holding block on community maps.
     "sg_rt": SG_RS_HOLDING_CONTROL_POINTS,
 }
+
+
+# ---------------------------------------------------------------------------
+# SH hybrid holding controls (#331)
+# ---------------------------------------------------------------------------
+# Wire addresses transcribed from TCzerny/ha-modbus-manager's ``sungrow_shx_dynamic.yaml``
+# (MIT), which is itself based on the mkaiser SHx project + Sungrow protocol V1.1.11.
+# TCzerny's field notes confirm the RS/RT split on active-power-limit registers:
+# 13088/13089 work on SH-RT hybrids but are non-functional on SH-RS, which use
+# 31203/31204 instead. Everything else (EMS, forced charge/discharge, SoC limits,
+# export limit, backup mode) shares the 13049..13086 block across both hybrid
+# sub-families.
+#
+# ``param`` matches the canonical name in ``pysolarcloud.Control.PARAMETER_SPECS``
+# so ``Control.encode_parameter`` gives us bounds enforcement and enum→raw
+# encoding for free — no wire-value math lives here.
+
+SH_HYBRID_HOLDING_COMMON: tuple[HoldingControlPoint, ...] = (
+    HoldingControlPoint(
+        param="energy_management_mode",
+        wire_address=13049,
+        description="Hybrid EMS mode (0 self-consumption, 2 compulsory, 3 external EMS, 4 VPP)",
+        param_code="10003",
+    ),
+    HoldingControlPoint(
+        param="charge_discharge_command",
+        wire_address=13050,
+        description="Battery forced-charge/discharge command (0xAA charge / 0xBB discharge / 0xCC stop)",
+        param_code="10004",
+    ),
+    HoldingControlPoint(
+        param="charge_discharge_power",
+        wire_address=13051,
+        description="Battery forced charge/discharge power (W)",
+        param_code="10005",
+    ),
+    HoldingControlPoint(
+        param="soc_upper_limit",
+        wire_address=13057,
+        description="Battery max SoC (0.1 %; 700-1000 = 70-100 %)",
+        param_code="10001",
+    ),
+    HoldingControlPoint(
+        param="soc_lower_limit",
+        wire_address=13058,
+        description="Battery min SoC (0.1 %; 0-500 = 0-50 %)",
+        param_code="10002",
+    ),
+    HoldingControlPoint(
+        param="feed_in_limitation_value",
+        wire_address=13073,
+        description="Export power limit (W); only in effect when feed_in_limitation is enabled",
+        param_code="10013",
+    ),
+    HoldingControlPoint(
+        param="feed_in_limitation",
+        wire_address=13086,
+        description="Export power limit switch (0xAA enable / 0x55 disable)",
+        param_code="10012",
+    ),
+)
+
+# SH-RT three-phase hybrids use 13088/13089 for the active-power-limit block.
+SH_RT_HOLDING_CONTROL_POINTS: tuple[HoldingControlPoint, ...] = (
+    *SH_HYBRID_HOLDING_COMMON,
+    HoldingControlPoint(
+        param="limited_power_switch",
+        wire_address=13088,
+        description="Active power limitation switch (0xAA enable / 0x55 disable) — SH-RT hybrids",
+        param_code="10007",
+    ),
+    HoldingControlPoint(
+        param="active_power_limit_ratio",
+        wire_address=13089,
+        description="Active power limit ratio (0.1 %; 1000 = 100 %) — SH-RT hybrids",
+        param_code="10008",
+    ),
+)
+
+# SH-RS single-phase hybrids: the same param names map to a different wire block
+# (31203/31204). TCzerny confirms the SH-RS models return exception_code=2 for
+# 13088/13089, so the split lives at the family level, not the entity level.
+SH_RS_HOLDING_CONTROL_POINTS: tuple[HoldingControlPoint, ...] = (
+    *SH_HYBRID_HOLDING_COMMON,
+    HoldingControlPoint(
+        param="limited_power_switch",
+        wire_address=31203,
+        description="Active power limitation switch (0xAA enable / 0x55 disable) — SH-RS hybrids",
+        param_code="10007",
+    ),
+    HoldingControlPoint(
+        param="active_power_limit_ratio",
+        wire_address=31204,
+        description="Active power limit ratio (0.1 %; 1000 = 100 %) — SH-RS hybrids",
+        param_code="10008",
+    ),
+)
+
+HOLDING_CONTROL_MAPS["sh_rt"] = SH_RT_HOLDING_CONTROL_POINTS
+HOLDING_CONTROL_MAPS["sh_rs"] = SH_RS_HOLDING_CONTROL_POINTS
 
 # Sentinel values a register can return when the point is not supported by the
 # attached hardware/firmware.

@@ -23,10 +23,22 @@ from custom_components.sungrow.modbus_registers import (
 )
 
 
-def test_write_denylist_includes_start_stop_and_ems():
-    """Spike must never target start/stop or hybrid EMS wires."""
+def test_write_denylist_covers_hardware_hazards_only():
+    """The denylist protects start/stop and heartbeat wires; hybrid EMS is controllable.
+
+    5005 (start/stop) and 13079 (external EMS heartbeat) are never legal targets for a
+    dispatch entity: 0xCE shuts the inverter down and 13079 is owned by heartbeat.py.
+    13049/13050/13051 (EMS mode / charge-discharge command / charge-discharge power) are
+    the *point* of the SH hybrid holding-control map (#331), so they must NOT be
+    denylisted — writes are gated by ``HOLDING_CONTROL_MAPS`` instead.
+    """
     assert 5005 in HOLDING_WRITE_DENYLIST_WIRE
-    assert 13049 in HOLDING_WRITE_DENYLIST_WIRE
+    assert 13079 in HOLDING_WRITE_DENYLIST_WIRE
+    # Regression guard for #331 — the SH hybrid EMS block MUST NOT sit on the denylist.
+    for allowed in (13049, 13050, 13051):
+        assert allowed not in HOLDING_WRITE_DENYLIST_WIRE, (
+            f"wire {allowed} must be writable via HOLDING_CONTROL_MAPS (#331)"
+        )
 
 
 def test_classify_supported_when_noop_write_ok():
@@ -104,13 +116,17 @@ async def test_probe_noop_write_when_allowed():
 
 
 async def test_probe_refuses_denylisted_write_candidate():
-    """Even if marked write_candidate, denylist blocks the write."""
+    """Even if marked write_candidate, denylist blocks the write.
+
+    Uses wire 5005 (start/stop) — the canonical denylisted address after #331 moved
+    hybrid EMS (13049) into ``HOLDING_CONTROL_MAPS``.
+    """
     client = MagicMock()
     client.async_read_holding = AsyncMock(return_value=[0])
     client.async_write_holding = AsyncMock()
     point = HoldingProbePoint(
-        name="ems",
-        wire_address=13049,
+        name="start_stop",
+        wire_address=5005,
         description="denied",
         family="probe_negative",
         write_candidate=True,
