@@ -9,16 +9,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import voluptuous as vol
-from aiohttp import web
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
-from homeassistant.helpers.http import HomeAssistantView
 from pysolarcloud import UserAuth
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
@@ -64,6 +61,16 @@ from .device_helpers import (
 from .device_helpers import (
     select_dispatch_device as select_dispatch_device,
 )
+from .heartbeat import (
+    _stop_heartbeat,
+)
+from .heartbeat import (
+    async_start_heartbeat as async_start_heartbeat,
+)
+from .heartbeat import (
+    async_stop_heartbeat as async_stop_heartbeat,
+)
+from .oauth_view import SungrowAuthCallbackView
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
@@ -86,17 +93,6 @@ def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
         return CLOUD_USER_PLATFORMS
     return PLATFORMS
 
-
-# How long to wait for a heartbeat loop to observe its stop event and exit
-# before force-cancelling it.
-HEARTBEAT_STOP_TIMEOUT = 10
-
-# Repair raised when the EMS heartbeat loop stops unexpectedly while a forced
-# charge/discharge is active (#231/#254). The loop keeps the inverter in External-EMS
-# mode; if it dies silently the inverter times out of forced mode and the command
-# stops being applied, with nothing surfaced to the user until now.
-_HEARTBEAT_STOPPED_ISSUE = "heartbeat_stopped"
-_REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
 
 # How long to wait for a single cloud call during entry setup before giving up
 # and letting HA retry later (ConfigEntryNotReady). Fixed rather than tied to the
@@ -724,182 +720,3 @@ def _async_prune_stale_devices(hass: HomeAssistant, entry: SungrowConfigEntry) -
         if any(identifier in known for identifier in device.identifiers):
             continue
         registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
-
-
-async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -> None:
-    """Signal a heartbeat loop to stop and wait for it to actually exit."""
-    stop_event, task = heartbeat
-    stop_event.set()
-    try:
-        async with asyncio.timeout(HEARTBEAT_STOP_TIMEOUT):
-            await task
-    except TimeoutError:
-        _LOGGER.warning("Heartbeat loop did not stop within %ss; cancelling", HEARTBEAT_STOP_TIMEOUT)
-        task.cancel()
-    except asyncio.CancelledError:
-        pass
-    except Exception:  # pylint: disable=broad-except
-        _LOGGER.exception("Heartbeat loop raised while stopping")
-
-
-def _plant_name(entry: SungrowConfigEntry, plant_id: str) -> str:
-    """Return the plant's display name for a Repair message, falling back to its id."""
-    data = getattr(entry, "runtime_data", None)
-    for coordinator in getattr(data, "coordinators", []) or []:
-        if coordinator.plant_id == plant_id:
-            return str(coordinator.plant_name)
-    return plant_id
-
-
-@callback
-def _on_heartbeat_done(
-    hass: HomeAssistant,
-    entry: SungrowConfigEntry,
-    plant_id: str,
-    stop_event: asyncio.Event,
-    task: asyncio.Task[None],
-) -> None:
-    """Detect an EMS heartbeat loop that stopped unexpectedly and raise a Repair (#254).
-
-    The heartbeat keeps the inverter in External-EMS mode while a forced charge/discharge
-    is active. If the loop raises and exits on its own — as seen in #231, where it died
-    silently for ~1h48m — the inverter times out of forced mode and the command quietly
-    stops being applied. A *requested* stop (``stop_event`` set) or a cancellation (entry
-    unload / HA shutdown) is expected and ignored; anything else surfaces an actionable
-    Repair so the user knows dispatch is no longer being kept alive.
-    """
-    if stop_event.is_set() or task.cancelled():
-        return
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:  # pragma: no cover - guarded by task.cancelled() above
-        return
-    _LOGGER.error(
-        "EMS heartbeat loop for plant %s stopped unexpectedly; a forced charge/discharge "
-        "is no longer being kept alive on the inverter: %s",
-        plant_id,
-        exc,
-    )
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        f"{_HEARTBEAT_STOPPED_ISSUE}_{plant_id}",
-        is_fixable=False,
-        severity=ir.IssueSeverity.WARNING,
-        translation_key=_HEARTBEAT_STOPPED_ISSUE,
-        translation_placeholders={"plant": _plant_name(entry, plant_id)},
-        learn_more_url=_REPAIR_LEARN_MORE,
-    )
-
-
-async def async_start_heartbeat(
-    hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str, device_uuid: str, interval: int
-) -> None:
-    """Start (or restart) the EMS heartbeat loop for a plant/device."""
-    data = entry.runtime_data
-    heartbeats = data.heartbeats
-
-    # A fresh keepalive is starting, so clear any stale "heartbeat stopped" Repair (#254).
-    ir.async_delete_issue(hass, DOMAIN, f"{_HEARTBEAT_STOPPED_ISSUE}_{plant_id}")
-
-    stop_event = asyncio.Event()
-    control = data.control
-    assert control is not None  # the heartbeat is only ever started on a cloud dispatch entry
-    # Tracked by the config entry so HA cancels it automatically on unload.
-    task = entry.async_create_background_task(
-        hass,
-        control.heartbeat_loop(device_uuid, interval, stop_event),
-        name=f"sungrow-heartbeat-{plant_id}",
-    )
-    # Surface an unexpected exit (the #231 silent-death bug) as a Repair. A requested
-    # stop or a cancellation is ignored by the callback.
-    task.add_done_callback(lambda finished: _on_heartbeat_done(hass, entry, plant_id, stop_event, finished))
-    # Publish the new loop into the map BEFORE awaiting the old one's stop, so two
-    # concurrent starts can't interleave across that await and orphan a task (a task
-    # left running but no longer in `heartbeats`). Whichever start runs last owns the
-    # map; every task it displaces is stopped by the displacing call.
-    existing = heartbeats.get(plant_id)
-    heartbeats[plant_id] = (stop_event, task)
-    if existing is not None:
-        await _stop_heartbeat(existing)
-
-
-async def async_stop_heartbeat(hass: HomeAssistant, entry: SungrowConfigEntry, plant_id: str) -> None:
-    """Stop the EMS heartbeat loop for a plant."""
-    # An intentional stop means a dead-heartbeat Repair (if any) no longer applies (#254).
-    ir.async_delete_issue(hass, DOMAIN, f"{_HEARTBEAT_STOPPED_ISSUE}_{plant_id}")
-    heartbeats = entry.runtime_data.heartbeats
-    heartbeat = heartbeats.pop(plant_id, None)
-    if heartbeat is not None:
-        await _stop_heartbeat(heartbeat)
-
-
-class SungrowAuthCallbackView(HomeAssistantView):
-    """Sungrow Authorization Callback View."""
-
-    requires_auth = False
-    url = "/api/sungrow_hass/callback"
-    name = "api:sungrow_hass:callback"
-
-    @staticmethod
-    def _resolve_future(
-        flows: dict[str, asyncio.Future[str]], states: dict[str, str], flow_id: str | None, state: str | None
-    ) -> asyncio.Future[str] | None:
-        """Correlate a callback to its pending flow's future.
-
-        Prefers an explicit ``flow_id``, then the OAuth ``state`` param. If either
-        correlator is present but matches no known flow, returns ``None`` rather than
-        guessing — a stale or foreign correlator must never be misrouted onto a
-        different flow's future (#116). Only when NO correlator is supplied at all
-        (iSolarCloud may strip query params from the redirect) does it fall back to
-        the sole pending flow.
-        """
-        if flow_id and flow_id in flows:
-            return flows.get(flow_id)
-        if state and state in states:
-            return flows.get(states[state])
-        if flow_id or state:
-            # A correlator was supplied but matched nothing: do not misroute it.
-            return None
-        if len(flows) == 1:
-            return next(iter(flows.values()))
-        return None
-
-    async def get(self, request: web.Request) -> web.Response:
-        """Handle callback from iSolarCloud after user authorization."""
-        hass: HomeAssistant = request.app["hass"]
-        params = request.query
-        code = params.get("code")
-        flow_id = params.get("flow_id")
-        state = params.get("state")
-
-        if not code:
-            # Log only the parameter *names* — never their values. An external redirect
-            # could carry sensitive values, and users are told to enable debug logging.
-            _LOGGER.warning("Callback received but missing 'code'. Query params present: %s", list(params))
-            return web.Response(text="Missing code parameter. Please try again.", status=400)
-
-        # Never log the authorization code — it's a single-use credential that exchanges
-        # for tokens (mirrors the rule in config_flow.async_step_finish). Presence is implied.
-        _LOGGER.debug("Callback received with an authorization code (flow_id=%s, state=%s)", flow_id, state)
-
-        # Signal the waiting future so the config flow's background task can
-        # resume the flow cleanly.
-        domain_data = hass.data.get(DOMAIN, {})
-        flows = domain_data.get("flows", {})
-        states = domain_data.get("states", {})
-        future = self._resolve_future(flows, states, flow_id, state)
-        if future is not None and not future.done():
-            future.set_result(code)
-            return web.Response(
-                text="Authorization successful! You can close this window and return to Home Assistant.",
-                content_type="text/html",
-            )
-
-        _LOGGER.warning(
-            "OAuth callback received (flow_id=%s, state=%s) but no pending future was found", flow_id, state
-        )
-        return web.Response(
-            text="Authorization request not found or already completed. Please return to Home Assistant and try again.",
-            status=400,
-        )
