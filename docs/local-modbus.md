@@ -26,8 +26,11 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
 
 ## What you need
 
-- A **WiNet-S** communication dongle on the **same LAN** as Home Assistant.
-- The dongle reachable on **TCP port 502** (Modbus TCP) from Home Assistant — the default
+- A **WiNet-S** communication dongle **or** the inverter's internal LAN port on the
+  **same LAN** as Home Assistant. The internal LAN port, where present, is generally
+  the more reliable path — it may need to be **enabled from the iSolarCloud app**
+  first (see [Troubleshooting → The Ethernet port on the inverter appears dead](TROUBLESHOOTING.md#the-ethernet-port-on-the-inverter-appears-dead)).
+- The device reachable on **TCP port 502** (Modbus TCP) from Home Assistant — the default
   Modbus port and unit ID (`1`) are used automatically.
 - **No iSolarCloud account** for a Modbus-only setup. (A cloud entry is independent and
   still needs credentials for its own sensors and dispatch.)
@@ -38,6 +41,12 @@ the cloud plant in the device registry (`via_device`) — a soft “related to�
     default. If Home Assistant and the WiNet-S are on different network segments, discovery
     won't fire — add the local entry manually when that path is available, or ensure mDNS
     can cross the boundary.
+
+!!! info "Flaky WiNet-S connection?"
+    The WiNet-S dongle sometimes drops idle Modbus TCP sessions. If reads flap in and
+    out, a stateful proxy like [`Akulatraxas/ha-modbusproxy`](https://github.com/Akulatraxas/ha-modbusproxy)
+    in front of the dongle is the community-standard workaround — see
+    [Troubleshooting → WiNet-S drops connections](TROUBLESHOOTING.md#winet-s-drops-connections-or-reads-flap-in-and-out).
 
 ## Transport modes
 
