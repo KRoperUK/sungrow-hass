@@ -440,7 +440,7 @@ async def test_stop_heartbeat_cancels_stubborn_loop(hass: HomeAssistant):
 
     entry.runtime_data.control.heartbeat_loop = _stubborn
 
-    with patch("custom_components.sungrow.HEARTBEAT_STOP_TIMEOUT", 0.01):
+    with patch("custom_components.sungrow.heartbeat.HEARTBEAT_STOP_TIMEOUT", 0.01):
         await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
         _, task = entry.runtime_data.heartbeats["12345"]
         await async_stop_heartbeat(hass, entry, "12345")
