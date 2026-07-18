@@ -222,13 +222,53 @@ async def test_read_connects_when_not_connected():
 
 
 async def test_connect_failure_raises():
-    """A failed connect raises SungrowModbusError."""
+    """A failed connect raises SungrowModbusError after a recreate attempt."""
     cls, _ = _mock_client_cls([], connected=False, connect_ok=False)
     with (
         patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls),
         pytest.raises(SungrowModbusError, match="Could not connect"),
     ):
         await SungrowModbusClient("10.0.0.1").async_read_realtime()
+
+
+async def test_connect_failure_recreates_and_succeeds():
+    """When the first connect() fails, a fresh client is opened and the read continues."""
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    regs = [0] * count
+    regs[5035 - start] = 501
+
+    dead = MagicMock()
+    dead.connected = False
+    dead.connect = AsyncMock(return_value=False)
+    dead.close = MagicMock()
+
+    healthy = MagicMock()
+    healthy.connected = False
+    healthy.connect = AsyncMock(return_value=True)
+    healthy.close = MagicMock()
+    ok = MagicMock()
+    ok.isError.return_value = False
+    ok.registers = regs
+    healthy.read_input_registers = AsyncMock(return_value=ok)
+
+    # __init__ builds dead; ensure_connected recreates → healthy.
+    cls = MagicMock(side_effect=[dead, healthy])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1")
+        _skip_family_detect(client)
+        client.model = "_test_connect_heal"
+        with patch.dict(
+            "custom_components.sungrow.modbus.REGISTER_MAPS",
+            {"_test_connect_heal": low_points},
+            clear=False,
+        ):
+            data = await client.async_read_realtime()
+    assert data["grid_frequency"]["value"] == 50.1
+    dead.connect.assert_awaited()
+    dead.close.assert_called()
+    healthy.connect.assert_awaited()
+    healthy.read_input_registers.assert_awaited()
 
 
 async def test_read_error_raises_and_drops_connection():
@@ -247,7 +287,102 @@ async def test_read_error_raises_and_drops_connection():
             clear=False,
         ):
             await client.async_read_realtime()
-    inner.close.assert_called_once()
+    # Permanent (non-connection) protocol error still force-disconnects once.
+    assert inner.close.call_count >= 1
+
+
+async def test_not_connected_error_reconnects_and_succeeds():
+    """A mid-session 'Not connected' error recreates the client and retries once."""
+    from pymodbus.exceptions import ConnectionException
+
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    regs = [0] * count
+    regs[5035 - start] = 499
+
+    first = MagicMock()
+    first.connected = True
+    first.connect = AsyncMock(return_value=True)
+    first.close = MagicMock()
+    first.read_input_registers = AsyncMock(side_effect=ConnectionException("Not connected[AsyncModbusTcpClient]"))
+
+    second = MagicMock()
+    second.connected = False
+    second.connect = AsyncMock(return_value=True)
+    second.close = MagicMock()
+    ok = MagicMock()
+    ok.isError.return_value = False
+    ok.registers = regs
+    second.read_input_registers = AsyncMock(return_value=ok)
+
+    cls = MagicMock(side_effect=[first, second])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1")
+        _skip_family_detect(client)
+        client.model = "_test_reconnect"
+        # Replace the client created in __init__ with our first mock.
+        client._client = first  # noqa: SLF001
+        with patch.dict(
+            "custom_components.sungrow.modbus.REGISTER_MAPS",
+            {"_test_reconnect": low_points},
+            clear=False,
+        ):
+            data = await client.async_read_realtime()
+    assert data["grid_frequency"]["value"] == 49.9
+    first.close.assert_called()
+    second.connect.assert_awaited()
+    second.read_input_registers.assert_awaited()
+
+
+async def test_stale_connected_flag_still_reconnects_after_failure():
+    """After a connection failure the next poll can open a fresh socket."""
+    from pymodbus.exceptions import ConnectionException
+
+    low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)
+    start, count = block_bounds(low_points)
+    regs = [0] * count
+    regs[5035 - start] = 500
+
+    dead = MagicMock()
+    dead.connected = True  # stale flag: thinks it's up
+    dead.connect = AsyncMock(return_value=True)
+    dead.close = MagicMock()
+    dead.read_input_registers = AsyncMock(side_effect=ConnectionException("Not connected[x]"))
+
+    healthy = MagicMock()
+    healthy.connected = False
+    healthy.connect = AsyncMock(return_value=True)
+    healthy.close = MagicMock()
+    ok = MagicMock()
+    ok.isError.return_value = False
+    ok.registers = regs
+    healthy.read_input_registers = AsyncMock(return_value=ok)
+
+    # __init__ constructs once; recreate after the failed read constructs ``healthy``.
+    cls = MagicMock(side_effect=[MagicMock(), healthy])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("192.168.1.93")
+        _skip_family_detect(client)
+        client.model = "_test_stale"
+        client._client = dead  # noqa: SLF001
+        with patch.dict(
+            "custom_components.sungrow.modbus.REGISTER_MAPS",
+            {"_test_stale": low_points},
+            clear=False,
+        ):
+            data = await client.async_read_realtime()
+    assert data["grid_frequency"]["value"] == 50.0
+
+
+def test_decode_omits_zero_optional_channels():
+    """Optional phase/MPPT channels that report 0 are omitted (unavailable in HA)."""
+    points = (
+        ModbusPoint(0, "phase_b_voltage", "u16", 0.1, "V", nan_value=0xFFFF, omit_zero=True),
+        ModbusPoint(1, "mppt1_current", "u16", 0.1, "A"),  # zero is legitimate at night
+    )
+    out = decode_registers(points, 0, [0, 0])
+    assert "phase_b_voltage" not in out
+    assert out["mppt1_current"]["value"] == 0.0
 
 
 async def test_unsupported_address_block_is_skipped_but_other_blocks_return_data():

@@ -185,6 +185,34 @@ async def test_setup_modbus_only_entry(hass: HomeAssistant):
         await hass.async_block_till_done()
     assert seen["platforms"] == [Platform.BINARY_SENSOR, Platform.SENSOR]
     assert entry.state is ConfigEntryState.NOT_LOADED
+    # WiNet-S single-connection slot must be released on unload (options reload heal).
+    client.close.assert_called()
+
+
+async def test_setup_modbus_only_closes_client_when_first_refresh_fails(hass: HomeAssistant):
+    """Failed first_refresh must close the Modbus client so HA retries can reconnect."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SNFAIL",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SNFAIL",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(side_effect=OSError("Not connected"))
+    client.close = MagicMock()
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is not ConfigEntryState.LOADED
+    client.close.assert_called()
 
 
 async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):

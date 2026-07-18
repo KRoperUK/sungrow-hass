@@ -1,7 +1,7 @@
 """Tests for the Sungrow data update coordinator."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -936,6 +936,29 @@ def test_no_modbus_client_when_host_blank():
         )
         is None
     )
+
+
+async def test_close_modbus_releases_client(hass: HomeAssistant):
+    """close_modbus closes the underlying client and clears the coordinator handle."""
+    from custom_components.sungrow.const import CONF_MODEL
+
+    entry = _make_entry(
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_MODBUS_HOST: "10.0.0.5",
+            CONF_MODEL: "SG3.6RS",
+        }
+    )
+    mock_client = MagicMock()
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=mock_client):
+        coordinator = SungrowPlantCoordinator(hass, entry, None, "p1", "Plant", [])
+    client = MagicMock()
+    coordinator._modbus_client = client  # noqa: SLF001
+    coordinator.close_modbus()
+    client.close.assert_called_once()
+    assert coordinator._modbus_client is None  # noqa: SLF001
+    # Idempotent when already closed.
+    coordinator.close_modbus()
 
 
 async def test_modbus_debug_daily_yield_gated(hass: HomeAssistant):
