@@ -64,6 +64,117 @@ def test_decode_omits_nan_sentinel_values():
     assert "absent" not in out
 
 
+# ---------------------------------------------------------------------------
+# String data_type support (#323)
+# ---------------------------------------------------------------------------
+# Sungrow packs ASCII fields (serial number, firmware version) in consecutive
+# registers with two bytes per register, high byte first. The decoder must
+# reconstruct the string, strip trailing NUL padding, and treat a fully empty
+# field as "not populated" so unsupported firmwares don't produce empty sensors.
+
+
+def test_string_point_register_count_uses_length():
+    """A string ModbusPoint spans ``length`` registers, not the numeric-type fallback."""
+    point = ModbusPoint(4989, "inverter_serial", "string", 1, None, length=10)
+    assert point.register_count == 10
+
+
+def test_string_point_rejects_zero_length():
+    """A string with no declared length is a configuration error, not silent success."""
+    point = ModbusPoint(4989, "bad", "string", 1, None)  # length defaults to 0
+    with pytest.raises(ValueError, match="length"):
+        _ = point.register_count
+
+
+def test_decode_string_reads_big_endian_ascii():
+    """Two ASCII bytes per register, high byte first — the mkaiser/Sungrow convention."""
+    point = ModbusPoint(0, "inverter_serial", "string", 1, None, length=5)
+    # 'A'=0x41, 'B'=0x42, ...
+    registers = [0x4142, 0x4344, 0x4546, 0x4748, 0x494A]
+    out = decode_registers((point,), 0, registers)
+    assert out["inverter_serial"]["value"] == "ABCDEFGHIJ"
+    # Strings are unitless and still tagged source=modbus.
+    assert out["inverter_serial"]["unit"] is None
+    assert out["inverter_serial"]["source"] == "modbus"
+
+
+def test_decode_string_strips_trailing_nul_padding():
+    """Sungrow pads short serials with NUL — never leak them into HA."""
+    point = ModbusPoint(0, "inverter_serial", "string", 1, None, length=4)
+    # "A12" + trailing NULs across two registers.
+    registers = [0x4131, 0x3200, 0x0000, 0x0000]  # "A", "1", "2", NUL...
+    out = decode_registers((point,), 0, registers)
+    assert out["inverter_serial"]["value"] == "A12"
+
+
+def test_decode_string_omitted_when_all_nul():
+    """A fully NUL / empty field means the firmware doesn't expose the point."""
+    point = ModbusPoint(0, "battery_firmware_version", "string", 1, None, length=4)
+    registers = [0x0000] * 4
+    out = decode_registers((point,), 0, registers)
+    assert "battery_firmware_version" not in out
+
+
+def test_decode_string_strips_non_printable_control_bytes():
+    """Some firmwares leak zero-padding mid-string; those bytes get dropped cleanly."""
+    point = ModbusPoint(0, "inverter_firmware_version", "string", 1, None, length=3)
+    # "V1" + NUL + more real chars + NUL, imitating a corrupted mid-string zero.
+    registers = [0x5631, 0x0056, 0x3200]  # 'V','1',NUL,'V','2',NUL
+    out = decode_registers((point,), 0, registers)
+    # Interior NULs are stripped; the printable characters remain.
+    assert out["inverter_firmware_version"]["value"] == "V1V2"
+
+
+def test_decode_string_survives_undecodable_bytes():
+    """Non-ASCII bytes are silently dropped (support snapshots must still round-trip)."""
+    point = ModbusPoint(0, "inverter_serial", "string", 1, None, length=3)
+    # 0xFF is not valid ASCII; the decoder should ignore it, not raise.
+    registers = [0x4142, 0xFFFF, 0x4344]  # "AB", <invalid>, "CD"
+    out = decode_registers((point,), 0, registers)
+    assert out["inverter_serial"]["value"] == "ABCD"
+
+
+def test_decode_string_and_numeric_share_a_block():
+    """A string point and neighbouring numeric points decode together in one block."""
+    points = (
+        ModbusPoint(0, "inverter_serial", "string", 1, None, length=3),
+        ModbusPoint(4, "device_type_code", "u16", 1, None),
+    )
+    registers = [0x5347, 0x2D33, 0x2E36, 0, 3355]  # "SG-3.6" + padding + 3355
+    out = decode_registers(points, 0, registers)
+    assert out["inverter_serial"]["value"] == "SG-3.6"
+    assert out["device_type_code"]["value"] == 3355
+
+
+def test_block_partitions_counts_string_length_for_cap():
+    """A 15-register string is charged 15 registers against the 125-cap accounting."""
+    points = (
+        ModbusPoint(1000, "big_string", "string", 1, None, length=15),
+        ModbusPoint(1020, "neighbour", "u16", 1),
+    )
+    # With a 10-register cap the string alone exceeds the cap — verify the
+    # partitioner then breaks between the two points rather than merging.
+    blocks = block_partitions(points, max_block_size=10)
+    assert all(count <= 15 for _, count in blocks), blocks  # cap is clamped up to point size
+    # Two distinct blocks because the neighbour doesn't fit in the same read.
+    assert len(blocks) == 2
+    # But it MUST fit in the standard 100-register cap.
+    blocks_default = block_partitions(points)
+    assert len(blocks_default) == 1
+    assert blocks_default[0][1] == 21  # 15 (string) + 5 (gap) + 1 (u16)
+
+
+def test_block_bounds_includes_full_string_span():
+    """block_bounds reports the trailing register of a string point too."""
+    points = (
+        ModbusPoint(4989, "inverter_serial", "string", 1, None, length=10),
+        ModbusPoint(5030, "total_active_power", "s32", 1, "W"),
+    )
+    start, count = block_bounds(points)
+    assert start == 4989
+    assert start + count == 5032  # s32 ends at 5030+2
+
+
 def test_block_bounds_covers_all_points_in_one_read():
     """block_bounds spans from the lowest address to past the highest (incl. 32-bit width)."""
     points = (
@@ -103,15 +214,19 @@ def test_sh_rt_map_partitions_stay_under_modbus_count_cap():
 
     Before this fix, points 4999..5241 collapsed into a single 243-register block
     that pymodbus refuses to send (spec cap = 125). Every block must now fit and
-    the low PV/mppt/AC section must still start at register 4999.
+    the map must still cover the full register range from the serial-number
+    block up past the high hybrid registers.
     """
     blocks = block_partitions(SH_RT_INPUT_POINTS)
     # Every read must be within the Modbus function-4 protocol limit.
     assert blocks, "expected at least one block"
     assert all(count <= 125 for _, count in blocks), blocks
-    # Low PV/AC block still starts at the device-type register.
-    assert blocks[0][0] == 4999
+    # First block starts at or before the device-type register 4999 (the serial
+    # at 4989 pulls the block start down when local identity strings are mapped).
+    assert blocks[0][0] <= 4999
     # Full range still covered: last block must reach the high hybrid registers.
+    # 13279 + 15 = 13294 for the battery firmware string, or 13047 for the last
+    # numeric point on models that don't expose the firmware strings.
     assert max(start + count for start, count in blocks) >= 13046
 
 
