@@ -5,14 +5,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
 
-from . import build_device_info, build_plant_device_info, resolve_point_device
+from . import SungrowConfigEntry, build_device_info, build_plant_device_info, resolve_point_device
 from .const import (
     BATTERY_DIAGNOSTIC_CODES,
     COMM_MODULE_POINTS,
@@ -200,7 +199,9 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
     return sensors
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow sensors from the coordinators created during entry setup."""
     coordinators = entry.runtime_data.coordinators
     # Point the device "Visit" link at the region's iSolarCloud web console.

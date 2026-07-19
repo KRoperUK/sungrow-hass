@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -16,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import DispatchControl, build_device_info, select_dispatch_device
+from . import DispatchControl, SungrowConfigEntry, build_device_info, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .device_helpers import unique_id_owned_by_other_entry
@@ -247,7 +246,9 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
     return entities
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow dispatch number entities."""
     data = entry.runtime_data
     control = data.control

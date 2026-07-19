@@ -7,7 +7,6 @@ import time
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -21,6 +20,7 @@ from pysolarcloud.control import Control
 
 from . import (
     DispatchControl,
+    SungrowConfigEntry,
     async_start_heartbeat,
     async_stop_heartbeat,
     build_device_info,
@@ -162,7 +162,9 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: DispatchContro
     ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow dispatch select entities."""
     data = entry.runtime_data
     control = data.control

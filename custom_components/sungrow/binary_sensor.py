@@ -11,14 +11,13 @@ import logging
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
 
-from . import build_device_info
+from . import SungrowConfigEntry, build_device_info
 from .coordinator import SungrowPlantCoordinator
 from .device_helpers import unique_id_owned_by_other_entry
 from .measure_points import resolve_enum_value
@@ -96,7 +95,9 @@ def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySe
     return sensors
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow binary sensors from the coordinators created during entry setup."""
     coordinators = entry.runtime_data.coordinators
 
