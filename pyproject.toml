@@ -12,6 +12,14 @@ markers = [
     "live: marks tests that require live API credentials (deselect with '-m \"not live\"')",
     "real_refresh: opt a coordinator test out of the auto-stubbed periodic-refresh fixture",
 ]
+# Fail the suite on leaked coroutines. AsyncMock returns a coroutine every time
+# it's called; if it's passed into another async-mocked callable that ignores
+# its argument, the coroutine is never awaited and only shows up as a noisy
+# RuntimeWarning at GC time (see #375). Promoting that specific warning to an
+# error keeps future regressions from hiding in the log.
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+]
 # ``--import-mode=importlib`` skips pytest's legacy ``sys.path`` prepend hack, but
 # that hack was silently making ``custom_components/`` importable. Restore it
 # explicitly via ``pythonpath`` so ``from custom_components.sungrow.const import ...``
