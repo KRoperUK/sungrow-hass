@@ -7,9 +7,9 @@ python-dotenv
 hypothesis
 
 # Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
-ruff==0.15.21
-mypy==2.2.0
+ruff==0.15.22
+mypy==2.3.0
 
 # Component dependencies
 sungrow-isolarcloud==0.14.0
-pymodbus==3.13.1
+pymodbus==3.14.0
