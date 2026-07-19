@@ -49,6 +49,13 @@
           "gateway": "Region"
         }
       },
+      "plant_selection": {
+        "title": "Select plants",
+        "description": "Your account has more than one plant. Choose which plants Home Assistant should integrate. Every plant is selected by default; uncheck any you do not want to include. You can change the selection later via Reconfigure.",
+        "data": {
+          "plant_ids": "Plants"
+        }
+      },
       "auth_callback": {
         "title": "Waiting for authorization",
         "description": "Open the link below to authorize the application:\n\n{auth_url}\n\nAfter you log in and approve the app, you will be redirected back and this screen will update automatically.\n\nIf the redirect does not complete (for example the page shows an error), wait a moment and you will be able to paste the code manually."
@@ -99,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud rejected the authorization code — it may have already been used or expired. Open the authorization link above to get a fresh code, then paste it here (or paste the full redirect URL).",
       "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "invalid_redirect_uri": "The Redirect URI must end with /api/sungrow_hass/callback. Update it here AND in the iSolarCloud developer portal so both match — otherwise iSolarCloud redirects to the Home Assistant homepage and the authorization code is lost.",
+      "no_plants_selected": "Select at least one plant to integrate.",
       "unknown": "Unexpected error"
     },
     "abort": {

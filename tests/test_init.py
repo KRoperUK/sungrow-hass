@@ -1133,6 +1133,106 @@ async def test_setup_cloud_user_entry(hass: HomeAssistant):
     control.async_check_update_support.assert_awaited()
 
 
+async def test_setup_cloud_user_filters_plants_by_selection(hass: HomeAssistant):
+    """CONF_PLANT_IDS on the entry restricts setup to the selected plants (#358)."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_PLANT_IDS,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            CONF_USER_ACCOUNT: "me@example.com",
+            CONF_USER_PASSWORD: "pw",
+            CONF_GATEWAY: "Europe",
+            # User selected the "Home" plant only during config flow.
+            CONF_PLANT_IDS: ["10"],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(
+        return_value=[
+            {"ps_id": 10, "ps_name": "Home"},
+            {"ps_id": 20, "ps_name": "Holiday"},
+            {"ps_id": 30, "ps_name": "Office"},
+        ]
+    )
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1000", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[])
+
+    control = MagicMock()
+    control.async_check_update_support = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sungrow.UserAuth", return_value=client),
+        patch("custom_components.sungrow.UserControl", return_value=control),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    # Only the selected "Home" plant is set up; the Holiday / Office plants are skipped.
+    data = entry.runtime_data
+    assert [c.plant_id for c in data.coordinators] == ["10"]
+
+
+async def test_setup_cloud_user_no_selection_serves_all_plants(hass: HomeAssistant):
+    """Legacy entries with no CONF_PLANT_IDS keep serving every plant (#358).
+
+    Pre-#358 behaviour: an entry that never went through the plant picker has
+    no ``CONF_PLANT_IDS`` in its data, and setup must include every plant the
+    account returns — otherwise upgrading to a version that introduces the
+    filter would silently drop plants from existing installations.
+    """
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            CONF_USER_ACCOUNT: "me@example.com",
+            CONF_USER_PASSWORD: "pw",
+            CONF_GATEWAY: "Europe",
+            # No CONF_PLANT_IDS — legacy shape from before #358.
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(
+        return_value=[
+            {"ps_id": 100, "ps_name": "Home"},
+            {"ps_id": 200, "ps_name": "Holiday"},
+        ]
+    )
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1000", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[])
+
+    control = MagicMock()
+    control.async_check_update_support = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sungrow.UserAuth", return_value=client),
+        patch("custom_components.sungrow.UserControl", return_value=control),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    data = entry.runtime_data
+    assert sorted(c.plant_id for c in data.coordinators) == ["100", "200"]
+
+
 async def test_heartbeat_loop_uses_update_parameters_without_native_loop(hass: HomeAssistant):
     """UserControl-style clients without heartbeat_loop still keep EMS alive (#271)."""
     entry = MockConfigEntry(domain=DOMAIN, data={"tokens": {}})

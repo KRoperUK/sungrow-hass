@@ -27,11 +27,12 @@ from ..const import CONF_APP_ID, CONF_APP_KEY, CONF_APP_SECRET, CONF_GATEWAY, CO
 from . import _base
 from ._base import _SungrowFlowBase
 from ._helpers import CALLBACK_WAIT_TIMEOUT
+from .plant_selection import PlantSelectionMixin
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class CloudOAuthMixin(_SungrowFlowBase):
+class CloudOAuthMixin(PlantSelectionMixin, _SungrowFlowBase):
     """OAuth cloud transport steps for :class:`SungrowConfigFlow`."""
 
     # ---- OAuth-specific helpers -----------------------------------------
@@ -310,13 +311,23 @@ class CloudOAuthMixin(_SungrowFlowBase):
                 await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
                 self._abort_if_unique_id_mismatch(reason="wrong_account")
                 reason = "reconfigure_successful" if self._is_reconfigure else "reauth_successful"
+                # Reauth/reconfigure preserves the entry's existing plant selection
+                # (#358); the picker is only shown on initial setup below.
                 return self.async_update_reload_and_abort(self._reauth_entry, data=data, reason=reason)
 
             await self.async_set_unique_id(str(self.init_info[CONF_APP_ID]))
             self._abort_if_unique_id_configured()
-            # Cloud and local stay separate: if a Modbus-only entry already exists it is
-            # left alone (soft-linked by serial at device setup, never merged).
-            return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=data)
+
+            # Initial setup: fetch the account's plants using the freshly-obtained
+            # tokens. Multi-plant accounts route through ``async_step_plant_selection``
+            # (#358); single-plant accounts finalise directly with no extra step so
+            # the flow shape is unchanged for the common case.
+            plant_list = await self._fetch_plants()
+            if len(plant_list) > 1:
+                self._pending_plant_list = plant_list
+                self._pending_entry_data = data
+                return await self.async_step_plant_selection()
+            return await self._finalise_cloud_oauth_entry(data)
 
         except data_entry_flow.AbortFlow:
             raise
@@ -343,3 +354,32 @@ class CloudOAuthMixin(_SungrowFlowBase):
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception in async_step_finish: %s", e)
             return self._finish_error_result("unknown")
+
+    async def _fetch_plants(self) -> list[dict[str, Any]]:
+        """Fetch the account's plants using the freshly-authorized ``auth_client`` (#358).
+
+        Best-effort: any failure returns ``[]`` and the caller falls back to
+        finalising the entry without a plant picker. Setup then re-fetches the
+        list itself and serves whatever it discovers (legacy shape). The catch
+        is deliberately broad — the picker is a UX nicety, not a correctness
+        gate, so a probe error (typed or otherwise) must never block the entry
+        from being created.
+        """
+        from pysolarcloud.plants import Plants
+
+        try:
+            plants_service = Plants(self.auth_client)
+            async with asyncio.timeout(30):
+                return list(await plants_service.async_get_plants() or [])
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Plant list fetch failed after OAuth authorize; skipping picker: %s", err)
+            return []
+
+    async def _finalise_cloud_oauth_entry(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Create the OAuth entry with the plant selection merged in.
+
+        Called by :class:`PlantSelectionMixin._dispatch_plant_selection_finalise`
+        after the user submits the picker, and by :meth:`async_step_finish`
+        directly for single-plant accounts that skip the picker entirely.
+        """
+        return self.async_create_entry(title=f"Sungrow {self.init_info[CONF_APP_ID]}", data=entry_data)

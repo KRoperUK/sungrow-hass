@@ -31,6 +31,7 @@ from .const import (
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
     CONF_MODEL,
+    CONF_PLANT_IDS,
     CONF_SERIAL,
     CONF_TRANSPORT,
     CONF_USER_ACCOUNT,
@@ -161,6 +162,33 @@ def _has_battery_device(devices: list[dict[str, Any]]) -> bool:
         _matches_device_type(d, DeviceType.ENERGY_STORAGE_SYSTEM) or _matches_device_type(d, DeviceType.BATTERY)
         for d in devices
     )
+
+
+def _filter_plants_by_selection(plant_list: list[dict[str, Any]], entry: SungrowConfigEntry) -> list[dict[str, Any]]:
+    """Restrict ``plant_list`` to the plants the entry is scoped to (#358).
+
+    ``CONF_PLANT_IDS`` on the entry is a list of ``ps_id`` strings (the config
+    flow's plant picker collects them). When missing or empty the entry serves
+    every plant the account returns — the pre-#358 behaviour, so legacy entries
+    keep working with no migration. A selection that no longer matches any plant
+    (all previously-selected plants deleted upstream) also falls back to the
+    full list so setup surfaces a discoverable Repair via first-refresh failures
+    rather than a silent empty-entities state.
+    """
+    selected = entry.data.get(CONF_PLANT_IDS)
+    if not selected:
+        return plant_list
+    selected_ids = {str(pid) for pid in selected}
+    filtered = [p for p in plant_list if str(p.get("ps_id")) in selected_ids]
+    if not filtered:
+        _LOGGER.warning(
+            "Entry %s selects %d plant(s) but none match the account's current plant list; "
+            "serving every plant so at least one becomes visible",
+            entry.title,
+            len(selected_ids),
+        )
+        return plant_list
+    return filtered
 
 
 async def _async_has_battery(plants_service: Plants, plant_id: str, devices: list[dict[str, Any]]) -> bool:
@@ -388,6 +416,8 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
             raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
         raise ConfigEntryNotReady(f"Unable to reach iSolarCloud (user account): {err}") from err
 
+    plant_list = _filter_plants_by_selection(list(plant_list or []), entry)
+
     coordinators: list[SungrowPlantCoordinator] = []
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
@@ -508,6 +538,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             raise ConfigEntryAuthFailed(f"Authentication with iSolarCloud failed: {err}") from err
         # A timeout arrives here as TimeoutError and is treated as transient.
         raise ConfigEntryNotReady(describe_api_error(err) or f"Unable to fetch plants from iSolarCloud: {err}") from err
+
+    plant_list = _filter_plants_by_selection(list(plant_list or []), entry)
 
     coordinators: list[SungrowPlantCoordinator] = []
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
