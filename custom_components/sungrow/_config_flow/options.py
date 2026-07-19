@@ -11,6 +11,7 @@ registered in ``__init__``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -23,6 +24,7 @@ from ..const import (
     CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
     CONF_SCAN_INTERVAL,
+    CONF_SCHEDULE_WINDOWS,
     CONF_TRANSPORT,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
@@ -31,6 +33,15 @@ from ..const import (
     TRANSPORT_MODBUS_ONLY,
 )
 from ._helpers import _parse_extra_measure_points
+
+# Fixed number of schedule slots exposed in the options-flow UI (#359). Two covers
+# the common tariff pattern (cheap overnight charge + optional peak discharge); users
+# who need more can add windows via YAML options edits or wait for a follow-up UI.
+_SCHEDULE_SLOTS = 2
+
+# Mode options offered per schedule slot, mirroring the keys accepted by
+# ``sungrow.set_battery_mode`` and :mod:`..schedule`.
+_SCHEDULE_MODE_OPTIONS = ("force_charge", "force_discharge")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,13 +74,22 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = "invalid_extra_measure_points"
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
-                data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
-                data.pop(CONF_MODBUS_HOST, None)
-                data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
-                # cloud_modbus transport was retired in #348; the options flow no
-                # longer offers modbus_host on cloud entries. Local Modbus is set up
-                # via a separate ``Modbus Only`` entry instead.
+                schedule_windows, schedule_errors = _collect_schedule_windows(user_input)
+                errors.update(schedule_errors)
                 if not errors:
+                    data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
+                    data.pop(CONF_MODBUS_HOST, None)
+                    data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
+                    # Strip the per-slot schedule fields — they're stored as a single
+                    # normalised list under ``CONF_SCHEDULE_WINDOWS`` (#359).
+                    for slot in range(1, _SCHEDULE_SLOTS + 1):
+                        data.pop(f"schedule_{slot}_start", None)
+                        data.pop(f"schedule_{slot}_end", None)
+                        data.pop(f"schedule_{slot}_mode", None)
+                    data[CONF_SCHEDULE_WINDOWS] = schedule_windows
+                    # cloud_modbus transport was retired in #348; the options flow no
+                    # longer offers modbus_host on cloud entries. Local Modbus is set up
+                    # via a separate ``Modbus Only`` entry instead.
                     return self.async_create_entry(title="", data=data)
 
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -94,6 +114,12 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
         # transport). The options flow for a cloud entry no longer offers a
         # ``modbus_host`` field — users who want local Modbus add a ``Modbus Only``
         # entry alongside their cloud one.
+
+        # Scheduled forced-charge / forced-discharge windows (#359). Two fixed slots
+        # cover the typical tariff shape; each slot is a triple of start / end /
+        # mode fields. Leaving both start and end blank disables that slot.
+        schedule_fields = _build_schedule_slot_schema(self.config_entry.options)
+        schema_fields.update(schedule_fields)
 
         return self.async_show_form(
             step_id="init",
@@ -130,3 +156,92 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 }
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# #359 schedule-window slot helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any, Any]:
+    """Build the ``vol.Optional`` fields for each schedule slot (#359).
+
+    Each slot contributes three fields to the options form: a start-time picker,
+    an end-time picker, and a mode dropdown. Defaults are pulled from the
+    entry's currently-persisted ``CONF_SCHEDULE_WINDOWS`` (if any) so re-opening
+    the options form shows the values the user last submitted.
+    """
+    from homeassistant.helpers.selector import (
+        SelectOptionDict,
+        SelectSelector,
+        SelectSelectorConfig,
+        TimeSelector,
+    )
+
+    current_windows = list(current_options.get(CONF_SCHEDULE_WINDOWS) or [])
+    fields: dict[Any, Any] = {}
+    for slot in range(1, _SCHEDULE_SLOTS + 1):
+        row = current_windows[slot - 1] if slot - 1 < len(current_windows) else {}
+        start_default = str(row.get("start") or "")
+        end_default = str(row.get("end") or "")
+        mode_default = str(row.get("mode") or _SCHEDULE_MODE_OPTIONS[0])
+        # ``description={"suggested_value": ...}`` keeps the field empty by default
+        # in the UI but pre-fills the last value on re-open; ``vol.Optional`` with an
+        # empty-string default lets the user *clear* the slot to disable it.
+        fields[
+            vol.Optional(
+                f"schedule_{slot}_start",
+                description={"suggested_value": start_default} if start_default else None,
+            )
+        ] = TimeSelector()
+        fields[
+            vol.Optional(
+                f"schedule_{slot}_end",
+                description={"suggested_value": end_default} if end_default else None,
+            )
+        ] = TimeSelector()
+        fields[
+            vol.Optional(
+                f"schedule_{slot}_mode",
+                default=mode_default,
+            )
+        ] = SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value="force_charge", label="Force charge"),
+                    SelectOptionDict(value="force_discharge", label="Force discharge"),
+                ]
+            )
+        )
+    return fields
+
+
+def _collect_schedule_windows(
+    user_input: dict[str, Any],
+) -> tuple[list[dict[str, str]], dict[str, str]]:
+    """Read the per-slot fields back into a normalised ``CONF_SCHEDULE_WINDOWS`` list.
+
+    Returns ``(windows, errors)``: a slot with both start and end blank is treated
+    as "disabled" and simply omitted; a half-populated slot (only one of start /
+    end set) is a user error surfaced as ``invalid_schedule_window`` so they can
+    fix it. Overlapping windows are allowed at save time — the engine resolves
+    overlaps by picking the latest-starting one.
+    """
+    windows: list[dict[str, str]] = []
+    errors: dict[str, str] = {}
+    for slot in range(1, _SCHEDULE_SLOTS + 1):
+        start = (user_input.get(f"schedule_{slot}_start") or "").strip()
+        end = (user_input.get(f"schedule_{slot}_end") or "").strip()
+        mode = (user_input.get(f"schedule_{slot}_mode") or "").strip()
+        if not start and not end:
+            continue  # slot disabled — legitimate
+        if not start or not end:
+            errors["base"] = "invalid_schedule_window"
+            _LOGGER.warning("Schedule slot %d has only one of start/end filled in", slot)
+            continue
+        if mode not in _SCHEDULE_MODE_OPTIONS:
+            errors["base"] = "invalid_schedule_window"
+            _LOGGER.warning("Schedule slot %d has an unknown mode %r", slot, mode)
+            continue
+        windows.append({"start": start, "end": end, "mode": mode})
+    return windows, errors

@@ -106,6 +106,7 @@
       "invalid_auth_code": "Gwrthododd iSolarCloud y cod awdurdodi — efallai ei fod eisoes wedi'i ddefnyddio neu wedi dod i ben. Agor y ddolen awdurdodi uchod i gael cod newydd, yna gludwch ef yma (neu gludwch yr URL ailgyfeirio llawn).",
       "invalid_extra_measure_points": "Rhaid i bwyntiau mesur ychwanegol fod ar ffurf point_id=code, wedi'u gwahanu gan atalnodau",
       "invalid_redirect_uri": "Rhaid i'r URI ailgyfeirio orffen gyda /api/sungrow_hass/callback. Diweddara ef yma AC yn y porth datblygwyr iSolarCloud fel bod y ddau yn cydweddu — fel arall mae iSolarCloud yn ailgyfeirio i dudalen gartref Home Assistant a chollir y cod awdurdodi.",
+      "invalid_schedule_window": "Mae angen amser cychwyn ac amser gorffen ar slotiau amserlen, ynghyd â modd a gefnogir. Gadewch y ddau amser yn wag i analluogi slot.",
       "no_plants_selected": "Dewiswch o leiaf un orsaf i'w chynnwys.",
       "unknown": "Gwall annisgwyl"
     },
@@ -124,12 +125,18 @@
     "step": {
       "init": {
         "title": "Opsiynau Sungrow",
-        "description": "Addaswch pa mor aml y mae Home Assistant yn holi iSolarCloud. Mae gwerthoedd is yn diweddaru'n amlach ond yn defnyddio mwy o'ch cwota API. Mae'r cynllun am ddim yn caniatáu ~2000 galwad yr awr; y lleiafswm yw 10 eiliad.",
+        "description": "Addaswch pa mor aml y mae Home Assistant yn holi iSolarCloud. Mae gwerthoedd is yn diweddaru'n amlach ond yn defnyddio mwy o'ch cwota API. Mae'r cynllun am ddim yn caniatáu ~2000 galwad yr awr; y lleiafswm yw 10 eiliad.\n\nMae'r ffenestri gorfodol wedi'u hamserlennu (gwefru/dadwefru) yn ailadrodd bob dydd. Gadewch y cychwyn a'r diwedd yn wag i analluogi slot; mae lapio dros hanner nos (e.e. 23:30 → 06:00) yn iawn.",
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
           "extra_measure_points": "Pwyntiau mesur ychwanegol (point_id=code, wedi'u gwahanu gan atalnodau)",
           "enable_device_sensors": "Creu synwyryddion fesul dyfais (gwefrwyr EV, mesuryddion, batris ychwanegol)",
-          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
+          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)",
+          "schedule_1_start": "Amserlen 1 — cychwyn (HH:MM, amser lleol)",
+          "schedule_1_end": "Amserlen 1 — diwedd (HH:MM, amser lleol)",
+          "schedule_1_mode": "Amserlen 1 — modd batri",
+          "schedule_2_start": "Amserlen 2 — cychwyn (HH:MM, amser lleol)",
+          "schedule_2_end": "Amserlen 2 — diwedd (HH:MM, amser lleol)",
+          "schedule_2_mode": "Amserlen 2 — modd batri"
         }
       },
       "modbus_options": {

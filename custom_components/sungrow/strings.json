@@ -106,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud rejected the authorization code — it may have already been used or expired. Open the authorization link above to get a fresh code, then paste it here (or paste the full redirect URL).",
       "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "invalid_redirect_uri": "The Redirect URI must end with /api/sungrow_hass/callback. Update it here AND in the iSolarCloud developer portal so both match — otherwise iSolarCloud redirects to the Home Assistant homepage and the authorization code is lost.",
+      "invalid_schedule_window": "Schedule slots need both a start and an end time, and a supported mode. Leave both times blank to disable a slot.",
       "no_plants_selected": "Select at least one plant to integrate.",
       "unknown": "Unexpected error"
     },
@@ -124,12 +125,18 @@
     "step": {
       "init": {
         "title": "Sungrow Options",
-        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota. The free plan allows ~2000 calls/hour; the minimum is 10 seconds.",
+        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota. The free plan allows ~2000 calls/hour; the minimum is 10 seconds.\n\nOptional scheduled forced-charge / forced-discharge windows repeat daily. Leave both start and end blank to disable a slot; wrap-over-midnight (e.g. 23:30 → 06:00) is allowed.",
         "data": {
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)",
           "enable_device_sensors": "Create per-device sensors (EV chargers, meters, extra batteries)",
-          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
+          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)",
+          "schedule_1_start": "Schedule 1 — start (HH:MM, local time)",
+          "schedule_1_end": "Schedule 1 — end (HH:MM, local time)",
+          "schedule_1_mode": "Schedule 1 — battery mode",
+          "schedule_2_start": "Schedule 2 — start (HH:MM, local time)",
+          "schedule_2_end": "Schedule 2 — end (HH:MM, local time)",
+          "schedule_2_mode": "Schedule 2 — battery mode"
         }
       },
       "modbus_options": {

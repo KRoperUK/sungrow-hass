@@ -106,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud rechazó el código de autorización — puede que ya se haya usado o haya caducado. Abre el enlace de autorización de arriba para obtener un código nuevo y pégalo aquí (o pega la URL completa de redirección).",
       "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
       "invalid_redirect_uri": "La URI de redirección debe terminar en /api/sungrow_hass/callback. Actualízala aquí Y en el portal de desarrollador de iSolarCloud para que coincidan — de lo contrario, iSolarCloud redirige a la página de inicio de Home Assistant y se pierde el código de autorización.",
+      "invalid_schedule_window": "Las franjas de programación necesitan hora de inicio y de fin, y un modo admitido. Deje ambos tiempos en blanco para desactivar una franja.",
       "no_plants_selected": "Selecciona al menos una planta para integrar.",
       "unknown": "Error inesperado"
     },
@@ -124,12 +125,18 @@
     "step": {
       "init": {
         "title": "Opciones de Sungrow",
-        "description": "Ajuste la frecuencia con la que Home Assistant consulta iSolarCloud. Los valores más bajos actualizan con más frecuencia, pero consumen más de su cuota de la API. El plan gratuito permite unas 2000 llamadas/hora; el mínimo es de 10 segundos.",
+        "description": "Ajuste la frecuencia con la que Home Assistant consulta iSolarCloud. Los valores más bajos actualizan con más frecuencia, pero consumen más de su cuota de la API. El plan gratuito permite unas 2000 llamadas/hora; el mínimo es de 10 segundos.\n\nLas ventanas opcionales de carga/descarga forzada programadas se repiten a diario. Deje el inicio y el fin en blanco para desactivar una franja; se admite el cambio de día (p. ej. 23:30 → 06:00).",
         "data": {
           "scan_interval": "Intervalo de sondeo (segundos)",
           "extra_measure_points": "Puntos de medición adicionales (point_id=code, separados por comas)",
           "enable_device_sensors": "Crear sensores por dispositivo (cargadores de VE, contadores, baterías adicionales)",
-          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
+          "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)",
+          "schedule_1_start": "Programación 1 — inicio (HH:MM, hora local)",
+          "schedule_1_end": "Programación 1 — fin (HH:MM, hora local)",
+          "schedule_1_mode": "Programación 1 — modo de batería",
+          "schedule_2_start": "Programación 2 — inicio (HH:MM, hora local)",
+          "schedule_2_end": "Programación 2 — fin (HH:MM, hora local)",
+          "schedule_2_mode": "Programación 2 — modo de batería"
         }
       },
       "modbus_options": {

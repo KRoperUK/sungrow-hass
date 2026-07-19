@@ -56,6 +56,15 @@ DEFAULT_MODBUS_SCAN_INTERVAL = 30
 # the selected IDs here.
 CONF_PLANT_IDS = "plant_ids"
 
+# Scheduled forced-charge / forced-discharge windows (#359). Stored in
+# ``entry.options`` as a list of window dicts, each with ``start`` ("HH:MM" local
+# time), ``end`` ("HH:MM" local time), and ``mode`` (``force_charge`` or
+# ``force_discharge``). Missing / empty means "no schedule" — the entry serves the
+# user's manual battery-mode picks as before. Wrap-over-midnight is allowed
+# (``start > end`` means the window spans midnight). Overlapping windows are
+# resolved to the most recently started one.
+CONF_SCHEDULE_WINDOWS = "schedule_windows"
+
 # Backfill historical statistics (see specs/backfill-historical-statistics).
 # The History_Window defaults to 30 days back from now, is user-configurable via the
 # CONF_BACKFILL_DAYS option, and is clamped to [1, 365] days so a run can never request
