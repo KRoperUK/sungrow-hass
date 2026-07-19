@@ -127,6 +127,40 @@ def test_battery_soc_empty_string_unit_gets_percent():
     assert sensor._attr_native_unit_of_measurement == "%"
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("0.95", 95.0),  # SBH250-V11 plant returns a 0–1 fraction (#314)
+        ("0.5", 50.0),
+        ("1.0", 100.0),  # exactly 1.0 stays in the fraction bracket -> full battery
+        ("0", 0.0),  # empty battery, no scaling either way
+    ],
+)
+def test_battery_soc_fraction_scaled_to_percent(raw, expected):
+    """SOC reported as a 0–1 fraction is rescaled to a real percentage (#314).
+
+    Sungrow's iSolarCloud returns ``battery_level_soc`` (83252) as a 0–1 fraction on
+    some plants (SBH250-V11) instead of the usual 0–100. Because we already force the
+    unit to ``%`` for BATTERY sensors (#228), the raw fraction otherwise renders as
+    ``0.95 %``.
+    """
+    point = {"id": "83252", "code": "battery_level_soc", "value": raw, "unit": ""}
+    coordinator = _coord_with_devices([], data={"battery_level_soc": point})
+    sensor = SungrowSensor(coordinator, "battery_level_soc", "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.BATTERY
+    assert sensor._attr_native_unit_of_measurement == "%"
+    assert sensor.native_value == expected
+
+
+@pytest.mark.parametrize("raw, expected", [("95", 95.0), ("100", 100.0), ("42.5", 42.5)])
+def test_battery_soc_percent_form_unchanged(raw, expected):
+    """SOC already in 0–100 percent form (>1) is passed through untouched (#314)."""
+    point = {"id": "83252", "code": "battery_level_soc", "value": raw, "unit": "%"}
+    coordinator = _coord_with_devices([], data={"battery_level_soc": point})
+    sensor = SungrowSensor(coordinator, "battery_level_soc", "123", "Plant", point)
+    assert sensor.native_value == expected
+
+
 def test_power_fraction_gets_gauge_icon():
     """A per-code override gives power_fraction a gauge icon, not the solar fallback."""
     point = {"code": "power_fraction", "value": "0.83", "unit": ""}

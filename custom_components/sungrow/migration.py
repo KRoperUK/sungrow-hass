@@ -11,6 +11,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_APP_ID,
@@ -36,6 +37,36 @@ _HYBRID_OPTION_KEYS = frozenset(
     }
 )
 
+# Legacy select unique_id suffix retired in v5.0.0 (replaced by ``_battery_mode``, #255).
+# HA does not auto-remove renamed entities, so the old registry row lingers as
+# "unavailable" until we sweep it (issue #314).
+_LEGACY_SELECT_SUFFIXES: tuple[str, ...] = ("_charge_discharge_command",)
+
+
+def _remove_legacy_entities(hass: HomeAssistant, config_entry: ConfigEntry) -> int:
+    """Purge entity-registry rows renamed away in earlier releases.
+
+    Idempotent: entries already missing from the registry are skipped, so calling this
+    on every migration or setup is safe. Returns the number of entities removed for
+    logging/testing.
+    """
+    registry = er.async_get(hass)
+    removed = 0
+    for entity in list(er.async_entries_for_config_entry(registry, config_entry.entry_id)):
+        if entity.platform != DOMAIN:
+            continue
+        unique_id = entity.unique_id or ""
+        if not any(unique_id.endswith(suffix) for suffix in _LEGACY_SELECT_SUFFIXES):
+            continue
+        registry.async_remove(entity.entity_id)
+        removed += 1
+        _LOGGER.info(
+            "Removed legacy Sungrow entity %s (unique_id=%s); superseded by select.*_battery_mode",
+            entity.entity_id,
+            unique_id,
+        )
+    return removed
+
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old config entry versions to the current schema."""
@@ -54,6 +85,19 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=3)
         _LOGGER.info(
             "Migrated config entry %s to version 3 (transport=%s)", config_entry.title, new_data[CONF_TRANSPORT]
+        )
+
+    if config_entry.version == 3:
+        # v3→v4: sweep entities renamed away in v5.0.0 (issue #314). The
+        # ``select.*_charge_discharge_command`` unique_id was replaced by
+        # ``select.*_battery_mode``; HA leaves the old row registered but permanently
+        # unavailable until we remove it here.
+        removed = _remove_legacy_entities(hass, config_entry)
+        hass.config_entries.async_update_entry(config_entry, version=4)
+        _LOGGER.info(
+            "Migrated config entry %s to version 4 (removed %d legacy entities)",
+            config_entry.title,
+            removed,
         )
 
     # Defensive back-fill: ensure cloud entries carry app_id (#245).
