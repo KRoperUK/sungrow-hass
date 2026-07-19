@@ -1,45 +1,69 @@
 """Config flow for the Sungrow iSolarCloud integration.
 
-Historically a single ~1000-line ``config_flow.py`` handled four transports plus
-reauth, reconfigure, options, zeroconf discovery, and the manual-code path.
-Split into a package in #354 so editing one transport doesn't risk touching
-another and the mental map is smaller per file.
+hassfest requires the ConfigFlow subclass to be textually defined in a file
+named ``config_flow.py``. The per-transport modules — cloud OAuth,
+cloud user-account, Modbus-only, zeroconf, reauth/reconfigure, options,
+plus helpers — live in the sibling :mod:`._config_flow` subpackage so
+editing one transport doesn't risk touching another and the mental map
+is smaller per file (#354).
 
 Layout:
 
-* :mod:`._base` — shared instance state + lifecycle (``async_remove``).
-* :mod:`._helpers` — pure helper functions (URI normalisation, TXT parsing,
-  extra-measure-point parsing) and the OAuth callback timeout constant.
-* :mod:`.cloud_oauth` — developer-portal OAuth handshake steps + helpers.
-* :mod:`.cloud_user` — unofficial email/password (``UserAuth``) transport.
-* :mod:`.modbus_only` — cloud-free direct-Modbus setup / import / reconfigure.
-* :mod:`.zeroconf` — WiNet-S mDNS discovery.
-* :mod:`.reconfigure` — reauth + cloud reconfigure.
-* :mod:`.options` — options-flow handler.
+* :mod:`._config_flow._base` — shared instance state + lifecycle (``async_remove``).
+* :mod:`._config_flow._helpers` — pure helper functions (URI normalisation,
+  TXT parsing, extra-measure-point parsing) and the OAuth callback timeout
+  constant.
+* :mod:`._config_flow.cloud_oauth` — developer-portal OAuth handshake steps
+  + helpers.
+* :mod:`._config_flow.cloud_user` — unofficial email/password (``UserAuth``)
+  transport.
+* :mod:`._config_flow.modbus_only` — cloud-free direct-Modbus setup / import
+  / reconfigure.
+* :mod:`._config_flow.zeroconf` — WiNet-S mDNS discovery.
+* :mod:`._config_flow.reconfigure` — reauth + cloud reconfigure.
+* :mod:`._config_flow.options` — options-flow handler.
 
-The shell class :class:`SungrowConfigFlow` in this module combines every
-per-transport mixin (each of which subclasses :class:`._base._SungrowFlowBase`)
-and passes ``domain=DOMAIN`` so it's the only class HA registers as a config
-flow. ``async_step_user`` — the transport selector that dispatches into each
-per-transport step — lives here since it orchestrates all of them.
+The shell class :class:`SungrowConfigFlow` below combines every per-transport
+mixin (each of which subclasses ``_SungrowFlowBase``) and passes
+``domain=DOMAIN`` so it's the only class HA registers as a config flow.
+``async_step_user`` — the transport selector that dispatches into each
+per-transport step — lives here since it orchestrates all of them, as does
+``async_step_cloud_credentials`` (the cloud fork of the user step).
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
+from homeassistant.helpers.network import get_url
 
-from ..const import CONF_TRANSPORT, DOMAIN, TRANSPORT_CLOUD_ONLY, TRANSPORT_CLOUD_USER, TRANSPORT_MODBUS_ONLY
-from ._helpers import _normalize_redirect_uri, _parse_winet_properties
-from .cloud_oauth import CloudOAuthMixin
-from .cloud_user import CloudUserMixin
-from .modbus_only import ModbusOnlyMixin
-from .options import SungrowOptionsFlow
-from .reconfigure import ReconfigureAndReauthMixin
-from .zeroconf import ZeroconfMixin
+from ._config_flow._helpers import _normalize_redirect_uri, _parse_winet_properties
+from ._config_flow.cloud_oauth import CloudOAuthMixin
+from ._config_flow.cloud_user import CloudUserMixin
+from ._config_flow.modbus_only import ModbusOnlyMixin
+from ._config_flow.options import SungrowOptionsFlow
+from ._config_flow.reconfigure import ReconfigureAndReauthMixin
+from ._config_flow.zeroconf import ZeroconfMixin
+from .const import (
+    CONF_APP_ID,
+    CONF_APP_KEY,
+    CONF_APP_SECRET,
+    CONF_GATEWAY,
+    CONF_REDIRECT_URI,
+    CONF_TRANSPORT,
+    DOMAIN,
+    GATEWAYS,
+    TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
+    TRANSPORT_MODBUS_ONLY,
+)
+from .oauth_view import OAUTH_CALLBACK_PATH
+
+_LOGGER = logging.getLogger(__name__)
 
 # Re-exports for external consumers (tests import these paths directly).
 __all__ = [
@@ -60,11 +84,11 @@ class SungrowConfigFlow(
 ):
     """Config flow for Sungrow iSolarCloud, assembled from per-transport mixins.
 
-    Each mixin subclasses :class:`._base._SungrowFlowBase` (which is a bare
-    ``ConfigFlow`` subclass without ``domain=``), so ``self`` in every step
-    method sees the shared instance state and helper methods. The concrete
-    shell class here is the only subclass that registers with HA's flow
-    manager (via ``domain=DOMAIN`` above).
+    Each mixin subclasses :class:`._config_flow._base._SungrowFlowBase` (which
+    is a bare ``ConfigFlow`` subclass without ``domain=``), so ``self`` in every
+    step method sees the shared instance state and helper methods. The concrete
+    shell class here is the only subclass that registers with HA's flow manager
+    (via ``domain=DOMAIN`` above).
     """
 
     @staticmethod
@@ -110,22 +134,7 @@ class SungrowConfigFlow(
         mixin — it's the "cloud path" fork of the user step, feeding either the
         OAuth flow (``async_step_auth``) or the retired cloud+modbus code path.
         """
-        import logging
-
-        from homeassistant.helpers.network import get_url
-
-        from ..const import (
-            CONF_APP_ID,
-            CONF_APP_KEY,
-            CONF_APP_SECRET,
-            CONF_GATEWAY,
-            CONF_REDIRECT_URI,
-            GATEWAYS,
-        )
-        from ..oauth_view import OAUTH_CALLBACK_PATH
-
-        logger = logging.getLogger(__name__)
-        logger.debug("async_step_cloud_credentials called (user_input provided: %s)", user_input is not None)
+        _LOGGER.debug("async_step_cloud_credentials called (user_input provided: %s)", user_input is not None)
         errors: dict[str, str] = {}
 
         if user_input is not None:
