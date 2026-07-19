@@ -175,6 +175,67 @@ def test_block_bounds_includes_full_string_span():
     assert start + count == 5032  # s32 ends at 5030+2
 
 
+# ---------------------------------------------------------------------------
+# ARM + DSP subsystem software strings (#333)
+# ---------------------------------------------------------------------------
+# The register audit reconciled our SG-RS + SH-RT maps against mkaiser and
+# TCzerny. Both projects expose 15-register string fields at wires 4953
+# (ARM software) and 4968 (DSP software); we surface them as diagnostic
+# sensors that fall through the empty-string skip when unpopulated.
+
+
+@pytest.mark.parametrize("map_name", ["sg_rs", "sh_rt"])
+def test_arm_and_dsp_strings_present_in_family_maps(map_name):
+    """Both string points appear in the SG-RS and SH-RT input maps (#333)."""
+    from custom_components.sungrow.modbus_registers import REGISTER_MAPS
+
+    codes = {p.code: p for p in REGISTER_MAPS[map_name]}
+    for code, address, length in (
+        ("arm_software_version", 4953, 15),
+        ("dsp_software_version", 4968, 15),
+    ):
+        point = codes.get(code)
+        assert point is not None, f"{code} missing from {map_name}"
+        assert point.data_type == "string"
+        assert point.address == address
+        assert point.length == length
+
+
+def test_arm_and_dsp_strings_are_diagnostic():
+    """LOCAL_IDENTITY_CODES gates the sensor layer's DIAGNOSTIC categorisation (#333)."""
+    from custom_components.sungrow.modbus_registers import LOCAL_IDENTITY_CODES
+
+    assert "arm_software_version" in LOCAL_IDENTITY_CODES
+    assert "dsp_software_version" in LOCAL_IDENTITY_CODES
+
+
+def test_arm_and_dsp_strings_decode_from_realistic_bytes():
+    """A 15-register block round-trips into a printable version string."""
+    from custom_components.sungrow.modbus_registers import SG_RS_INPUT_POINTS
+
+    arm = next(p for p in SG_RS_INPUT_POINTS if p.code == "arm_software_version")
+    # "SAPPHIRE-H_01011.95.12" — mkaiser doc example, packed high-byte first.
+    text = "SAPPHIRE-H_01011.95.12"
+    padded = text.ljust(arm.length * 2, "\x00")  # 30 bytes total for 15 regs
+    registers = [(ord(padded[i]) << 8) | ord(padded[i + 1]) for i in range(0, arm.length * 2, 2)]
+    out = decode_registers((arm,), arm.address, registers)
+    assert out["arm_software_version"]["value"] == "SAPPHIRE-H_01011.95.12"
+    assert out["arm_software_version"]["unit"] is None
+    assert out["arm_software_version"]["source"] == "modbus"
+
+
+def test_sg_rs_low_block_still_fits_after_arm_dsp_addition():
+    """The SG-RS low block (4953..5035) stays comfortably under the 125-register cap (#333)."""
+    from custom_components.sungrow.modbus_registers import SG_RS_INPUT_POINTS
+
+    blocks = block_partitions(SG_RS_INPUT_POINTS)
+    # A single low block covers everything from ARM software to the last SG-RS
+    # numeric point. It must fit under 125 registers so pymodbus accepts it.
+    assert len(blocks) == 1
+    _, count = blocks[0]
+    assert count <= 125
+
+
 def test_block_bounds_covers_all_points_in_one_read():
     """block_bounds spans from the lowest address to past the highest (incl. 32-bit width)."""
     points = (

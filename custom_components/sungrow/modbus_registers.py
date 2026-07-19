@@ -292,6 +292,12 @@ class ModbusPoint:
 # Register definitions validated against a live SG3.6RS; additional common
 # single/three-phase string points from the mkaiser SHx mapping (see module doc).
 SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # Certification / firmware version strings for the two internal
+    # subsystems on Sungrow inverters (ARM controller + DSP). Both are
+    # 15-register UTF-8 fields; empty on hardware that doesn't populate them,
+    # which _decode_string handles by simply omitting the point (#333).
+    ModbusPoint(4953, "arm_software_version", "string", 1, None, length=15),
+    ModbusPoint(4968, "dsp_software_version", "string", 1, None, length=15),
     # Sungrow packs the unit's serial in 10 registers of ASCII starting at wire
     # 4989 (doc 4990). Present on every family we've validated; low-address so
     # it merges into the first block.
@@ -323,6 +329,9 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
 # Derived from the mkaiser SHx YAML mapping (MIT license) with on-the-wire
 # addresses and low-word-first 32-bit decoding.
 SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # ARM + DSP subsystem certification/firmware strings (see SG-RS map).
+    ModbusPoint(4953, "arm_software_version", "string", 1, None, length=15),
+    ModbusPoint(4968, "dsp_software_version", "string", 1, None, length=15),
     # Serial number — 10 registers of ASCII (see SG-RS map).
     ModbusPoint(4989, "inverter_serial", "string", 1, None, length=10),
     ModbusPoint(4999, "device_type_code", "u16", 1, None),
@@ -641,6 +650,9 @@ LOCAL_IDENTITY_CODES: frozenset[str] = frozenset(
         "inverter_firmware_version",
         "communication_module_firmware_version",
         "battery_firmware_version",
+        # Subsystem software strings — same diagnostic character (#333).
+        "arm_software_version",
+        "dsp_software_version",
     }
 )
 

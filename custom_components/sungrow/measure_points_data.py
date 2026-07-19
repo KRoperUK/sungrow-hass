@@ -832,6 +832,10 @@ CODE_ALIASES: dict[str, str] = {
     "inverter_firmware_version": "Firmware Version",
     "communication_module_firmware_version": "Communication Module Firmware",
     "battery_firmware_version": "Battery Firmware Version",
+    # ARM + DSP subsystem software versions (#333). Populated on models
+    # that carry certification strings for their internal controllers.
+    "arm_software_version": "ARM Software Version",
+    "dsp_software_version": "DSP Software Version",
     # Per-device diagnostic codes whose acronyms/initialisms the generic
     # title-caser would mangle ("Mppt1", "Wlan", "Afci", "Dc", "Id").
     "mppt1_voltage": "MPPT1 Voltage",
