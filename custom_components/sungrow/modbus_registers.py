@@ -241,11 +241,13 @@ class ModbusPoint:
 
     ``address`` is the on-the-wire register address (documented number - 1).
     ``code`` matches the cloud transport's measure-point code so both sources feed
-    the same entity. ``data_type`` is one of ``u16``/``s16``/``u32``/``s32``/``string``;
-    32-bit types consume two registers (low word first), string types consume
-    ``length`` registers with two ASCII bytes per register (high byte first).
-    The displayed value is the raw register value multiplied by ``scale`` (numeric)
-    or the decoded UTF-8 text (string).
+    the same entity. ``data_type`` is one of ``u16``/``s16``/``u32``/``s32``/
+    ``string``/``version_bcd``; 32-bit types consume two registers (low word
+    first), string types consume ``length`` registers with two ASCII bytes per
+    register (high byte first), and ``version_bcd`` is a two-register u32 whose
+    top three bytes decode as byte-BCD into ``"V<major>.<minor>.<patch>"``.
+    The displayed value is the raw register value multiplied by ``scale`` (numeric),
+    the decoded UTF-8 text (string), or the formatted version string (version_bcd).
 
     ``length`` is the width in 16-bit registers for a ``string`` point; ignored for
     numeric types. Set it to match the documented Sungrow field width (serial
@@ -276,14 +278,15 @@ class ModbusPoint:
     def register_count(self) -> int:
         """Number of 16-bit registers this point occupies.
 
-        Numeric types are one register (u16/s16) or two (u32/s32); string types
-        take ``length`` registers packing two ASCII bytes each.
+        Numeric 16-bit types (u16/s16) take one register, 32-bit types
+        (u32/s32/version_bcd) take two, string types take ``length`` registers
+        packing two ASCII bytes each.
         """
         if self.data_type == "string":
             if self.length <= 0:
                 raise ValueError(f"string point {self.code!r} needs length > 0")
             return self.length
-        return 2 if self.data_type in ("u32", "s32") else 1
+        return 2 if self.data_type in ("u32", "s32", "version_bcd") else 1
 
 
 # String-inverter (SG-RS) input registers — Modbus function 0x04. Codes are reused
@@ -292,6 +295,9 @@ class ModbusPoint:
 # Register definitions validated against a live SG3.6RS; additional common
 # single/three-phase string points from the mkaiser SHx mapping (see module doc).
 SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # Sungrow Modbus protocol version — byte-BCD packed into a u32 at wire
+    # 4951; ``version_bcd`` decodes it to "V<major>.<minor>.<patch>" (#333).
+    ModbusPoint(4951, "protocol_version", "version_bcd", 1, None),
     # Certification / firmware version strings for the two internal
     # subsystems on Sungrow inverters (ARM controller + DSP). Both are
     # 15-register UTF-8 fields; empty on hardware that doesn't populate them,
@@ -329,6 +335,8 @@ SG_RS_INPUT_POINTS: tuple[ModbusPoint, ...] = (
 # Derived from the mkaiser SHx YAML mapping (MIT license) with on-the-wire
 # addresses and low-word-first 32-bit decoding.
 SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
+    # Sungrow Modbus protocol version (see SG-RS map).
+    ModbusPoint(4951, "protocol_version", "version_bcd", 1, None),
     # ARM + DSP subsystem certification/firmware strings (see SG-RS map).
     ModbusPoint(4953, "arm_software_version", "string", 1, None, length=15),
     ModbusPoint(4968, "dsp_software_version", "string", 1, None, length=15),
@@ -653,6 +661,8 @@ LOCAL_IDENTITY_CODES: frozenset[str] = frozenset(
         # Subsystem software strings — same diagnostic character (#333).
         "arm_software_version",
         "dsp_software_version",
+        # Modbus protocol version decoded from wire 4951 (#333).
+        "protocol_version",
     }
 )
 
@@ -719,6 +729,21 @@ def decode_registers(
                 "source": "modbus",
             }
             continue
+        if point.data_type == "version_bcd":
+            raw_u32 = registers[offset] + (registers[offset + 1] << 16)
+            version = _decode_version_bcd(raw_u32)
+            # A zero register or invalid BCD digits mean the register isn't
+            # populated on this firmware — skip the point rather than emitting
+            # something misleading like "V0.0.0".
+            if not version:
+                continue
+            out[point.code] = {
+                "code": point.code,
+                "value": version,
+                "unit": None,
+                "source": "modbus",
+            }
+            continue
         raw = _combine(registers, offset, point.data_type)
         if point.nan_value is not None and raw == point.nan_value:
             continue
@@ -763,6 +788,34 @@ def _decode_string(registers: list[int], offset: int, length: int) -> str:
     text = raw.decode("ascii", errors="ignore").rstrip("\x00").strip()
     # Strip any remaining control chars (some firmware zero-pads mid-string).
     return "".join(ch for ch in text if ch.isprintable() or ch.isspace()).strip()
+
+
+def _decode_version_bcd(raw: int) -> str:
+    """Decode a Sungrow byte-BCD version u32 into ``"V<major>.<minor>.<patch>"``.
+
+    Sungrow packs firmware / protocol version numbers as byte-BCD in the top three
+    bytes of a u32 with the bottom byte reserved. Each byte carries two decimal
+    digits: the high nibble is tens, the low nibble is units. Example from
+    TCzerny/ha-modbus-manager: ``0x01015300`` → ``"V1.1.53"``.
+
+    Returns an empty string if the register is zero (unpopulated) or contains a
+    nibble that isn't a valid BCD digit (0–9), so the caller can omit the point
+    rather than emit a misleading ``"V0.0.0"`` or a version with non-numeric
+    digits from a firmware that repurposed the register.
+    """
+    if raw == 0:
+        return ""
+    major = (raw >> 24) & 0xFF
+    minor = (raw >> 16) & 0xFF
+    patch = (raw >> 8) & 0xFF
+    parts: list[int] = []
+    for byte in (major, minor, patch):
+        high = (byte >> 4) & 0x0F
+        low = byte & 0x0F
+        if high > 9 or low > 9:
+            return ""  # not a valid BCD encoding — treat as unpopulated
+        parts.append(high * 10 + low)
+    return f"V{parts[0]}.{parts[1]}.{parts[2]}"
 
 
 def block_bounds(points: tuple[ModbusPoint, ...]) -> tuple[int, int]:

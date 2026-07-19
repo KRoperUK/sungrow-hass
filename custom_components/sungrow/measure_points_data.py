@@ -836,6 +836,8 @@ CODE_ALIASES: dict[str, str] = {
     # that carry certification strings for their internal controllers.
     "arm_software_version": "ARM Software Version",
     "dsp_software_version": "DSP Software Version",
+    # Sungrow Modbus protocol version (BCD-packed u32 at wire 4951; #333).
+    "protocol_version": "Modbus Protocol Version",
     # Per-device diagnostic codes whose acronyms/initialisms the generic
     # title-caser would mangle ("Mppt1", "Wlan", "Afci", "Dc", "Id").
     "mppt1_voltage": "MPPT1 Voltage",
