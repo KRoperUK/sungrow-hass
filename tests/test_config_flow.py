@@ -1066,3 +1066,113 @@ async def test_cloud_user_invalid_auth_shows_error(hass: HomeAssistant):
     assert result3["type"] == data_entry_flow.FlowResultType.FORM
     assert result3["step_id"] == "cloud_user"
     assert result3["errors"]["base"] == "invalid_auth"
+
+
+# ---------------------------------------------------------------------------
+# Redirect URI validation (#340)
+# ---------------------------------------------------------------------------
+# iSolarCloud silently drops the ``code`` query parameter if it redirects to
+# anywhere other than the OAuth callback view. The config flow must therefore
+# either normalise or reject bare-host / wrong-path inputs before the user
+# clicks through the authorization page and finds it doesn't work.
+
+
+def test_normalize_redirect_uri_auto_appends_callback_to_bare_host():
+    """A bare Home Assistant base URL is auto-fixed to the callback path (#340)."""
+    from custom_components.sungrow.config_flow import _normalize_redirect_uri
+
+    # This is the exact shape a user pastes when they forget the callback path.
+    assert _normalize_redirect_uri("http://192.168.0.218:8123") == "http://192.168.0.218:8123/api/sungrow_hass/callback"
+    # Trailing slash is tolerated.
+    assert (
+        _normalize_redirect_uri("http://192.168.0.218:8123/") == "http://192.168.0.218:8123/api/sungrow_hass/callback"
+    )
+    # HTTPS + Nabu Casa style host.
+    assert (
+        _normalize_redirect_uri("https://abc-def.ui.nabu.casa")
+        == "https://abc-def.ui.nabu.casa/api/sungrow_hass/callback"
+    )
+
+
+def test_normalize_redirect_uri_leaves_correct_input_unchanged():
+    """A URI that already ends with the callback path is returned verbatim."""
+    from custom_components.sungrow.config_flow import _normalize_redirect_uri
+
+    assert (
+        _normalize_redirect_uri("http://192.168.0.218:8123/api/sungrow_hass/callback")
+        == "http://192.168.0.218:8123/api/sungrow_hass/callback"
+    )
+    # Whitespace around a correct URI is stripped.
+    assert (
+        _normalize_redirect_uri("  http://192.168.0.218:8123/api/sungrow_hass/callback  ")
+        == "http://192.168.0.218:8123/api/sungrow_hass/callback"
+    )
+
+
+def test_normalize_redirect_uri_rejects_wrong_path():
+    """A URI with a non-empty, non-callback path is refused (returns None)."""
+    from custom_components.sungrow.config_flow import _normalize_redirect_uri
+
+    # A user with a proxy path we can't auto-fix without silently changing behaviour.
+    assert _normalize_redirect_uri("http://192.168.0.218:8123/some/other/path") is None
+    # A callback path with typo — reject rather than paper over.
+    assert _normalize_redirect_uri("http://192.168.0.218:8123/api/sungrow/callback") is None
+
+
+def test_normalize_redirect_uri_rejects_missing_scheme():
+    """A URI without a scheme (host only) is refused."""
+    from custom_components.sungrow.config_flow import _normalize_redirect_uri
+
+    assert _normalize_redirect_uri("192.168.0.218:8123") is None
+    assert _normalize_redirect_uri("homeassistant.local") is None
+
+
+def test_normalize_redirect_uri_rejects_empty_and_none():
+    """None / empty / whitespace-only inputs return None."""
+    from custom_components.sungrow.config_flow import _normalize_redirect_uri
+
+    assert _normalize_redirect_uri(None) is None
+    assert _normalize_redirect_uri("") is None
+    assert _normalize_redirect_uri("   ") is None
+
+
+async def test_cloud_credentials_auto_appends_callback_path(hass: HomeAssistant):
+    """Submitting the cloud creds form with a bare host auto-fixes the redirect URI (#340)."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY}
+    )
+    assert result["step_id"] == "cloud_credentials"
+
+    bare = {
+        CONF_APP_KEY: "k",
+        CONF_APP_SECRET: "s",
+        CONF_APP_ID: "id_bare_redirect",
+        CONF_GATEWAY: "Europe",
+        CONF_REDIRECT_URI: "http://192.168.0.218:8123",  # missing callback path
+    }
+    result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=bare)
+    # A tokenless entry gets created — the callback path was appended, not rejected.
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_REDIRECT_URI] == "http://192.168.0.218:8123/api/sungrow_hass/callback"
+
+
+async def test_cloud_credentials_rejects_wrong_path(hass: HomeAssistant):
+    """A redirect URI with an incorrect non-callback path shows the invalid_redirect_uri error."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY}
+    )
+
+    bad = {
+        CONF_APP_KEY: "k",
+        CONF_APP_SECRET: "s",
+        CONF_APP_ID: "id_bad_redirect",
+        CONF_GATEWAY: "Europe",
+        CONF_REDIRECT_URI: "http://192.168.0.218:8123/oauth/callback",  # wrong path
+    }
+    result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=bad)
+    # Form re-shown with the invalid_redirect_uri error keyed on the redirect_uri field.
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["step_id"] == "cloud_credentials"
+    assert result2["errors"] == {CONF_REDIRECT_URI: "invalid_redirect_uri"}

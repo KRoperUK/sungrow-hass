@@ -41,6 +41,7 @@ from .const import (
     TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
+from .oauth_view import OAUTH_CALLBACK_PATH
 
 # Try to import pysolarcloud, handle if missing gracefully for development
 try:
@@ -58,6 +59,56 @@ _LOGGER = logging.getLogger(__name__)
 # can be slow — a redirect that lands within this window completes the flow
 # automatically even if the user has already reached the manual-entry form.
 CALLBACK_WAIT_TIMEOUT = 300
+
+
+def _normalize_redirect_uri(raw: str | None) -> str | None:
+    """Return a redirect URI whose path is the OAuth callback, or ``None`` if unfixable.
+
+    iSolarCloud must redirect the user back to Home Assistant's OAuth callback view,
+    which is registered at :data:`OAUTH_CALLBACK_PATH` (``/api/sungrow_hass/callback``).
+    Users occasionally paste just their Home Assistant base URL into the ``redirect_uri``
+    field (e.g. ``http://192.168.0.218:8123``), which sends iSolarCloud to the HA
+    homepage instead of the callback endpoint and silently drops the ``code`` query
+    parameter (#340).
+
+    Rules applied here:
+
+    - Whitespace is stripped.
+    - Trailing slashes on the base URL are collapsed.
+    - If the URI already ends with :data:`OAUTH_CALLBACK_PATH`, it is returned as-is.
+    - If it looks like a bare base URL (has a scheme and host, no path or just ``/``),
+      the callback path is appended.
+    - Anything else — a URI with an *incorrect* non-empty path, a value missing the
+      scheme, or an empty string — is refused by returning ``None`` so the caller can
+      surface a clear validation error rather than silently sending iSolarCloud a
+      URI that would misroute the callback.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    # Require a scheme so we never silently accept ``example.com`` (no scheme -> Sungrow
+    # would reject the redirect anyway, but the failure would be far from the input).
+    if "://" not in text:
+        return None
+    if text.endswith(OAUTH_CALLBACK_PATH):
+        return text
+    # Split scheme + rest, then split host + path.
+    scheme, rest = text.split("://", 1)
+    if "/" in rest:
+        host, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        host = rest
+        path = ""
+    # Accept bare base URLs (``http://host:port`` or ``http://host:port/``) and auto-
+    # append the callback path. Reject anything with a non-empty, non-slash path that
+    # doesn't end in the callback — that's a mis-configuration a user should fix
+    # deliberately, not one we should paper over.
+    if path in ("", "/"):
+        return f"{scheme}://{host}{OAUTH_CALLBACK_PATH}"
+    return None
 
 
 def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -148,16 +199,22 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._is_reconfigure = True
         self._transport = transport
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            # Preserve the App ID (identity) and drop stale tokens — we re-authorize.
-            self.init_info = {**entry.data, **user_input}
-            self.init_info.pop("tokens", None)
-            # Start a fresh Auth client for the (possibly changed) credentials.
-            self.auth_client = None
-            # For cloud_modbus: collect an updated modbus host before re-authorizing.
-            if transport == TRANSPORT_CLOUD_MODBUS:
-                return await self.async_step_reconfigure_modbus_host()
-            return await self.async_step_auth()
+            fixed_uri = _normalize_redirect_uri(user_input.get(CONF_REDIRECT_URI))
+            if fixed_uri is None:
+                errors[CONF_REDIRECT_URI] = "invalid_redirect_uri"
+            else:
+                user_input = {**user_input, CONF_REDIRECT_URI: fixed_uri}
+                # Preserve the App ID (identity) and drop stale tokens — we re-authorize.
+                self.init_info = {**entry.data, **user_input}
+                self.init_info.pop("tokens", None)
+                # Start a fresh Auth client for the (possibly changed) credentials.
+                self.auth_client = None
+                # For cloud_modbus: collect an updated modbus host before re-authorizing.
+                if transport == TRANSPORT_CLOUD_MODBUS:
+                    return await self.async_step_reconfigure_modbus_host()
+                return await self.async_step_auth()
 
         current = entry.data
         # Build the schema dynamically: include App ID when the entry is missing it
@@ -175,6 +232,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(schema_fields),
+            errors=errors,
         )
 
     async def async_step_reconfigure_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -332,23 +390,32 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self.init_info = user_input
-            await self.async_set_unique_id(str(user_input[CONF_APP_ID]))
-            self._abort_if_unique_id_configured()
+            # Normalise / validate the redirect URI: iSolarCloud drops the auth code if
+            # it redirects anywhere other than the OAuth callback view (#340). Auto-fix
+            # obvious bare-host inputs; otherwise reject with a clear error so the user
+            # updates BOTH this field and the developer-portal registration.
+            fixed_uri = _normalize_redirect_uri(user_input.get(CONF_REDIRECT_URI))
+            if fixed_uri is None:
+                errors[CONF_REDIRECT_URI] = "invalid_redirect_uri"
+            else:
+                user_input = {**user_input, CONF_REDIRECT_URI: fixed_uri}
+                self.init_info = user_input
+                await self.async_set_unique_id(str(user_input[CONF_APP_ID]))
+                self._abort_if_unique_id_configured()
 
-            # If hybrid mode, collect the Modbus host next.
-            if self._transport == TRANSPORT_CLOUD_MODBUS:
-                return await self.async_step_modbus_host()
+                # If hybrid mode, collect the Modbus host next.
+                if self._transport == TRANSPORT_CLOUD_MODBUS:
+                    return await self.async_step_modbus_host()
 
-            # Create the hub immediately, before authorizing. Setting up this
-            # token-less entry runs async_setup — which registers the OAuth
-            # callback view — and then raises ConfigEntryAuthFailed, so Home
-            # Assistant starts a reauth flow to finish authorization.
-            data = {**user_input, CONF_TRANSPORT: self._transport or TRANSPORT_CLOUD_ONLY}
-            return self.async_create_entry(
-                title=f"Sungrow {user_input[CONF_APP_ID]}",
-                data=data,
-            )
+                # Create the hub immediately, before authorizing. Setting up this
+                # token-less entry runs async_setup — which registers the OAuth
+                # callback view — and then raises ConfigEntryAuthFailed, so Home
+                # Assistant starts a reauth flow to finish authorization.
+                data = {**user_input, CONF_TRANSPORT: self._transport or TRANSPORT_CLOUD_ONLY}
+                return self.async_create_entry(
+                    title=f"Sungrow {user_input[CONF_APP_ID]}",
+                    data=data,
+                )
 
         # Attempt to automatically detect the callback URL
         try:
@@ -356,7 +423,7 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:
             base_url = "http://homeassistant.local:8123"  # Fallback
 
-        default_redirect = f"{base_url}/api/sungrow_hass/callback"
+        default_redirect = f"{base_url}{OAUTH_CALLBACK_PATH}"
 
         self.context["title_placeholders"] = {"app_id": "YourAppID"}
 
