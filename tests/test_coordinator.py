@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
@@ -46,6 +47,24 @@ def _make_entry(options=None, data=None):
     entry.options = options or {}
     entry.data = data or {}
     return entry
+
+
+@pytest.fixture(autouse=True)
+def _stub_periodic_refresh(request, monkeypatch):
+    """Auto-stub the coordinator's device / plant-detail refresh methods.
+
+    ``_async_update_data`` calls these on every successful poll. The narrower
+    exception catches introduced by #350 no longer swallow the ``TypeError``
+    raised when an under-stubbed ``MagicMock`` plants_service is awaited, so
+    tests that don't care about periodic refresh would otherwise need to stub
+    both methods on every mock. Instead, they no-op by default; tests that do
+    test refresh behavior opt back into the real methods with
+    ``@pytest.mark.real_refresh`` (see ``test_refresh_devices_*`` below).
+    """
+    if request.node.get_closest_marker("real_refresh"):
+        return
+    monkeypatch.setattr(SungrowPlantCoordinator, "_async_maybe_refresh_devices", AsyncMock(return_value=None))
+    monkeypatch.setattr(SungrowPlantCoordinator, "_async_maybe_refresh_plant_detail", AsyncMock(return_value=None))
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +389,13 @@ async def test_update_data_keyerror_raises_update_failed(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.real_refresh
 async def test_refresh_devices_updates_list(hass: HomeAssistant):
     """Each poll refreshes the plant's device list so new devices are picked up."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
     plants.async_get_plant_devices = AsyncMock(return_value=[{"uuid": "new-dev"}])
+    plants.async_get_plant_details = AsyncMock(return_value=[])
 
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices=[])
     await coordinator._async_update_data()
@@ -382,11 +403,13 @@ async def test_refresh_devices_updates_list(hass: HomeAssistant):
     assert coordinator.devices == [{"uuid": "new-dev"}]
 
 
+@pytest.mark.real_refresh
 async def test_refresh_devices_failure_keeps_previous_list(hass: HomeAssistant):
     """A device-list fetch failure keeps the previous list (best effort, non-fatal)."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
-    plants.async_get_plant_devices = AsyncMock(side_effect=ConnectionError("boom"))
+    plants.async_get_plant_devices = AsyncMock(side_effect=ClientError("boom"))
+    plants.async_get_plant_details = AsyncMock(return_value=[])
 
     coordinator = SungrowPlantCoordinator(
         hass, _make_entry(), plants, "12345", "Test Plant", devices=[{"uuid": "keep"}]
@@ -396,11 +419,13 @@ async def test_refresh_devices_failure_keeps_previous_list(hass: HomeAssistant):
     assert coordinator.devices == [{"uuid": "keep"}]
 
 
+@pytest.mark.real_refresh
 async def test_device_list_refresh_is_throttled(hass: HomeAssistant):
     """The device list is refreshed on the first poll, then only once the interval elapses (#115)."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value={"12345": {}})
     plants.async_get_plant_devices = AsyncMock(return_value=[{"uuid": "dev"}])
+    plants.async_get_plant_details = AsyncMock(return_value=[])
 
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", devices=[])
 
@@ -690,7 +715,7 @@ async def test_device_data_best_effort_on_error(hass: HomeAssistant):
 
     async def _realtime(plant_id, device_type, **kwargs):
         if getattr(device_type, "value", device_type) == 999:
-            raise RuntimeError("charger endpoint down")
+            raise ClientError("charger endpoint down")
         return {"inv-1": {"foo": {"code": "foo", "value": "1"}}}
 
     plants.async_get_device_realtime = AsyncMock(side_effect=_realtime)
@@ -862,10 +887,12 @@ async def test_device_data_dedupes_device_types(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.real_refresh
 async def test_plant_detail_fetched_and_stored(hass: HomeAssistant):
     """The plant-detail fields are fetched during a poll and stored on the coordinator (#178)."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_plant_devices = AsyncMock(return_value=[])
     plants.async_get_plant_details = AsyncMock(
         return_value=[{"alarm_count": 0, "fault_count": 1, "install_power": 3600.0, "power_price_unit": "GBP"}]
     )
@@ -878,11 +905,13 @@ async def test_plant_detail_fetched_and_stored(hass: HomeAssistant):
     plants.async_get_plant_details.assert_awaited()
 
 
+@pytest.mark.real_refresh
 async def test_plant_detail_best_effort_on_error(hass: HomeAssistant):
     """A failing plant-detail fetch doesn't fail the whole poll (#178)."""
     plants = MagicMock()
     plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
-    plants.async_get_plant_details = AsyncMock(side_effect=RuntimeError("detail endpoint down"))
+    plants.async_get_plant_devices = AsyncMock(return_value=[])
+    plants.async_get_plant_details = AsyncMock(side_effect=ClientError("detail endpoint down"))
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant", [])
 
     await coordinator._async_update_data()  # must not raise
@@ -1051,11 +1080,17 @@ async def test_modbus_only_update_no_client_raises(hass: HomeAssistant):
 
 
 async def test_modbus_only_update_keeps_last_good_within_grace(hass: HomeAssistant):
-    """A transient Modbus blip keeps serving the last-good data (availability grace)."""
+    """A transient Modbus blip keeps serving the last-good data (availability grace).
+
+    The Modbus client wraps raw pymodbus/OSError failures into ``SungrowModbusError``
+    before they reach the coordinator, so the test injects the wrapped type.
+    """
+    from custom_components.sungrow.modbus import SungrowModbusError
+
     coordinator = _modbus_only_coordinator(hass)
     coordinator.data = {"grid_frequency": {"value": 50.0}}
     coordinator._last_successful_update = hass.loop.time()  # fresh success
-    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=OSError("connection reset"))
+    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("connection reset"))
 
     data = await coordinator._async_update_data()
 
@@ -1064,10 +1099,12 @@ async def test_modbus_only_update_keeps_last_good_within_grace(hass: HomeAssista
 
 async def test_modbus_only_update_raises_outside_grace(hass: HomeAssistant):
     """Once the last-good data is stale, a Modbus failure takes the entry unavailable."""
+    from custom_components.sungrow.modbus import SungrowModbusError
+
     coordinator = _modbus_only_coordinator(hass)
     coordinator.data = {"grid_frequency": {"value": 50.0}}
     coordinator._last_successful_update = None  # no recent success -> outside grace
-    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=OSError("connection reset"))
+    coordinator._modbus_client.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("connection reset"))
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
@@ -1418,7 +1455,7 @@ async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
 async def test_user_update_transient_rides_grace_window(hass: HomeAssistant):
     """A transient user-account failure keeps last-good data within the grace window (#268/#152)."""
     client = MagicMock()
-    client.async_get_plant_detail = AsyncMock(side_effect=RuntimeError("network blip"))
+    client.async_get_plant_detail = AsyncMock(side_effect=ClientError("network blip"))
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
     coordinator.data = {"total_active_power": {"value": "1.2"}}
     coordinator._last_successful_update = hass.loop.time()  # recent success

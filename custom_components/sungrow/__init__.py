@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant, callback
@@ -17,7 +18,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
-from pysolarcloud import UserAuth, UserControl
+from pysolarcloud import PySolarCloudException, UserAuth, UserControl
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
@@ -147,7 +148,9 @@ async def _async_dispatch_supported(control: DispatchControl, devices: list[dict
         return True
     try:
         return bool(await control.async_check_update_support(str(target["uuid"])))
-    except Exception as err:  # pylint: disable=broad-except
+    except (PySolarCloudException, ClientError, TimeoutError) as err:
+        # Fail-open on typed transport failures. Cloud-only path here; the Modbus
+        # dispatch probe has its own tighter catch further down (#350).
         _LOGGER.debug("Could not check dispatch support for %s: %s", target.get("uuid"), err)
         return True
 
@@ -173,7 +176,7 @@ async def _async_has_battery(plants_service: Plants, plant_id: str, devices: lis
     try:
         async with asyncio.timeout(SETUP_TIMEOUT):
             details = await plants_service.async_get_plant_details(plant_id)
-    except Exception as err:  # pylint: disable=broad-except
+    except (PySolarCloudException, ClientError, TimeoutError) as err:
         _LOGGER.debug("Could not fetch plant details for %s; using device list for battery check: %s", plant_id, err)
         return _has_battery_device(devices)
     for entry in details or []:
@@ -306,11 +309,14 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         modbus_control = ModbusControl(modbus_client, family=getattr(modbus_client, "model", None))
         if modbus_control.supported_parameters:
             # Probe once; fail-open to True only if the map is non-empty and readable.
+            from .modbus import SungrowModbusError
+            from .modbus_control import ModbusControlError
+
             try:
                 coordinator.dispatch_update_supported = await modbus_control.async_check_update_support(
                     str(inverter["uuid"])
                 )
-            except Exception as err:  # pylint: disable=broad-except
+            except (SungrowModbusError, ModbusControlError, TimeoutError) as err:
                 _LOGGER.debug("Modbus control support probe failed: %s", err)
                 coordinator.dispatch_update_supported = False
             if coordinator.dispatch_update_supported:
@@ -393,7 +399,7 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         try:
             async with asyncio.timeout(SETUP_TIMEOUT):
                 devices = await user_auth.async_get_devices(plant_id)
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.warning("Could not fetch devices for plant %s (user account): %s", plant_name, err)
             devices = []
 

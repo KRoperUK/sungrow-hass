@@ -578,7 +578,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         """
         try:
             params = await self.control.async_read_parameters(self.device_uuid, [_EMS_MODE_PARAM])
-        except Exception as err:  # pylint: disable=broad-except  (best-effort verification)
+        except (PySolarCloudException, ModbusControlError, TimeoutError) as err:
+            # Best-effort verification: cloud, user-account, and Modbus dispatch all
+            # come through here, so keep the union of their typed error surfaces.
             _LOGGER.debug("EMS-mode read-back failed for %s; skipping actuation check: %s", self.device_uuid, err)
             return None
         return self._reads_as_self_consumption(params)

@@ -7,6 +7,7 @@ import logging
 from datetime import timedelta
 from typing import Any, cast
 
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -45,6 +46,7 @@ from .const import (
     TRANSPORT_MODBUS_ONLY,
 )
 from .energy_units import normalize_energy_units, normalize_power_units, tag_source
+from .modbus import SungrowModbusError
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
@@ -359,7 +361,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with asyncio.timeout(self._poll_timeout):
                 data = await self._modbus_client.async_read_realtime()
-        except Exception as err:  # pylint: disable=broad-except
+        except (SungrowModbusError, TimeoutError) as err:
             # Ride out a brief local blip the same way the cloud path does (#152).
             if self.data is not None and self._within_availability_grace():
                 _LOGGER.debug("Transient Modbus read failure for %s; keeping last-good data: %s", self.plant_name, err)
@@ -384,7 +386,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with asyncio.timeout(self._poll_timeout):
                 detail = await self._user_auth.async_get_plant_detail(self.plant_id)
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
             if self.data is not None and self._within_availability_grace():
@@ -439,7 +441,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with asyncio.timeout(self._poll_timeout):
                 self.daily_yield_diagnostic = await self._modbus_client.async_read_daily_yield_diagnostic()
-        except Exception as err:  # pylint: disable=broad-except  (best-effort diagnostic)
+        except (SungrowModbusError, TimeoutError) as err:  # best-effort diagnostic
             _LOGGER.debug("daily_yield diagnostic capture failed for %s: %s", self.plant_name, err)
 
     def _within_availability_grace(self) -> bool:
@@ -517,7 +519,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with asyncio.timeout(self._poll_timeout):
                 devices = await self.plants_service.async_get_plant_devices(self.plant_id)
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Could not refresh devices for plant %s: %s", self.plant_id, err)
             return
         # Mutate in place so holders of this list (runtime_data.devices) see updates.
@@ -544,7 +546,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with asyncio.timeout(self._poll_timeout):
                 details = await self.plants_service.async_get_plant_details(self.plant_id)
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Could not refresh plant detail for plant %s: %s", self.plant_id, err)
             return
         for row in details or []:
@@ -663,7 +665,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ps_key_list=ps_keys or None,
                         extra_measure_points=extra or None,
                     )
-            except Exception as err:  # pylint: disable=broad-except
+            except (PySolarCloudException, ClientError, TimeoutError) as err:
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
                 continue
             if not result:

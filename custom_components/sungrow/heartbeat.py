@@ -10,10 +10,13 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from aiohttp import ClientError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from pysolarcloud import PySolarCloudException
 
 from .const import DOMAIN
+from .modbus_control import ModbusControlError
 
 if TYPE_CHECKING:
     from . import SungrowConfigEntry
@@ -42,7 +45,12 @@ async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -
         task.cancel()
     except asyncio.CancelledError:
         pass
-    except Exception:  # pylint: disable=broad-except
+    except (PySolarCloudException, ClientError, ModbusControlError):
+        # ``await task`` re-raises the loop's stored exception; the done_callback
+        # (``_on_heartbeat_done``) is what raises the Repair, so at the stop path
+        # we just log the failure so it never propagates back out of unload (#350).
+        # ``TimeoutError`` is caught above as the ``asyncio.timeout`` firing on the
+        # stop wait itself, so no need to list it here.
         _LOGGER.exception("Heartbeat loop raised while stopping")
 
 
@@ -120,7 +128,7 @@ async def _heartbeat_loop(control: object, device_uuid: str, interval: int, stop
     while not stop_event.is_set():
         try:
             await update(device_uuid, {"external_ems_heartbeat": wire})
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, ModbusControlError, TimeoutError) as err:
             _LOGGER.warning("EMS heartbeat failed for %s: %s", device_uuid, err)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
