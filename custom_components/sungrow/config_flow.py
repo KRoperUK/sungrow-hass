@@ -80,7 +80,7 @@ def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | No
 class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Sungrow iSolarCloud."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         """Initialize the config flow."""

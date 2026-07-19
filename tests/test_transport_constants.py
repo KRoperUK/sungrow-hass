@@ -23,6 +23,6 @@ def test_transport_modbus_only_value():
     assert TRANSPORT_MODBUS_ONLY == "modbus_only"
 
 
-def test_config_flow_version_is_3():
-    """SungrowConfigFlow.VERSION is 3 after the breaking migration."""
-    assert SungrowConfigFlow.VERSION == 3
+def test_config_flow_version_is_current():
+    """SungrowConfigFlow.VERSION reflects the latest schema (v3→v4 legacy sweep, #314)."""
+    assert SungrowConfigFlow.VERSION == 4
