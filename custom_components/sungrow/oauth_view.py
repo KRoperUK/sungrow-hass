@@ -18,11 +18,18 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+# Path segment iSolarCloud must redirect back to on Home Assistant. The full
+# redirect URI (what the user enters in the config flow AND registers in the
+# developer portal) is ``<HA base URL>{OAUTH_CALLBACK_PATH}``. Shared with
+# config_flow.py so the two never drift (#340).
+OAUTH_CALLBACK_PATH = "/api/sungrow_hass/callback"
+
+
 class SungrowAuthCallbackView(HomeAssistantView):
     """Sungrow Authorization Callback View."""
 
     requires_auth = False
-    url = "/api/sungrow_hass/callback"
+    url = OAUTH_CALLBACK_PATH
     name = "api:sungrow_hass:callback"
 
     @staticmethod
