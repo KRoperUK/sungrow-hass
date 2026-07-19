@@ -196,6 +196,15 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
                     continue
                 sensors.append(sensor)
 
+    # Modbus-only diagnostic sensor (#361): a text sensor whose state is the last
+    # error string ("ok" on success). Disabled by default — power users enable it
+    # in the entity registry so they can alert on Modbus stalls without decoding
+    # the ``extra_state_attributes`` on the connectivity binary_sensor.
+    if coordinator.plants_service is None:
+        for device in coordinator.devices:
+            if device.get("device_type") == DeviceType.INVERTER and device.get("uuid"):
+                sensors.append(SungrowModbusStatusSensor(coordinator, device))
+
     return sensors
 
 
@@ -518,3 +527,61 @@ class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], Senso
             return str(raw)
         # Counts (alarm/fault) are whole numbers, not floats.
         return int(num) if self._desc.integer else num
+
+
+class SungrowModbusStatusSensor(CoordinatorEntity[SungrowPlantCoordinator], SensorEntity):
+    """A per-inverter diagnostic status text sensor for local Modbus entries (#361).
+
+    Reports the last Modbus poll's error string, or ``"ok"`` when the last poll
+    succeeded. Attributes carry the resolved device family and any register
+    blocks that were skipped as unsupported so users can alert on repeated errors
+    or a growing skipped-block list without decoding the connectivity sensor's
+    ``extra_state_attributes``.
+
+    Disabled by default (``entity_registry_enabled_default = False``): the state
+    is verbose and only matters to users diagnosing Modbus problems. Power users
+    enable it in the entity registry when they want alerting on poll failure.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_translation_key = "modbus_status"
+
+    def __init__(self, coordinator: SungrowPlantCoordinator, device: dict[str, Any]) -> None:
+        """Initialize the diagnostic status sensor for a local inverter."""
+        super().__init__(coordinator)
+        self.device_uuid = str(device["uuid"])
+        self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_modbus_status"
+        local_url = getattr(coordinator, "local_configuration_url", None)
+        self._attr_device_info = build_device_info(
+            device,
+            coordinator.plant_id,
+            fallback_name=coordinator.plant_name,
+            via_plant_id=getattr(coordinator, "via_plant_id", None),
+            configuration_url=local_url if isinstance(local_url, str) else None,
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return ``"ok"`` on a successful last poll; else the last error string.
+
+        Falls back to ``"unknown"`` when the coordinator hasn't reported an error
+        but ``last_update_success`` is somehow False — should be rare in practice
+        but avoids the None state that HA would render as "unknown" anyway.
+        """
+        if self.coordinator.last_update_success:
+            return "ok"
+        diag = getattr(self.coordinator, "modbus_diagnostics", None) or {}
+        return str(diag.get("last_error") or "unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the resolved device family and any skipped register blocks."""
+        diag = getattr(self.coordinator, "modbus_diagnostics", None) or {}
+        attrs: dict[str, Any] = {}
+        if diag.get("device_family"):
+            attrs["device_family"] = diag["device_family"]
+        if diag.get("skipped_blocks"):
+            attrs["skipped_blocks"] = diag["skipped_blocks"]
+        return attrs
