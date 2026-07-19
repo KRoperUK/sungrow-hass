@@ -100,6 +100,9 @@ async def test_setup_persists_rotated_tokens(hass: HomeAssistant):
         async def async_get_plant_devices(self, *args, **kwargs):
             return []
 
+        async def async_get_plant_details(self, *args, **kwargs):
+            return []
+
     async def _fake_parent_get_token(self):
         # Simulate pysolarcloud assigning a brand-new tokens dict on refresh.
         self.tokens = rotated

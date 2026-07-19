@@ -196,12 +196,20 @@ def mock_plants_service():
         plants_instance.async_get_plant_devices = AsyncMock(return_value=[])
         # Battery-presence detection (#148) fetches plant details during setup.
         plants_instance.async_get_plant_details = AsyncMock(return_value=[{"design_capacity_battery": 10.0}])
+        # Per-device realtime capture (#74): default to empty so tests that don't care
+        # about it don't leak an un-awaited-MagicMock TypeError now that the coordinator's
+        # per-device catch is narrowed (#350).
+        plants_instance.async_get_device_realtime = AsyncMock(return_value={})
         mock_plants_cls.return_value = plants_instance
 
         control_instance = MagicMock()
         control_instance.async_update_parameters = AsyncMock(return_value=[])
         control_instance.async_heartbeat = AsyncMock()
         control_instance.heartbeat_loop = AsyncMock()
+        # Dispatch-support probe is called during setup; stub True by default so tests
+        # that don't override see working dispatch entities (#350 narrowed the catch so
+        # an unstubbed MagicMock await now leaks a TypeError instead of being swallowed).
+        control_instance.async_check_update_support = AsyncMock(return_value=True)
         mock_control_cls.return_value = control_instance
 
         yield plants_instance

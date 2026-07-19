@@ -12,6 +12,7 @@ from datetime import datetime, time
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -20,6 +21,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
+from pysolarcloud import PySolarCloudException
 
 from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_CLOUD_USER, TRANSPORT_MODBUS_ONLY
 
@@ -278,7 +280,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 auth.tokens["expires_at"] = 0
                 try:
                     await auth.async_get_access_token()
-                except Exception as err:  # pylint: disable=broad-except
+                except (PySolarCloudException, ClientError, TimeoutError) as err:
                     _LOGGER.warning("Token refresh failed for entry %s: %s", entry.entry_id, err)
                     errors.append((entry.entry_id, str(err)))
                     continue

@@ -3,6 +3,7 @@
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from pysolarcloud.plants import DeviceType
 
@@ -113,7 +114,7 @@ async def test_diagnostics_device_probe_failure_is_captured(hass: HomeAssistant)
     entry.options = {}
 
     service = MagicMock()
-    service.async_get_plant_devices = AsyncMock(side_effect=RuntimeError("boom"))
+    service.async_get_plant_devices = AsyncMock(side_effect=ClientError("boom"))
     coordinator = _make_coordinator("1", "P", {}, plants_service=service)
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
 
@@ -139,7 +140,7 @@ async def test_diagnostics_per_device_realtime_failure_is_captured(hass: HomeAss
             {"uuid": "chg-1", "device_type": 999},
         ]
     )
-    service.async_get_device_realtime = AsyncMock(side_effect=RuntimeError("nope"))
+    service.async_get_device_realtime = AsyncMock(side_effect=ClientError("nope"))
     coordinator = _make_coordinator("1", "P", {}, plants_service=service)
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
 
@@ -374,7 +375,7 @@ async def test_points_catalog_handles_probe_error(hass: HomeAssistant):
     service.async_get_plant_devices = AsyncMock(
         return_value=[{"uuid": "chg-1", "device_type": 999, "device_model_code": "AC011E"}]
     )
-    service.async_get_device_realtime = AsyncMock(side_effect=RuntimeError("nope"))
+    service.async_get_device_realtime = AsyncMock(side_effect=ClientError("nope"))
     coordinator = _make_coordinator("1", "P", None, plants_service=service)
     entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
 

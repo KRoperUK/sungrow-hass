@@ -243,11 +243,12 @@ async def test_refresh_tokens_service_rejects_cloud_user(hass: HomeAssistant):
 async def test_refresh_tokens_service_surfaces_refresh_failure(hass: HomeAssistant):
     """A failing refresh is re-raised as :class:`HomeAssistantError` for the UI to display."""
     from homeassistant.exceptions import HomeAssistantError
+    from pysolarcloud import PySolarCloudException
 
     from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
 
     async def _fail() -> str:
-        raise RuntimeError("upstream 500")
+        raise PySolarCloudException({"error": "upstream 500"})
 
     entry, auth = _make_oauth_entry_with_auth(hass, refresh_side_effect=_fail)
     async_setup_services(hass)

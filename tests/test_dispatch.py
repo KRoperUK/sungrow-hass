@@ -902,7 +902,7 @@ async def test_dispatch_supported_check_fails_open():
     assert await _async_dispatch_supported(control, []) is True
 
     # A failing check must not hide working controls.
-    control.async_check_update_support = AsyncMock(side_effect=Exception("boom"))
+    control.async_check_update_support = AsyncMock(side_effect=PySolarCloudException({"error": "server_busy"}))
     assert await _async_dispatch_supported(control, ess) is True
 
 

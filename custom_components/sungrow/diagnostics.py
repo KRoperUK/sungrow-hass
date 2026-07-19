@@ -6,9 +6,11 @@ import asyncio
 import logging
 from typing import Any
 
+from aiohttp import ClientError
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
+from pysolarcloud import PySolarCloudException
 
 from . import SungrowConfigEntry, SungrowData
 from ._serialization import anonymise_device_keys, catalog_rows, jsonable
@@ -142,7 +144,7 @@ async def _probe_plant_devices(
     try:
         async with asyncio.timeout(PROBE_TIMEOUT):
             all_devices = await service.async_get_plant_devices(plant_id)
-    except Exception as err:  # pylint: disable=broad-except
+    except (PySolarCloudException, ClientError, TimeoutError) as err:
         _LOGGER.debug("Diagnostics: could not list devices for plant %s: %s", plant_id, err)
         return [{"error": str(err)}], {}, {}
 
@@ -169,7 +171,7 @@ async def _probe_plant_devices(
             async with asyncio.timeout(PROBE_TIMEOUT):
                 realtime = await service.async_get_device_realtime(plant_id, device_type)
             device_realtime[str(type_id)] = anonymise_device_keys(jsonable(realtime), uuid_map)
-        except Exception as err:  # pylint: disable=broad-except
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}
 
