@@ -388,3 +388,100 @@ async def test_points_catalog_handles_probe_error(hass: HomeAssistant):
     assert charger["points"] == []
     assert charger["family"] == "unknown"
     json.dumps(diag)
+
+
+# ---------------------------------------------------------------------------
+# Active Repairs in the diagnostics bundle (#357)
+# ---------------------------------------------------------------------------
+
+
+async def test_diagnostics_includes_active_sungrow_repairs(hass: HomeAssistant):
+    """Active Sungrow-owned issue-registry entries appear under ``repairs`` (#357)."""
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.sungrow.const import DOMAIN
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "rate_limited_12345",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="rate_limited",
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "dispatch_not_actuated_12345",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="dispatch_not_actuated",
+    )
+    # A non-Sungrow issue that must NOT appear in the bundle.
+    ir.async_create_issue(
+        hass,
+        "some_other_domain",
+        "unrelated_issue",
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="unrelated",
+    )
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"gateway": "Europe", "tokens": {"access_token": "x", "refresh_token": "y"}}
+    entry.options = {}
+    entry.runtime_data = SungrowData(coordinators=[], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert "repairs" in diag
+    repair_ids = {row["issue_id"] for row in diag["repairs"]}
+    # Only Sungrow-owned issues appear.
+    assert repair_ids == {"dispatch_not_actuated_12345", "rate_limited_12345"}
+    # And they carry the expected non-PII fields.
+    rate_row = next(row for row in diag["repairs"] if row["issue_id"] == "rate_limited_12345")
+    assert rate_row["translation_key"] == "rate_limited"
+    assert rate_row["severity"] == "warning"
+    assert rate_row["is_fixable"] is False
+    assert rate_row["active"] is True
+
+
+async def test_diagnostics_repairs_is_empty_when_no_issues(hass: HomeAssistant):
+    """A clean registry produces an empty ``repairs`` list — never a missing key."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"gateway": "Europe", "tokens": {"access_token": "x", "refresh_token": "y"}}
+    entry.options = {}
+    entry.runtime_data = SungrowData(coordinators=[], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["repairs"] == []
+
+
+async def test_diagnostics_repairs_are_sorted_deterministically(hass: HomeAssistant):
+    """``repairs`` rows come out sorted by ``issue_id`` so bundle diffs stay noise-free."""
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.sungrow.const import DOMAIN
+
+    for issue_id in ("z_last", "a_first", "m_middle"):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="whatever",
+        )
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"gateway": "Europe", "tokens": {"access_token": "x", "refresh_token": "y"}}
+    entry.options = {}
+    entry.runtime_data = SungrowData(coordinators=[], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert [row["issue_id"] for row in diag["repairs"]] == ["a_first", "m_middle", "z_last"]
