@@ -7,7 +7,6 @@ import time
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -21,6 +20,7 @@ from pysolarcloud.control import Control
 
 from . import (
     DispatchControl,
+    SungrowConfigEntry,
     async_start_heartbeat,
     async_stop_heartbeat,
     build_device_info,
@@ -28,7 +28,7 @@ from . import (
 )
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
-from .device_helpers import unique_id_owned_by_other_entry
+from .entity_platform_helpers import create_entity_adder
 from .modbus_control import ModbusControlError
 
 _LOGGER = logging.getLogger(__name__)
@@ -162,40 +162,25 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: DispatchContro
     ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow dispatch select entities."""
     data = entry.runtime_data
     control = data.control
     coordinators = data.coordinators
 
-    known_unique_ids: set[str] = set()
-
-    @callback
-    def _add_new_entities() -> None:
-        new_entities: list[SelectEntity] = []
-        for coordinator in coordinators:
-            for entity in _build_selects(coordinator, control):
-                uid = entity.unique_id
-                if uid is None or uid in known_unique_ids:
-                    continue
-                # Skip silently when another Sungrow entry already owns this unique_id
-                # (multiple entries on the same plant) so we don't produce an ERROR log
-                # per entity, per coordinator tick.
-                if unique_id_owned_by_other_entry(hass, "select", uid, entry.entry_id):
-                    _LOGGER.info(
-                        "Skipping dispatch select %s: already owned by another Sungrow entry",
-                        uid,
-                    )
-                    known_unique_ids.add(uid)
-                    continue
-                known_unique_ids.add(uid)
-                new_entities.append(entity)
-        if new_entities:
-            async_add_entities(new_entities)
-
-    _add_new_entities()
+    adder = create_entity_adder(
+        hass,
+        entry,
+        "select",
+        coordinators,
+        lambda coordinator: _build_selects(coordinator, control),
+        async_add_entities,
+    )
+    adder()
     for coordinator in coordinators:
-        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
+        entry.async_on_unload(coordinator.async_add_listener(adder))
 
 
 class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreEntity, SelectEntity):

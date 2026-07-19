@@ -7,19 +7,18 @@ import re
 from typing import Any
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import DispatchControl, build_device_info, select_dispatch_device
+from . import DispatchControl, SungrowConfigEntry, build_device_info, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
-from .device_helpers import unique_id_owned_by_other_entry
+from .entity_platform_helpers import create_entity_adder
 from .modbus_control import ModbusControlError
 from .model_specs import spec_for
 
@@ -247,40 +246,25 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
     return entities
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: SungrowConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Sungrow dispatch number entities."""
     data = entry.runtime_data
     control = data.control
     coordinators = data.coordinators
 
-    known_unique_ids: set[str] = set()
-
-    @callback
-    def _add_new_entities() -> None:
-        new_entities: list[NumberEntity] = []
-        for coordinator in coordinators:
-            for entity in _build_numbers(coordinator, control):
-                uid = entity.unique_id
-                if uid is None or uid in known_unique_ids:
-                    continue
-                # Skip silently when another Sungrow entry already owns this unique_id
-                # (multiple entries on the same plant) so we don't produce an ERROR log
-                # per entity, per coordinator tick.
-                if unique_id_owned_by_other_entry(hass, "number", uid, entry.entry_id):
-                    _LOGGER.info(
-                        "Skipping dispatch number %s: already owned by another Sungrow entry",
-                        uid,
-                    )
-                    known_unique_ids.add(uid)
-                    continue
-                known_unique_ids.add(uid)
-                new_entities.append(entity)
-        if new_entities:
-            async_add_entities(new_entities)
-
-    _add_new_entities()
+    adder = create_entity_adder(
+        hass,
+        entry,
+        "number",
+        coordinators,
+        lambda coordinator: _build_numbers(coordinator, control),
+        async_add_entities,
+    )
+    adder()
     for coordinator in coordinators:
-        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
+        entry.async_on_unload(coordinator.async_add_listener(adder))
 
 
 class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreNumber):

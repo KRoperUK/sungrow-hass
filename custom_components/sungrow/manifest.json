@@ -21,7 +21,7 @@
   ],
   "quality_scale": "platinum",
   "requirements": [
-    "sungrow-isolarcloud==0.14.0",
+    "sungrow-isolarcloud==0.15.0",
     "pymodbus>=3.6.0"
   ],
   "version": "5.6.1",
