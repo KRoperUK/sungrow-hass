@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import PERCENTAGE, EntityCategory
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
@@ -22,7 +22,7 @@ from .const import (
     INVERTER_DIAGNOSTIC_POINTS,
 )
 from .coordinator import SungrowPlantCoordinator
-from .device_helpers import unique_id_owned_by_other_entry
+from .entity_platform_helpers import create_entity_adder
 from .measure_points import (
     PERCENT_FRACTION_POINT_IDS,
     normalize_unit,
@@ -207,36 +207,18 @@ async def async_setup_entry(
     # Point the device "Visit" link at the region's iSolarCloud web console.
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
 
-    known_unique_ids: set[str] = set()
-
-    @callback
-    def _add_new_entities() -> None:
-        """Add entities for any plant points / devices not seen yet."""
-        new_entities: list[SensorEntity] = []
-        for coordinator in coordinators:
-            for entity in _build_sensors(coordinator, console_url):
-                uid = entity.unique_id
-                if uid is None or uid in known_unique_ids:
-                    continue
-                # Skip silently when another Sungrow entry already owns this unique_id
-                # (multiple entries on the same plant) so we don't produce an ERROR log
-                # per entity, per coordinator tick.
-                if unique_id_owned_by_other_entry(hass, "sensor", uid, entry.entry_id):
-                    _LOGGER.info(
-                        "Skipping sensor %s: already owned by another Sungrow entry",
-                        uid,
-                    )
-                    known_unique_ids.add(uid)
-                    continue
-                known_unique_ids.add(uid)
-                new_entities.append(entity)
-        if new_entities:
-            async_add_entities(new_entities)
-
+    adder = create_entity_adder(
+        hass,
+        entry,
+        "sensor",
+        coordinators,
+        lambda coordinator: _build_sensors(coordinator, console_url),
+        async_add_entities,
+    )
     # Add the initial set, then keep watching each coordinator for new devices.
-    _add_new_entities()
+    adder()
     for coordinator in coordinators:
-        entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
+        entry.async_on_unload(coordinator.async_add_listener(adder))
 
 
 class SungrowSensor(CoordinatorEntity, SensorEntity):
