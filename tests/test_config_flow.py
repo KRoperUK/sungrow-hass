@@ -303,6 +303,33 @@ async def test_finish_step_missing_code(hass: HomeAssistant, mock_auth):
     assert result["reason"] == "missing_code"
 
 
+async def test_finish_step_invalid_grant_shows_manual_form(hass: HomeAssistant, mock_auth):
+    """iSolarCloud ``invalid_grant`` bounces to the manual code form with a targeted error.
+
+    Regression from rc10 (v5.7.0): the code-already-used case was falling through to the
+    generic ``Exception`` handler and surfacing as ``"unknown"``, hiding the real cause
+    from users staring at a stuck flow.
+    """
+    from pysolarcloud import PySolarCloudException
+
+    flow = _flow_at_finish(hass)
+    flow._code = "one-time-code"
+    flow.auth_client = mock_auth
+    flow.auth_client.async_authorize = AsyncMock(
+        side_effect=PySolarCloudException(
+            {"error": "invalid_grant", "error_description": "Invalid authorization code: XYZ", "result_code": "2"}
+        )
+    )
+
+    result = await flow.async_step_finish()
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "auth_manual"
+    assert result["errors"] == {"base": "invalid_auth_code"}
+    # The used code has been cleared so the next submission doesn't re-send the same one.
+    assert flow._code is None
+
+
 async def test_finish_leaves_modbus_only_entry_alone(hass: HomeAssistant, mock_auth):
     """Cloud OAuth finish creates a pure cloud entry and does not merge/remove local."""
     from custom_components.sungrow.const import CONF_MODBUS_HOST, CONF_MODEL, CONF_TRANSPORT, TRANSPORT_MODBUS_ONLY

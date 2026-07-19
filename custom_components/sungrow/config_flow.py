@@ -888,6 +888,23 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except ClientError as e:
             _LOGGER.warning("Client connection error in async_step_finish: %s", e)
             return self._finish_error_result("cannot_connect")
+        except PySolarCloudException as e:
+            # ``invalid_grant`` means iSolarCloud rejected the authorization code —
+            # typically because it's already been used (double-click, browser retry)
+            # or has expired. Guide the user back to the manual form with a clear
+            # message instead of surfacing a generic "unknown" error. The exposed
+            # ``.error`` attribute carries the machine-readable code from the API
+            # response envelope (``str(e)`` only returns the description text).
+            if getattr(e, "error", None) == "invalid_grant":
+                _LOGGER.warning(
+                    "iSolarCloud rejected the authorization code as invalid_grant; "
+                    "showing the manual code-entry step so the user can retry."
+                )
+                # Clear the used code so the next submission gets a fresh one.
+                self._code = None
+                return self._finish_error_result("invalid_auth_code")
+            _LOGGER.warning("iSolarCloud error in async_step_finish: %s", e)
+            return self._finish_error_result("invalid_auth")
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception in async_step_finish: %s", e)
             return self._finish_error_result("unknown")
