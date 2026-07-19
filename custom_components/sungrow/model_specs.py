@@ -30,6 +30,16 @@ class ModelSpec:
     Fields are ``None`` when the datasheet does not apply (e.g. battery power on
     a PV-only string inverter). Callers must therefore treat any of the ``max_*``
     fields as optional and fall back to a conservative default.
+
+    ``unverified=True`` marks a row whose battery-side values have not been
+    cross-referenced against a Sungrow datasheet — either because TCzerny
+    flagged them as such upstream (see the MG hybrid family), or because the
+    model is a family estimate rather than a per-SKU datasheet lookup. The
+    battery-slider ceiling resolver
+    (:func:`~custom_components.sungrow.number._resolve_battery_rated_power`)
+    treats these rows conservatively: instead of trusting the possibly-wrong
+    battery values, it falls back to the AC-side rating so the slider never
+    exposes a ceiling above the inverter's nameplate.
     """
 
     phases: int
@@ -40,6 +50,8 @@ class ModelSpec:
     # Battery-side limits (SH hybrids only). None on SG string inverters.
     max_charge_power: int | None = None
     max_discharge_power: int | None = None
+    # True when the row is a family estimate / unverified against a datasheet (#349).
+    unverified: bool = False
 
 
 # Every SG-RS single-phase hybrid (SH*RS 3.0..6.0) shares the same battery power
@@ -79,7 +91,9 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     "SH8.0RS": ModelSpec(1, 4, 1, 8000, 36, *_SH_RS_HIGH_BATTERY),
     "SH10RS": ModelSpec(1, 4, 1, 10600, 45, *_SH_RS_HIGH_BATTERY),
     # --- SH-RT three-phase hybrid (battery). RT / RT-20 / -V112 / -V122 share
-    # the same power schedule per Sungrow's datasheet family map.
+    # the same power schedule per Sungrow's datasheet family map. MG* rows below
+    # are unverified estimates flagged by TCzerny — kept for coverage; the
+    # battery-slider resolver falls back to the AC rating on unverified specs.
     **{
         model: ModelSpec(
             phases=3,
@@ -89,40 +103,41 @@ MODEL_SPECS: dict[str, ModelSpec] = {
             max_current=cur,
             max_charge_power=charge,
             max_discharge_power=discharge,
+            unverified=unverified,
         )
-        for model, ac, cur, charge, discharge in [
-            ("SH5.0RT", 5000, 8, 7500, 6000),
-            ("SH5.0RT-20", 5000, 8, 7500, 6000),
-            ("SH5.0RT-V112", 5000, 8, 7500, 6000),
-            ("SH5.0RT-V122", 5000, 8, 7500, 6000),
-            ("SH6.0RT", 6000, 10, 9000, 7200),
-            ("SH6.0RT-20", 6000, 10, 9000, 7200),
-            ("SH6.0RT-V112", 6000, 10, 9000, 7200),
-            ("SH6.0RT-V122", 6000, 10, 9000, 7200),
-            ("SH8.0RT", 8000, 13, 10600, 10600),
-            ("SH8.0RT-20", 8000, 13, 10600, 10600),
-            ("SH8.0RT-V112", 8000, 13, 10600, 10600),
-            ("SH8.0RT-V122", 8000, 13, 10600, 10600),
-            ("SH10RT", 10000, 17, 10600, 10600),
-            ("SH10RT-20", 10000, 17, 10600, 10600),
-            ("SH10RT-V112", 10000, 17, 10600, 10600),
-            ("SH10RT-V122", 10000, 17, 10600, 10600),
+        for model, ac, cur, charge, discharge, unverified in [
+            ("SH5.0RT", 5000, 8, 7500, 6000, False),
+            ("SH5.0RT-20", 5000, 8, 7500, 6000, False),
+            ("SH5.0RT-V112", 5000, 8, 7500, 6000, False),
+            ("SH5.0RT-V122", 5000, 8, 7500, 6000, False),
+            ("SH6.0RT", 6000, 10, 9000, 7200, False),
+            ("SH6.0RT-20", 6000, 10, 9000, 7200, False),
+            ("SH6.0RT-V112", 6000, 10, 9000, 7200, False),
+            ("SH6.0RT-V122", 6000, 10, 9000, 7200, False),
+            ("SH8.0RT", 8000, 13, 10600, 10600, False),
+            ("SH8.0RT-20", 8000, 13, 10600, 10600, False),
+            ("SH8.0RT-V112", 8000, 13, 10600, 10600, False),
+            ("SH8.0RT-V122", 8000, 13, 10600, 10600, False),
+            ("SH10RT", 10000, 17, 10600, 10600, False),
+            ("SH10RT-20", 10000, 17, 10600, 10600, False),
+            ("SH10RT-V112", 10000, 17, 10600, 10600, False),
+            ("SH10RT-V122", 10000, 17, 10600, 10600, False),
             # SH*T commercial three-phase hybrids. Battery limits scale with AC rating.
-            ("SH5T", 5000, 8, 7500, 6000),
-            ("SH6T", 6000, 10, 9000, 7200),
-            ("SH8T", 8000, 13, 10600, 10600),
-            ("SH10T", 10000, 17, 10600, 10600),
-            ("SH12T", 12000, 20, 12000, 12000),
-            ("SH15T", 15000, 25, 15000, 15000),
-            ("SH20T", 20000, 32, 20000, 20000),
-            ("SH25T", 25000, 40, 25000, 25000),
+            ("SH5T", 5000, 8, 7500, 6000, False),
+            ("SH6T", 6000, 10, 9000, 7200, False),
+            ("SH8T", 8000, 13, 10600, 10600, False),
+            ("SH10T", 10000, 17, 10600, 10600, False),
+            ("SH12T", 12000, 20, 12000, 12000, False),
+            ("SH15T", 15000, 25, 15000, 15000, False),
+            ("SH20T", 20000, 32, 20000, 20000, False),
+            ("SH25T", 25000, 40, 25000, 25000, False),
             # MG hybrid — battery limits estimated from RT scaling; TCzerny flags
-            # these as unverified against datasheet. Kept for coverage; downstream
-            # entities still clamp to the resolved ceiling.
-            ("MG5RL", 5000, 8, 7500, 6000),
-            ("MG6RL", 6000, 10, 9000, 7200),
-            ("MG8RL", 8000, 13, 10600, 10600),
-            ("MG10RL", 10000, 17, 10600, 10600),
+            # these as unverified against datasheet. The battery resolver picks a
+            # conservative AC-side fallback for these until a datasheet confirms.
+            ("MG5RL", 5000, 8, 7500, 6000, True),
+            ("MG6RL", 6000, 10, 9000, 7200, True),
+            ("MG8RL", 8000, 13, 10600, 10600, True),
+            ("MG10RL", 10000, 17, 10600, 10600, True),
         ]
     },
 }
