@@ -11,8 +11,23 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "live: marks tests that require live API credentials (deselect with '-m \"not live\"')",
 ]
-# Exclude live tests by default
-addopts = "-m 'not live' -v --tb=short"
+# ``--import-mode=importlib`` skips pytest's legacy ``sys.path`` prepend hack, but
+# that hack was silently making ``custom_components/`` importable. Restore it
+# explicitly via ``pythonpath`` so ``from custom_components.sungrow.const import ...``
+# in ``conftest.py`` still resolves under the modern import mode.
+pythonpath = ["."]
+# Default flags:
+#   -m 'not live' — skip live-API tests in local + CI runs (opt in with `-m live`)
+#   --tb=short — compact tracebacks
+#   --import-mode=importlib — modern, faster import handling; avoids sys.path hacks
+#     and lets tests share top-level fixture modules without ``__init__.py`` clutter
+#     (see https://docs.pytest.org/en/stable/explanation/goodpractices.html#tests-outside-application-code)
+# Deliberately NOT included:
+#   -v — chatty per-test output; adds terminal overhead on 800+ tests. CI passes it
+#        explicitly when it needs the verbose report; local dev doesn't.
+#   -n auto (pytest-xdist) — CI runs parallelised via its own flag so the local
+#        `pytest -k foo` iteration doesn't pay the worker-startup cost every run.
+addopts = "-m 'not live' --tb=short --import-mode=importlib"
 
 [tool.coverage.run]
 source = ["custom_components/sungrow"]

@@ -34,6 +34,8 @@ Run the same checks CI runs:
   credentials in a `.env` file (see `.env.example`).
 - A `.pre-commit-config.yaml` is provided; `pre-commit install` will run ruff on
   commit.
+- To parallelise the test run, add `-n auto --dist=loadscope` (via `pytest-xdist`,
+  already in `requirements_test.txt`). CI runs with this flag by default.
 
 ## Pull requests
 

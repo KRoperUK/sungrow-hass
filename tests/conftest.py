@@ -140,7 +140,6 @@ def auto_mock_hass_http(hass: HomeAssistant):
     The test HA instance doesn't have an HTTP server, so hass.http is None.
     This also prevents thread leaks from the HTTP server in teardown checks.
     """
-    print(f"DEBUG: hass.config type: {type(hass.config)}")
     hass.http = MagicMock()
     yield
 
