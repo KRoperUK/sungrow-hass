@@ -8,9 +8,11 @@ from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
 from . import SungrowConfigEntry, SungrowData
 from ._serialization import anonymise_device_keys, catalog_rows, jsonable
+from .const import DOMAIN
 from .model_capabilities import resolve_capabilities
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +45,48 @@ TO_REDACT = {
     "device_name",
     "ps_name",
 }
+
+
+def collect_active_repairs(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Snapshot every Sungrow-owned Repair for the diagnostics bundle (#357).
+
+    Users routinely download diagnostics to attach to a support ticket, but the
+    Repairs inbox lives in a separate UI panel and is easy to forget — support
+    ends up asking "check your Repairs and screenshot them" as a second round-trip.
+    Including a snapshot here means one download tells the whole story.
+
+    Returned rows carry only non-PII identifiers: the ``issue_id`` (which encodes
+    the plant id, never a secret), the translation key, severity, active/ignored
+    flags, and the created timestamp. Deliberately dropped:
+
+    * ``data`` — Repairs sometimes carry endpoint URLs or error strings that could
+      leak network configuration; safer to omit than to try scrubbing.
+    * ``translation_placeholders`` — may carry plant/device names.
+    * ``domain`` — always ``sungrow``; noise.
+    * ``breaks_in_ha_version`` / ``is_persistent`` — internal to the Repair
+      framework, not useful for triage.
+
+    Rows are sorted by ``issue_id`` for a deterministic bundle (diff-friendly).
+    """
+    registry = ir.async_get(hass)
+    rows: list[dict[str, Any]] = []
+    for (domain, issue_id), issue in registry.issues.items():
+        if domain != DOMAIN:
+            continue
+        rows.append(
+            {
+                "issue_id": issue_id,
+                "translation_key": issue.translation_key,
+                "severity": issue.severity.value if issue.severity is not None else None,
+                "is_fixable": issue.is_fixable,
+                "learn_more_url": issue.learn_more_url,
+                "active": issue.active,
+                "dismissed_version": issue.dismissed_version,
+                "created": issue.created.isoformat() if issue.created is not None else None,
+            }
+        )
+    rows.sort(key=lambda row: row["issue_id"])
+    return rows
 
 
 def build_points_catalog(
@@ -184,6 +228,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "tokens_present": "tokens" in entry.data,
             "options": dict(entry.options),
             "plants": plant_data,
+            # Active Sungrow Repairs (#357). Global to the integration (issues aren't
+            # per-entry) so the same list appears in every entry's bundle — harmless
+            # duplication for a much friendlier one-shot support workflow.
+            "repairs": collect_active_repairs(hass),
         },
         TO_REDACT,
     )
