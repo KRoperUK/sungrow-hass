@@ -44,7 +44,7 @@ from .conftest import MOCK_CONFIG_DATA, MOCK_USER_INPUT
 def mock_client_session():
     """Mock async_get_clientsession to prevent background thread creation."""
     with patch(
-        "custom_components.sungrow.config_flow.async_get_clientsession",
+        "custom_components.sungrow.config_flow._base.async_get_clientsession",
         return_value=MagicMock(),
     ):
         yield
@@ -72,7 +72,7 @@ async def _reauth_to_manual(hass: HomeAssistant, entry: MockConfigEntry) -> str:
         await asyncio.sleep(0)
         raise TimeoutError
 
-    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_timeout):
+    with patch("custom_components.sungrow.config_flow.cloud_oauth.asyncio.wait_for", side_effect=_timeout):
         result = await entry.start_reauth_flow(hass)
         assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
         await hass.async_block_till_done()
@@ -259,7 +259,7 @@ async def test_reauth_unexpected_error(hass: HomeAssistant, mock_auth):
 async def test_reauth_library_missing(hass: HomeAssistant):
     """Reauth aborts if the pysolarcloud library is unavailable."""
     entry = _hub_entry(hass)
-    with patch("custom_components.sungrow.config_flow.Auth", None):
+    with patch("custom_components.sungrow.config_flow._base.Auth", None):
         result = await entry.start_reauth_flow(hass)
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
@@ -286,7 +286,7 @@ async def test_finish_step_library_missing(hass: HomeAssistant):
     """async_step_finish aborts with library_missing when the library is gone."""
     flow = _flow_at_finish(hass)
     flow.context["code"] = "some_code"
-    with patch("custom_components.sungrow.config_flow.Auth", None):
+    with patch("custom_components.sungrow.config_flow._base.Auth", None):
         result = await flow.async_step_finish()
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
@@ -444,7 +444,7 @@ async def test_late_callback_completes_from_manual_step(hass: HomeAssistant, moc
             raise TimeoutError
         return await real_wait_for(aw, timeout=None)
 
-    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_wait_for):
+    with patch("custom_components.sungrow.config_flow.cloud_oauth.asyncio.wait_for", side_effect=_wait_for):
         result = await entry.start_reauth_flow(hass)
         assert result["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
         await hass.async_block_till_done()
@@ -718,7 +718,7 @@ async def test_reconfigure_updates_settings_and_reauthorizes(hass: HomeAssistant
         CONF_REDIRECT_URI: MOCK_USER_INPUT[CONF_REDIRECT_URI],
     }
     # Submitting drives to the OAuth wait; force it to time out -> manual entry.
-    with patch("custom_components.sungrow.config_flow.asyncio.wait_for", side_effect=_timeout):
+    with patch("custom_components.sungrow.config_flow.cloud_oauth.asyncio.wait_for", side_effect=_timeout):
         result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=new_input)
         assert result2["type"] == data_entry_flow.FlowResultType.SHOW_PROGRESS
         await hass.async_block_till_done()
@@ -1052,7 +1052,7 @@ async def test_cloud_user_transport_creates_entry(hass: HomeAssistant):
 
     client = MagicMock()
     client.async_get_plants = AsyncMock(return_value=[{"ps_id": 1, "ps_name": "Home"}])
-    with patch("custom_components.sungrow.config_flow.UserAuth", return_value=client):
+    with patch("custom_components.sungrow.config_flow._base.UserAuth", return_value=client):
         result3 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={
@@ -1085,7 +1085,7 @@ async def test_cloud_user_invalid_auth_shows_error(hass: HomeAssistant):
 
     client = MagicMock()
     client.async_get_plants = AsyncMock(side_effect=AuthError({"error": "user_login_failed"}))
-    with patch("custom_components.sungrow.config_flow.UserAuth", return_value=client):
+    with patch("custom_components.sungrow.config_flow._base.UserAuth", return_value=client):
         result3 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={CONF_USER_ACCOUNT: "me@example.com", CONF_USER_PASSWORD: "bad", CONF_GATEWAY: "Europe"},
