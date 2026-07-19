@@ -39,7 +39,6 @@ from .const import (
     DOMAIN,
     GATEWAY_CONSOLE_URLS,
     GATEWAYS,
-    TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
     TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
@@ -449,14 +448,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     if transport == TRANSPORT_CLOUD_USER:
         return await _async_setup_cloud_user(hass, entry)
 
-    if transport == TRANSPORT_CLOUD_MODBUS:
-        _LOGGER.info(
-            "Entry %s configured for cloud+modbus; Modbus wiring deferred to #217",
-            entry.title,
-        )
-
-    # cloud_only and cloud_modbus both use the standard cloud coordinator path.
-    # Split legacy hybrid cloud+Modbus entries into pure cloud + separate local.
+    # cloud_only path. Legacy cloud_modbus entries have been migrated to cloud_only
+    # by ``async_migrate_entry`` (#348); older hybrid-shape entries with orphan
+    # ``modbus_host`` in options get split into pure cloud + separate local here.
     _async_split_legacy_hybrid(hass, entry)
 
     # Defensive back-fill: recover app_id from unique_id if missing (#245).
