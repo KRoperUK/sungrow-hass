@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
 from homeassistant.const import EntityCategory
@@ -168,38 +168,70 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
     },
 }
 
-# Watt-valued power parameters whose slider maximum is sized from the device.
-# ``feed_in_limitation_value`` follows the AC nameplate rating (an export limit
-# cannot exceed what the inverter can push to the grid). ``charge_discharge_power``
-# is a *battery-side* number and can exceed the AC rating: SH-RS single-phase
-# hybrids top out around 3–6 kW AC but drive 6.6–10.6 kW to the battery. The
-# spec catalog (#332) provides both numbers per model; entities fall back to the
-# AC rating and finally to :data:`DEFAULT_MAX_DISPATCH_POWER` when the model
-# isn't in the catalog, so behaviour is unchanged for unknown models.
-_AC_RATED_POWER_PARAMS = frozenset({"feed_in_limitation_value"})
-_BATTERY_POWER_PARAMS = frozenset({"charge_discharge_power"})
+# Watt-valued dispatch parameters whose slider maximum is sized from the device.
+# The value picks the resolution strategy — ``"ac"`` reads the AC nameplate
+# (``feed_in_limitation_value``, since an export limit cannot exceed what the
+# inverter can push to the grid), ``"battery"`` reads the battery-side rating
+# (``charge_discharge_power``, since SH-RS hybrids drive 6.6–10.6 kW to the
+# battery from a 3–6 kW AC output — the battery limit exceeds the AC rating).
+#
+# Adding a new watt-valued parameter is a one-line change here; ``_resolve_param_max_power``
+# routes on the value. Non-watt params (percent, duration, ratio) don't appear
+# in this mapping — their bounds are static per :data:`DISPATCH_NUMBERS`.
+_POWER_PARAM_RATING_KIND: dict[str, Literal["ac", "battery"]] = {
+    "feed_in_limitation_value": "ac",
+    "charge_discharge_power": "battery",
+}
 
 
-def _resolve_param_max_power(
-    param: str,
-    target: dict[str, Any],
-    ac_rated_power: int,
-) -> int:
-    """Return the slider ceiling for a watt-valued dispatch parameter.
+def _resolve_ac_rated_power(target: dict[str, Any]) -> int:
+    """Return the device's AC-side rated output power in watts.
 
-    Battery-side params consult the datasheet catalog for the model's
-    ``max_charge_power`` (larger of charge/discharge, since the same slider drives
-    both directions). AC-side params keep the historic AC-nameplate ceiling.
-    ``ac_rated_power`` is the caller's already-resolved fallback so the
-    conservative default is applied in exactly one place.
+    Single source of truth for AC-side rating resolution, priority-ordered:
+
+    1. Datasheet catalog (:func:`~custom_components.sungrow.model_specs.spec_for`) —
+       the authoritative per-model number where known. Preferred over the regex
+       fallback because e.g. SG3.6RS parses to 3600 W but the datasheet lists 3680 W.
+    2. Model-code regex (:func:`rated_power_w`) — catches unknown models that
+       still encode the kW rating in their model code.
+    3. :data:`DEFAULT_MAX_DISPATCH_POWER` — final conservative clamp.
     """
-    if param in _BATTERY_POWER_PARAMS:
-        spec = spec_for(str(target.get("device_model_code") or ""))
-        if spec is not None:
-            battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
-            if battery_limits:
-                return max(battery_limits)
-    return ac_rated_power
+    spec = spec_for(str(target.get("device_model_code") or ""))
+    if spec is not None:
+        return spec.max_ac_output_power
+    return rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
+
+
+def _resolve_battery_rated_power(target: dict[str, Any]) -> int:
+    """Return the device's battery-side rated power (max of charge/discharge) in watts.
+
+    Battery-side sliders drive charge OR discharge, so the ceiling is
+    ``max(charge_power, discharge_power)`` from the datasheet. Falls back to the
+    AC rating for models without battery entries in the catalog, and finally to
+    :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
+    :func:`_resolve_ac_rated_power`.
+    """
+    spec = spec_for(str(target.get("device_model_code") or ""))
+    if spec is not None:
+        battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
+        if battery_limits:
+            return max(battery_limits)
+    return _resolve_ac_rated_power(target)
+
+
+def _resolve_param_max_power(param: str, target: dict[str, Any]) -> int | None:
+    """Return the slider ceiling for a watt-valued dispatch parameter, or ``None``.
+
+    Consults :data:`_POWER_PARAM_RATING_KIND` to decide whether the parameter is
+    AC-side or battery-side, and routes to the appropriate resolver. Returns
+    ``None`` for parameters that aren't watt-valued (their bounds are static).
+    """
+    kind = _POWER_PARAM_RATING_KIND.get(param)
+    if kind == "ac":
+        return _resolve_ac_rated_power(target)
+    if kind == "battery":
+        return _resolve_battery_rated_power(target)
+    return None
 
 
 def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchControl | None) -> list[NumberEntity]:
@@ -220,9 +252,6 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
         return []
     if not target.get("uuid"):
         return []
-    # Fallback ceiling used when the model isn't in the datasheet catalog (#332):
-    # parse the model code's kW rating and clamp; else the conservative default.
-    ac_rated_power = rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
     # Local ModbusControl only maps a subset of Appendix-10 params (#220).
     # Require a real collection so MagicMock control clients in tests are unaffected.
     raw_supported = getattr(control, "supported_parameters", None)
@@ -234,10 +263,11 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
             continue
         if supported is not None and param not in supported:
             continue
-        if param in _AC_RATED_POWER_PARAMS or param in _BATTERY_POWER_PARAMS:
-            max_power = _resolve_param_max_power(param, target, ac_rated_power)
-            if max_power != meta["native_max_value"]:
-                meta = {**meta, "native_max_value": max_power}
+        # Watt-valued params get their slider ceiling from the device's rated power
+        # (:func:`_resolve_param_max_power` returns ``None`` for non-watt params).
+        max_power = _resolve_param_max_power(param, target)
+        if max_power is not None and max_power != meta["native_max_value"]:
+            meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
     # The forced-dispatch auto-revert timeout only makes sense alongside the battery
     # charge/discharge controls, so gate it on the same has_battery check (#157/#148).

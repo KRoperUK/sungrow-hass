@@ -742,6 +742,48 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
 
 
+async def test_feed_in_limitation_prefers_datasheet_over_regex(hass: HomeAssistant):
+    """AC-side resolution reads the datasheet before the model-code regex (#353).
+
+    Regression test: SG3.6RS parses to 3600 W via ``rated_power_w`` but the datasheet
+    lists the real nameplate as 3680 W. Before consolidating on
+    :func:`_resolve_ac_rated_power`, the AC-side path went straight through the
+    regex and clipped ~80 W. The datasheet now wins.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    # SG3.6RS is a PV-only string inverter — no dispatch. Use an SH3.6RS (hybrid)
+    # so the export-limit entity is actually built and its ceiling is checked.
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH3.6RS"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
+    # 3680 (datasheet SH3.6RS AC nameplate), not 3600 (regex parse of "3.6").
+    assert export_limit._attr_native_max_value == 3680
+
+
+def test_resolve_param_max_power_returns_none_for_non_watt_params():
+    """The resolver returns ``None`` for params that aren't watt-valued (#353).
+
+    Percent / duration / ratio params keep their static bounds from ``DISPATCH_NUMBERS``;
+    only ``feed_in_limitation_value`` and ``charge_discharge_power`` get per-device rescaling.
+    """
+    from custom_components.sungrow.number import _resolve_param_max_power
+
+    target = {"device_model_code": "SH3.6RS", "uuid": "ess-1"}
+    # Non-watt params: no rating resolution applies.
+    assert _resolve_param_max_power("soc_upper_limit", target) is None
+    assert _resolve_param_max_power("q_t", target) is None
+    assert _resolve_param_max_power("pf", target) is None
+    assert _resolve_param_max_power("external_ems_heartbeat", target) is None
+    # Watt params: resolution kicks in.
+    assert _resolve_param_max_power("feed_in_limitation_value", target) == 3680
+    assert _resolve_param_max_power("charge_discharge_power", target) == 6600
+
+
 # ---------------------------------------------------------------------------
 # kW unit conversion + additional controls (device-verified formats)
 # ---------------------------------------------------------------------------
