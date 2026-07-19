@@ -225,15 +225,90 @@ def test_arm_and_dsp_strings_decode_from_realistic_bytes():
 
 
 def test_sg_rs_low_block_still_fits_after_arm_dsp_addition():
-    """The SG-RS low block (4953..5035) stays comfortably under the 125-register cap (#333)."""
+    """The SG-RS low block (4951..5035) stays comfortably under the 125-register cap (#333)."""
     from custom_components.sungrow.modbus_registers import SG_RS_INPUT_POINTS
 
     blocks = block_partitions(SG_RS_INPUT_POINTS)
-    # A single low block covers everything from ARM software to the last SG-RS
-    # numeric point. It must fit under 125 registers so pymodbus accepts it.
+    # A single low block covers everything from the protocol_version u32 at 4951
+    # to the last SG-RS numeric point. It must fit under 125 registers so
+    # pymodbus accepts it.
     assert len(blocks) == 1
     _, count = blocks[0]
     assert count <= 125
+
+
+# ---------------------------------------------------------------------------
+# Byte-BCD protocol version (#333)
+# ---------------------------------------------------------------------------
+# Wire 4951 is a u32 whose top three bytes are byte-BCD encoded — each byte
+# carries two decimal digits (high nibble = tens, low nibble = units).
+# Example from TCzerny: 0x01015300 → "V1.1.53".
+
+
+def test_version_bcd_register_count_is_two():
+    """A version_bcd point occupies two registers, like a u32."""
+    point = ModbusPoint(4951, "protocol_version", "version_bcd", 1, None)
+    assert point.register_count == 2
+
+
+def test_decode_version_bcd_matches_documented_example():
+    """0x01015300 decodes to 'V1.1.53' — the mkaiser/TCzerny worked example."""
+    point = ModbusPoint(0, "protocol_version", "version_bcd", 1, None)
+    # u32 low-word-first: 0x01015300 = low 0x5300, high 0x0101.
+    registers = [0x5300, 0x0101]
+    out = decode_registers((point,), 0, registers)
+    assert out["protocol_version"]["value"] == "V1.1.53"
+    assert out["protocol_version"]["unit"] is None
+    assert out["protocol_version"]["source"] == "modbus"
+
+
+def test_decode_version_bcd_omits_unpopulated_register():
+    """An all-zero register means the firmware doesn't expose the version."""
+    point = ModbusPoint(0, "protocol_version", "version_bcd", 1, None)
+    out = decode_registers((point,), 0, [0, 0])
+    assert "protocol_version" not in out
+
+
+def test_decode_version_bcd_rejects_invalid_bcd_digits():
+    """A byte whose nibble is > 9 isn't valid BCD — treat as unpopulated."""
+    point = ModbusPoint(0, "protocol_version", "version_bcd", 1, None)
+    # 0xAB as the "major" byte: high nibble A, low nibble B — not valid BCD.
+    # Low word 0x0000, high word 0xAB01 -> u32 = 0xAB010000.
+    registers = [0x0000, 0xAB01]
+    out = decode_registers((point,), 0, registers)
+    assert "protocol_version" not in out
+
+
+def test_decode_version_bcd_handles_zero_minor_and_patch():
+    """A version like V2.0.0 decodes even though minor and patch are zero bytes.
+
+    The all-zero *raw* is treated as unpopulated, but a non-zero raw with zero
+    minor / patch bytes must produce the correct version string.
+    """
+    point = ModbusPoint(0, "protocol_version", "version_bcd", 1, None)
+    # 0x02000000 -> V2.0.0 (major=0x02, minor=0x00, patch=0x00).
+    registers = [0x0000, 0x0200]
+    out = decode_registers((point,), 0, registers)
+    assert out["protocol_version"]["value"] == "V2.0.0"
+
+
+def test_protocol_version_present_in_both_family_maps():
+    """protocol_version appears in the SG-RS and SH-RT maps at wire 4951."""
+    from custom_components.sungrow.modbus_registers import REGISTER_MAPS
+
+    for family in ("sg_rs", "sh_rt"):
+        codes = {p.code: p for p in REGISTER_MAPS[family]}
+        point = codes.get("protocol_version")
+        assert point is not None, f"protocol_version missing from {family}"
+        assert point.data_type == "version_bcd"
+        assert point.address == 4951
+
+
+def test_protocol_version_is_diagnostic():
+    """protocol_version is in LOCAL_IDENTITY_CODES so it lands under Diagnostic."""
+    from custom_components.sungrow.modbus_registers import LOCAL_IDENTITY_CODES
+
+    assert "protocol_version" in LOCAL_IDENTITY_CODES
 
 
 def test_block_bounds_covers_all_points_in_one_read():
