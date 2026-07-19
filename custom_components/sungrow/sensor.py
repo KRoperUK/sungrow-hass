@@ -397,7 +397,16 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             # pollute long-term statistics (issue #113).
             return None
         # Capacity-factor ratios are reported as a 0–1 fraction but shown as "%".
-        return num * 100 if self._scale_to_percent else num
+        if self._scale_to_percent:
+            return num * 100
+        # Battery SOC on some plants (observed on SBH250-V11, issue #314) arrives as a
+        # 0–1 fraction from iSolarCloud instead of a 0–100 percentage. Rescale to
+        # percent so it displays correctly under the "%" unit. Skip 0 (empty battery is
+        # 0 either way) and only trigger when the value fits the fraction shape
+        # (0 < num ≤ 1.0); anything larger is already a percentage.
+        if self._attr_device_class == SensorDeviceClass.BATTERY and 0 < num <= 1.0:
+            return num * 100
+        return num
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
