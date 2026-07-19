@@ -163,7 +163,7 @@ def mock_config_entry() -> MockConfigEntry:
 @pytest.fixture
 def mock_auth():
     """Create a mock Auth instance matching the real pysolarcloud.Auth interface."""
-    with patch("custom_components.sungrow.config_flow.Auth") as mock_auth_cls:
+    with patch("custom_components.sungrow._config_flow._base.Auth") as mock_auth_cls:
         auth_instance = MagicMock()
         auth_instance.auth_url.return_value = "https://isolarcloud.eu/oauth?client_id=test"
         auth_instance.async_authorize = AsyncMock(return_value=None)

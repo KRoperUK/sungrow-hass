@@ -26,7 +26,7 @@ from .conftest import MOCK_USER_INPUT
 def mock_client_session():
     """Mock async_get_clientsession."""
     with patch(
-        "custom_components.sungrow.config_flow.async_get_clientsession",
+        "custom_components.sungrow._config_flow._base.async_get_clientsession",
         return_value=MagicMock(),
     ):
         yield
