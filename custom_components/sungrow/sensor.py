@@ -23,6 +23,7 @@ from .const import (
     INVERTER_DIAGNOSTIC_POINTS,
 )
 from .coordinator import SungrowPlantCoordinator
+from .device_helpers import unique_id_owned_by_other_entry
 from .measure_points import (
     PERCENT_FRACTION_POINT_IDS,
     normalize_unit,
@@ -215,6 +216,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             for entity in _build_sensors(coordinator, console_url):
                 uid = entity.unique_id
                 if uid is None or uid in known_unique_ids:
+                    continue
+                # Skip silently when another Sungrow entry already owns this unique_id
+                # (multiple entries on the same plant) so we don't produce an ERROR log
+                # per entity, per coordinator tick.
+                if unique_id_owned_by_other_entry(hass, "sensor", uid, entry.entry_id):
+                    _LOGGER.info(
+                        "Skipping sensor %s: already owned by another Sungrow entry",
+                        uid,
+                    )
+                    known_unique_ids.add(uid)
                     continue
                 known_unique_ids.add(uid)
                 new_entities.append(entity)
