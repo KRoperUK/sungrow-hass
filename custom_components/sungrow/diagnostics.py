@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import enum
 import logging
 from typing import Any
 
@@ -11,7 +10,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import SungrowConfigEntry, SungrowData
-from .measure_points import resolve_name
+from ._serialization import anonymise_device_keys, catalog_rows, jsonable
 from .model_capabilities import resolve_capabilities
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,71 +45,6 @@ TO_REDACT = {
 }
 
 
-def _anonymise_device_keys(realtime: Any, uuid_map: dict[str, str]) -> Any:
-    """Replace device-uuid keys in a per-device realtime dict with stable placeholders.
-
-    ``async_get_device_realtime`` returns ``{device_uuid: {...points...}}`` — the device
-    uuids are dict *keys*, not values named ``uuid``, so ``async_redact_data`` (which only
-    scrubs values under known key names) can't reach them and they would otherwise leak
-    into a diagnostics download (#122). Map each uuid to a stable ``device_N`` placeholder,
-    sharing ``uuid_map`` across device types within a plant so the same device keeps the
-    same label. Non-dict payloads (e.g. an ``{"error": ...}`` capture) pass through
-    untouched — their keys are not uuids.
-    """
-    if not isinstance(realtime, dict):
-        return realtime
-    anonymised: dict[str, Any] = {}
-    for uuid, payload in realtime.items():
-        placeholder = uuid_map.setdefault(str(uuid), f"device_{len(uuid_map) + 1}")
-        anonymised[placeholder] = payload
-    return anonymised
-
-
-def _jsonable(obj: Any) -> Any:
-    """Make API payloads JSON-serialisable for the diagnostics download.
-
-    pysolarcloud converts *known* device types / fault statuses to ``enum`` members
-    (which ``json`` can't serialise); an *unknown* device type — e.g. an EV charger
-    the library hasn't catalogued — is left as its raw int, which is exactly the
-    identifier we want to surface. Convert enums to ``"NAME (value)"`` and recurse
-    into containers; everything else passes through untouched.
-    """
-    if isinstance(obj, enum.Enum):
-        return f"{obj.name} ({obj.value})"
-    if isinstance(obj, dict):
-        return {k: _jsonable(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(v) for v in obj]
-    return obj
-
-
-def _catalog_rows(points: Any) -> list[dict[str, Any]]:
-    """Flatten a ``{code: point}`` realtime dict into tidy, sorted catalog rows.
-
-    Each row is ``{point_id, code, name, value, unit}`` — the exact fields a user needs
-    to pick a point for the "Extra measure points" option (#252). The friendly English
-    ``name`` comes from the measure-point catalog (``resolve_name``), not the API's
-    Chinese-for-English-locale name nor the user's device name, so the rows carry no PII.
-    """
-    if not isinstance(points, dict):
-        return []
-    rows: list[dict[str, Any]] = []
-    for code, point in points.items():
-        if not isinstance(point, dict):
-            continue
-        point_id = str(point.get("id") or code)
-        rows.append(
-            {
-                "point_id": point_id,
-                "code": str(code),
-                "name": resolve_name(point_id, str(code), point.get("name")),
-                "value": point.get("value"),
-                "unit": point.get("unit"),
-            }
-        )
-    return sorted(rows, key=lambda row: row["point_id"])
-
-
 def build_points_catalog(
     plant_realtime: Any,
     device_realtime: dict[str, Any],
@@ -126,7 +60,7 @@ def build_points_catalog(
     metadata and model codes — no uuids, serials or user-set names — so it is safe to
     include in a shared diagnostics bundle.
     """
-    catalog: dict[str, Any] = {"plant": _catalog_rows(plant_realtime), "devices": {}}
+    catalog: dict[str, Any] = {"plant": catalog_rows(plant_realtime), "devices": {}}
     for type_id, per_device in device_realtime.items():
         # Merge points across all devices of this type, deduped by point id (devices of
         # one type report the same point set). ``per_device`` is ``{device_N: {code:
@@ -134,7 +68,7 @@ def build_points_catalog(
         merged: dict[str, dict[str, Any]] = {}
         if isinstance(per_device, dict):
             for payload in per_device.values():
-                for row in _catalog_rows(payload):
+                for row in catalog_rows(payload):
                     merged.setdefault(row["point_id"], row)
         model = models_by_type.get(type_id)
         caps = resolve_capabilities(model)
@@ -190,12 +124,12 @@ async def _probe_plant_devices(
         try:
             async with asyncio.timeout(PROBE_TIMEOUT):
                 realtime = await service.async_get_device_realtime(plant_id, device_type)
-            device_realtime[str(type_id)] = _anonymise_device_keys(_jsonable(realtime), uuid_map)
+            device_realtime[str(type_id)] = anonymise_device_keys(jsonable(realtime), uuid_map)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.debug("Diagnostics: device realtime failed for type %s: %s", type_id, err)
             device_realtime[str(type_id)] = {"error": str(err)}
 
-    return _jsonable(all_devices), device_realtime, models_by_type
+    return jsonable(all_devices), device_realtime, models_by_type
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SungrowConfigEntry) -> dict[str, Any]:
@@ -230,7 +164,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "last_update_success": coordinator.last_update_success,
             "data": coordinator.data,
             # Devices the integration created dispatch entities for (inverter/ESS).
-            "devices": _jsonable(devices_by_plant.get(plant_id, [])),
+            "devices": jsonable(devices_by_plant.get(plant_id, [])),
             # Every device on the plant, including hardware without mapped sensors.
             "all_devices": all_devices,
             # Per-device-type realtime data (best effort; {} where unsupported).
