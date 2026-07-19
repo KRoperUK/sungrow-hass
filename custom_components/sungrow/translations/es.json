@@ -97,6 +97,7 @@
       "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
       "invalid_auth": "Autenticación no válida",
       "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
+      "invalid_redirect_uri": "La URI de redirección debe terminar en /api/sungrow_hass/callback. Actualízala aquí Y en el portal de desarrollador de iSolarCloud para que coincidan — de lo contrario, iSolarCloud redirige a la página de inicio de Home Assistant y se pierde el código de autorización.",
       "unknown": "Error inesperado"
     },
     "abort": {
