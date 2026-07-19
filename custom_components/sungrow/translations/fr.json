@@ -286,6 +286,16 @@
           "description": "Entrée de configuration Sungrow."
         }
       }
+    },
+    "refresh_tokens": {
+      "name": "Actualiser les jetons OAuth",
+      "description": "Force une actualisation immédiate des jetons OAuth sur l'entrée cloud indiquée (ou sur toutes les entrées cloud chargées si aucune n'est spécifiée). Utile pour le triage support lorsque les jetons semblent bloqués. Les entrées Modbus-only et compte utilisateur n'ont pas de jetons OAuth et sont rejetées.",
+      "fields": {
+        "config_entry": {
+          "name": "Intégration",
+          "description": "Entrée OAuth Sungrow à actualiser. Laisser vide pour actualiser toutes les entrées cloud chargées."
+        }
+      }
     }
   }
 }

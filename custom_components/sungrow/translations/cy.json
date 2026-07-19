@@ -286,6 +286,16 @@
           "description": "Cofnod cyfluniad Sungrow."
         }
       }
+    },
+    "refresh_tokens": {
+      "name": "Adnewyddu tocynnau OAuth",
+      "description": "Yn gorfodi adnewyddiad tocyn OAuth ar unwaith ar y cofnod cwmwl a nodwyd (neu bob cofnod cwmwl wedi'i lwytho os na chaiff un ei nodi). Yn ddefnyddiol i gymorth ddiagnosio pan fydd tocynnau'n ymddangos yn sownd. Nid oes tocynnau OAuth gan gofnodion Modbus-yn-unig neu gyfrif defnyddiwr, ac maent yn cael eu gwrthod.",
+      "fields": {
+        "config_entry": {
+          "name": "Integreiddio",
+          "description": "Cofnod OAuth Sungrow i'w adnewyddu. Gadewch yn wag i adnewyddu pob cofnod cwmwl wedi'i lwytho."
+        }
+      }
     }
   }
 }

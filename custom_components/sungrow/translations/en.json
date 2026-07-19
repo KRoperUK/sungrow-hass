@@ -286,6 +286,16 @@
           "description": "Sungrow config entry to target."
         }
       }
+    },
+    "refresh_tokens": {
+      "name": "Refresh OAuth tokens",
+      "description": "Force an immediate OAuth token refresh on the addressed cloud entry (or every loaded cloud entry when none is specified). Useful for support triage when tokens appear stuck. Modbus-only and user-account entries have no OAuth tokens to refresh and are rejected.",
+      "fields": {
+        "config_entry": {
+          "name": "Integration",
+          "description": "Sungrow OAuth config entry to refresh. Leave empty to refresh every loaded cloud entry."
+        }
+      }
     }
   }
 }

@@ -286,6 +286,16 @@
           "description": "Entrada de configuración Sungrow."
         }
       }
+    },
+    "refresh_tokens": {
+      "name": "Actualizar tokens OAuth",
+      "description": "Fuerza una actualización inmediata de los tokens OAuth en la entrada de nube indicada (o en todas las entradas de nube cargadas si no se especifica ninguna). Útil para triaje de soporte cuando los tokens parecen bloqueados. Las entradas Modbus-only y de cuenta de usuario no tienen tokens OAuth y se rechazan.",
+      "fields": {
+        "config_entry": {
+          "name": "Integración",
+          "description": "Entrada OAuth de Sungrow a actualizar. Dejar vacío para actualizar todas las entradas de nube cargadas."
+        }
+      }
     }
   }
 }

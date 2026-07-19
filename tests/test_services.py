@@ -146,3 +146,127 @@ async def test_set_battery_mode_no_selects_raises(hass: HomeAssistant):
 
     with pytest.raises(ServiceValidationError, match="No Sungrow battery mode"):
         await hass.services.async_call(DOMAIN, SERVICE_SET_BATTERY_MODE, {"mode": "self_consumption"}, blocking=True)
+
+
+# ---------------------------------------------------------------------------
+# sungrow.refresh_tokens (#356)
+# ---------------------------------------------------------------------------
+
+
+def _make_oauth_entry_with_auth(hass, *, entry_id="test_entry", refresh_side_effect=None):
+    """Build a mocked cloud entry with a fake ``Auth`` accessible via ``plants_service``."""
+    from unittest.mock import MagicMock as _MagicMock
+
+    from custom_components.sungrow.const import TRANSPORT_CLOUD_ONLY
+
+    fake_auth = _MagicMock()
+    fake_auth.tokens = {"access_token": "old", "refresh_token": "r", "expires_at": 999999999999}
+    fake_auth.async_get_access_token = AsyncMock(side_effect=refresh_side_effect or (lambda: "new"))
+
+    coordinator = _MagicMock()
+    coordinator.plants_service = _MagicMock()
+    coordinator.plants_service.auth = fake_auth
+
+    entry = _MagicMock()
+    entry.entry_id = entry_id
+    entry.domain = DOMAIN
+    entry.state = ConfigEntryState.LOADED
+    entry.data = {**MOCK_CONFIG_DATA, CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY}
+    entry.runtime_data = _MagicMock()
+    entry.runtime_data.coordinators = [coordinator]
+    return entry, fake_auth
+
+
+async def test_refresh_tokens_service_forces_refresh_on_targeted_entry(hass: HomeAssistant):
+    """The service invalidates the cached expiry and drives ``Auth.async_get_access_token`` (#356)."""
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    entry, auth = _make_oauth_entry_with_auth(hass)
+    async_setup_services(hass)
+
+    with patch.object(hass.config_entries, "async_get_entry", return_value=entry):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {"config_entry": entry.entry_id}, blocking=True)
+
+    # The refresh path was driven — ``expires_at`` was zeroed and access-token
+    # fetch was called (the ``Auth`` lock + double-check inside the library
+    # performs the actual refresh network call).
+    assert auth.tokens["expires_at"] == 0
+    auth.async_get_access_token.assert_awaited_once()
+
+
+async def test_refresh_tokens_service_defaults_to_all_cloud_entries(hass: HomeAssistant):
+    """With no ``config_entry`` target, every loaded OAuth entry is refreshed."""
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    e1, a1 = _make_oauth_entry_with_auth(hass, entry_id="e1")
+    e2, a2 = _make_oauth_entry_with_auth(hass, entry_id="e2")
+    modbus = _make_entry(hass, entry_id="mb", transport=TRANSPORT_MODBUS_ONLY)
+    async_setup_services(hass)
+
+    with patch.object(hass.config_entries, "async_entries", return_value=[e1, e2, modbus]):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {}, blocking=True)
+
+    # Both OAuth entries refreshed; the Modbus-only entry was excluded from the sweep.
+    a1.async_get_access_token.assert_awaited_once()
+    a2.async_get_access_token.assert_awaited_once()
+
+
+async def test_refresh_tokens_service_rejects_modbus_only(hass: HomeAssistant):
+    """A Modbus-only target raises ``ServiceValidationError`` — no tokens to refresh."""
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    modbus = _make_entry(hass, transport=TRANSPORT_MODBUS_ONLY)
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=modbus),
+        pytest.raises(ServiceValidationError, match="no OAuth tokens"),
+    ):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {"config_entry": modbus.entry_id}, blocking=True)
+
+
+async def test_refresh_tokens_service_rejects_cloud_user(hass: HomeAssistant):
+    """A cloud_user target raises ``ServiceValidationError`` — no OAuth refresh token."""
+    from custom_components.sungrow.const import TRANSPORT_CLOUD_USER
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    entry = _make_entry(hass, transport=TRANSPORT_CLOUD_USER)
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(ServiceValidationError, match="user-account"),
+    ):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {"config_entry": entry.entry_id}, blocking=True)
+
+
+async def test_refresh_tokens_service_surfaces_refresh_failure(hass: HomeAssistant):
+    """A failing refresh is re-raised as :class:`HomeAssistantError` for the UI to display."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    async def _fail() -> str:
+        raise RuntimeError("upstream 500")
+
+    entry, auth = _make_oauth_entry_with_auth(hass, refresh_side_effect=_fail)
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(HomeAssistantError, match="upstream 500"),
+    ):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {"config_entry": entry.entry_id}, blocking=True)
+
+
+async def test_refresh_tokens_service_no_entries_raises(hass: HomeAssistant):
+    """With no loaded OAuth entries at all, the service surfaces a clear validation error."""
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_entries", return_value=[]),
+        pytest.raises(ServiceValidationError, match="No loaded OAuth"),
+    ):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {}, blocking=True)
