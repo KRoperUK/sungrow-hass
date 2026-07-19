@@ -789,7 +789,7 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
 
 
 async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
-    """Cloud options expose an optional modbus_host field for transport switching (#216)."""
+    """Cloud options no longer expose a modbus_host field — #348 retired the cloud_modbus transport."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
@@ -797,10 +797,11 @@ async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_s
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     keys = {str(m.schema) for m in result["data_schema"].schema}
-    # cloud_only entries now show an optional modbus_host for switching to hybrid.
-    assert CONF_MODBUS_HOST in keys
+    # cloud_only entries no longer offer modbus_host; local Modbus is set up
+    # via a separate ``Modbus Only`` entry instead.
+    assert CONF_MODBUS_HOST not in keys
 
-    # But submitting without a host doesn't store modbus_host in options.
+    # Submitting the (now smaller) form still succeeds and doesn't leak modbus_host.
     result2 = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={CONF_SCAN_INTERVAL: 30},

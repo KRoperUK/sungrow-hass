@@ -13,8 +13,13 @@ def test_transport_cloud_only_value():
     assert TRANSPORT_CLOUD_ONLY == "cloud_only"
 
 
-def test_transport_cloud_modbus_value():
-    """TRANSPORT_CLOUD_MODBUS equals 'cloud_modbus'."""
+def test_transport_cloud_modbus_value_kept_for_migration():
+    """The ``cloud_modbus`` constant is retained after #348 retired the transport.
+
+    The v4→v5 migration converts legacy ``cloud_modbus`` entries to ``cloud_only``,
+    so it still needs to detect the string. The constant is not exposed in the
+    config-flow selector any more (see ``test_transport_flow.py``).
+    """
     assert TRANSPORT_CLOUD_MODBUS == "cloud_modbus"
 
 
@@ -24,5 +29,5 @@ def test_transport_modbus_only_value():
 
 
 def test_config_flow_version_is_current():
-    """SungrowConfigFlow.VERSION reflects the latest schema (v3→v4 legacy sweep, #314)."""
-    assert SungrowConfigFlow.VERSION == 4
+    """SungrowConfigFlow.VERSION reflects the latest schema (v4→v5 retires cloud_modbus, #348)."""
+    assert SungrowConfigFlow.VERSION == 5

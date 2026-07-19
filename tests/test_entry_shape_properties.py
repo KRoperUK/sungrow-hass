@@ -18,7 +18,6 @@ from custom_components.sungrow.const import (
     CONF_REDIRECT_URI,
     CONF_SERIAL,
     CONF_TRANSPORT,
-    TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
@@ -40,18 +39,10 @@ cloud_only_strategy = st.fixed_dictionaries(
     }
 )
 
-cloud_modbus_strategy = st.fixed_dictionaries(
-    {
-        CONF_TRANSPORT: st.just(TRANSPORT_CLOUD_MODBUS),
-        CONF_APP_KEY: _non_empty_str,
-        CONF_APP_SECRET: _non_empty_str,
-        CONF_APP_ID: _non_empty_str,
-        CONF_GATEWAY: st.sampled_from(["Europe", "International", "China", "Australia"]),
-        CONF_REDIRECT_URI: _non_empty_str,
-        "tokens": st.fixed_dictionaries({"access_token": _non_empty_str, "refresh_token": _non_empty_str}),
-        CONF_MODBUS_HOST: _non_empty_str,
-    }
-)
+# The ``cloud_modbus`` shape (cloud fields + modbus_host on one entry) was retired
+# in #348 — the transport is no longer selectable, existing entries are migrated
+# to ``cloud_only`` (dropping ``modbus_host``) in the v4→v5 migration, and no new
+# entries of this shape can be created. Property test removed with the transport.
 
 modbus_only_strategy = st.fixed_dictionaries(
     {
@@ -71,17 +62,6 @@ def test_cloud_only_entry_shape(data: dict):
     for field in CLOUD_FIELDS:
         assert field in data, f"Missing cloud field: {field}"
     assert CONF_MODBUS_HOST not in data
-
-
-@settings(max_examples=100)
-@given(data=cloud_modbus_strategy)
-def test_cloud_modbus_entry_shape(data: dict):
-    """cloud_modbus entries have all cloud fields AND modbus_host."""
-    assert data[CONF_TRANSPORT] == TRANSPORT_CLOUD_MODBUS
-    for field in CLOUD_FIELDS:
-        assert field in data, f"Missing cloud field: {field}"
-    assert CONF_MODBUS_HOST in data
-    assert data[CONF_MODBUS_HOST]
 
 
 @settings(max_examples=100)

@@ -36,7 +36,6 @@ from .const import (
     GATEWAYS,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
-    TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
     TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
@@ -134,7 +133,7 @@ def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | No
 class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Sungrow iSolarCloud."""
 
-    VERSION = 4
+    VERSION = 5
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -214,9 +213,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.init_info.pop("tokens", None)
                 # Start a fresh Auth client for the (possibly changed) credentials.
                 self.auth_client = None
-                # For cloud_modbus: collect an updated modbus host before re-authorizing.
-                if transport == TRANSPORT_CLOUD_MODBUS:
-                    return await self.async_step_reconfigure_modbus_host()
                 return await self.async_step_auth()
 
         current = entry.data
@@ -235,32 +231,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(schema_fields),
-            errors=errors,
-        )
-
-    async def async_step_reconfigure_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Collect updated Modbus host during reconfigure of a cloud_modbus entry (#216)."""
-        errors: dict[str, str] = {}
-        entry = self._get_reconfigure_entry()
-
-        if user_input is not None:
-            host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
-            from .helpers import async_test_modbus_host
-
-            if await async_test_modbus_host(host):
-                # Store host in init_info so the auth step includes it in the updated entry.
-                self.init_info[CONF_MODBUS_HOST] = host
-                return await self.async_step_auth()
-            errors["base"] = "host_unreachable"
-
-        current_host = entry.data.get(CONF_MODBUS_HOST, "")
-        return self.async_show_form(
-            step_id="reconfigure_modbus_host",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_MODBUS_HOST, default=current_host): str,
-                }
-            ),
             errors=errors,
         )
 
@@ -372,7 +342,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         transport_options = [
             SelectOptionDict(value=TRANSPORT_CLOUD_ONLY, label="Cloud Only"),
-            SelectOptionDict(value=TRANSPORT_CLOUD_MODBUS, label="Cloud + Modbus"),
             SelectOptionDict(value=TRANSPORT_CLOUD_USER, label="Cloud (user account, unofficial)"),
             SelectOptionDict(value=TRANSPORT_MODBUS_ONLY, label="Modbus Only"),
         ]
@@ -405,10 +374,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.init_info = user_input
                 await self.async_set_unique_id(str(user_input[CONF_APP_ID]))
                 self._abort_if_unique_id_configured()
-
-                # If hybrid mode, collect the Modbus host next.
-                if self._transport == TRANSPORT_CLOUD_MODBUS:
-                    return await self.async_step_modbus_host()
 
                 # Create the hub immediately, before authorizing. Setting up this
                 # token-less entry runs async_setup — which registers the OAuth
@@ -445,39 +410,6 @@ class SungrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_APP_ID, default=""): str,
                     vol.Required(CONF_GATEWAY, default="Europe"): vol.In(list(GATEWAYS.keys())),
                     vol.Required(CONF_REDIRECT_URI, default=default_redirect): str,
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_modbus_host(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Collect the WiNet-S Modbus host for hybrid (Cloud + Modbus) mode (#216)."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
-            from .helpers import async_test_modbus_host
-
-            if await async_test_modbus_host(host):
-                # Create the tokenless entry with the modbus host included.
-                data = {
-                    **self.init_info,
-                    CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
-                    CONF_MODBUS_HOST: host,
-                }
-                return self.async_create_entry(
-                    title=f"Sungrow {self.init_info[CONF_APP_ID]}",
-                    data=data,
-                )
-            errors["base"] = "host_unreachable"
-
-        # Pre-fill from zeroconf discovery if available.
-        default_host = self._discovered_modbus_host or ""
-        return self.async_show_form(
-            step_id="modbus_host",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_MODBUS_HOST, default=default_host): str,
                 }
             ),
             errors=errors,
@@ -966,31 +898,12 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = "invalid_extra_measure_points"
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
-                modbus_host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
                 data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
                 data.pop(CONF_MODBUS_HOST, None)
                 data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
-
-                # Transport switching: cloud_only + host → cloud_modbus
-                if transport == TRANSPORT_CLOUD_ONLY and modbus_host:
-                    from .helpers import async_test_modbus_host
-
-                    if await async_test_modbus_host(modbus_host):
-                        new_data = {
-                            **self.config_entry.data,
-                            CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
-                            CONF_MODBUS_HOST: modbus_host,
-                        }
-                        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
-                    else:
-                        errors["base"] = "host_unreachable"
-
-                # Transport switching: cloud_modbus + cleared host → cloud_only
-                elif transport == TRANSPORT_CLOUD_MODBUS and not modbus_host:
-                    new_data = {k: v for k, v in self.config_entry.data.items() if k != CONF_MODBUS_HOST}
-                    new_data[CONF_TRANSPORT] = TRANSPORT_CLOUD_ONLY
-                    self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
-
+                # cloud_modbus transport was retired in #348; the options flow no
+                # longer offers modbus_host on cloud entries. Local Modbus is set up
+                # via a separate ``Modbus Only`` entry instead.
                 if not errors:
                     return self.async_create_entry(title="", data=data)
 
@@ -1012,13 +925,10 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
             vol.Optional(CONF_ENABLE_DEVICE_SENSORS, default=current_device_sensors): bool,
         }
 
-        # For cloud_only: show optional modbus_host field to allow switching to hybrid.
-        # For cloud_modbus: show current host (user can clear to switch back to cloud_only).
-        if transport == TRANSPORT_CLOUD_ONLY:
-            schema_fields[vol.Optional(CONF_MODBUS_HOST, default="")] = str
-        elif transport == TRANSPORT_CLOUD_MODBUS:
-            current_host = self.config_entry.data.get(CONF_MODBUS_HOST, "")
-            schema_fields[vol.Optional(CONF_MODBUS_HOST, default=current_host)] = str
+        # Local Modbus is a separate entry now (#348 retired the ``cloud_modbus``
+        # transport). The options flow for a cloud entry no longer offers a
+        # ``modbus_host`` field — users who want local Modbus add a ``Modbus Only``
+        # entry alongside their cloud one.
 
         return self.async_show_form(
             step_id="init",

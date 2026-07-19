@@ -11,15 +11,18 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import async_migrate_entry
 from custom_components.sungrow.const import (
+    CONF_MODBUS_HOST,
     CONF_SCAN_INTERVAL,
     CONF_TRANSPORT,
     DOMAIN,
+    TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
 
-# The migration target after every v1/v2/v3 upgrade path (v3→v4 sweeps legacy entities).
-CURRENT_VERSION = 4
+# The migration target after every v1/v2/v3/v4 upgrade path (v3→v4 sweeps legacy entities;
+# v4→v5 retires the ``cloud_modbus`` transport, see #348).
+CURRENT_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Property 2: v2→v4 migration correctly sets or preserves transport
@@ -185,7 +188,7 @@ async def test_v3_to_v4_removes_legacy_charge_discharge_select(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 4
+    assert entry.version == 5
     assert registry.async_get(legacy.entity_id) is None
     assert registry.async_get(keep.entity_id) is not None
     assert registry.async_get(foreign.entity_id) is not None
@@ -205,4 +208,105 @@ async def test_v3_to_v4_no_legacy_entities_is_noop(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 4
+    assert entry.version == 5
+
+
+# ---------------------------------------------------------------------------
+# v4→v5: retire the ``cloud_modbus`` transport (#348)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_v4_to_v5_converts_cloud_modbus_to_cloud_only(hass):
+    """A ``cloud_modbus`` entry migrates to ``cloud_only`` and drops ``modbus_host`` (#348).
+
+    The ``cloud_modbus`` transport was selectable pre-#348 but the runtime never
+    wired the Modbus side (#217 was closed as ``not_planned``), so entries loaded
+    to zero entities. The migration silently reroutes them to the cloud coordinator
+    so users get working entities on the next reload.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
+            "app_key": "k",
+            CONF_MODBUS_HOST: "192.168.1.50",
+        },
+        version=4,
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 5
+    assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
+    assert CONF_MODBUS_HOST not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_v4_to_v5_leaves_cloud_only_entry_alone(hass):
+    """A ``cloud_only`` v4 entry just gets its version bumped — no data changes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY, "app_key": "k"},
+        version=4,
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 5
+    assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
+
+
+@pytest.mark.asyncio
+async def test_v4_to_v5_leaves_modbus_only_entry_alone(hass):
+    """A ``modbus_only`` v4 entry keeps its ``modbus_host`` (that field is legitimate there)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        version=4,
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 5
+    assert entry.data[CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
+    assert entry.data[CONF_MODBUS_HOST] == "10.0.0.9"
+
+
+@pytest.mark.asyncio
+async def test_full_chain_v1_to_v5_carries_cloud_modbus_through(hass):
+    """A v1 ``cloud_modbus`` entry migrates through every step to v5 ``cloud_only`` (#348).
+
+    Chains scan_interval-seconds (v1→v2), transport back-fill (v2→v3), legacy entity
+    sweep (v3→v4), and cloud_modbus retirement (v4→v5) in one go, guarding against
+    a future migration step forgetting to preserve the earlier fixes.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS, "app_key": "k", CONF_MODBUS_HOST: "10.0.0.5"},
+        options={CONF_SCAN_INTERVAL: 5},
+        version=1,
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == 5
+    assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
+    assert CONF_MODBUS_HOST not in entry.data
+    # scan_interval was converted from 5 minutes to 300 seconds in v1→v2.
+    assert entry.options[CONF_SCAN_INTERVAL] == 300
