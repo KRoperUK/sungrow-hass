@@ -78,6 +78,7 @@ from .migration import (
     async_migrate_entry as async_migrate_entry,
 )
 from .oauth_view import SungrowAuthCallbackView
+from .schedule import SungrowScheduler
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
@@ -132,6 +133,10 @@ class SungrowData:
     heartbeats: dict[str, tuple[asyncio.Event, asyncio.Task[None]]] = field(default_factory=dict)
     # None for a Modbus-only entry (backfill is cloud-only, Requirement 1.2).
     backfill: BackfillManager | None = None
+    # Scheduled forced-charge / forced-discharge windows engine (#359). None when the
+    # entry has no schedule configured or no battery-capable plant; the setup path
+    # only wires it up for cloud entries that can actually accept battery-mode writes.
+    scheduler: SungrowScheduler | None = None
 
 
 type SungrowConfigEntry = ConfigEntry[SungrowData]
@@ -467,7 +472,26 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         )
 
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+    await _async_start_scheduler(hass, entry)
     return True
+
+
+async def _async_start_scheduler(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
+    """Wire up the forced-charge / forced-discharge scheduler for a cloud entry (#359).
+
+    Only cloud entries with a battery-capable plant get a scheduler; PV-only
+    string inverters and Modbus-only entries never surface a battery-mode select
+    for the engine to drive. The scheduler self-limits to no-ops when no windows
+    are configured, so instantiating one unconditionally on cloud entries is
+    cheap — but skipping it when no battery is present avoids the "no selects
+    registered" debug spam on every entry setup.
+    """
+    if not any(getattr(c, "has_battery", False) for c in entry.runtime_data.coordinators):
+        return
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    entry.runtime_data.scheduler = scheduler
+    if scheduler.windows:
+        await scheduler.async_start()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> bool:
@@ -640,6 +664,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
 
     entry.async_create_background_task(hass, _async_start_backfill(), name="sungrow-backfill-start")
 
+    await _async_start_scheduler(hass, entry)
+
     return True
 
 
@@ -651,6 +677,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     # failed unload.
     unloaded = await hass.config_entries.async_unload_platforms(entry, _entry_platforms(entry))
     if unloaded:
+        # Cancel any armed schedule transitions so a reload doesn't leak timers (#359).
+        scheduler = entry.runtime_data.scheduler
+        if scheduler is not None:
+            scheduler.async_stop()
         # Cancel any in-flight Backfill runs before tearing down (Requirement 1.5). Cloud
         # entries have a manager; the Modbus-only path leaves ``backfill`` as None.
         manager = entry.runtime_data.backfill

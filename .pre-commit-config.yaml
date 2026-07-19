@@ -1,5 +1,13 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+#
+# Stages:
+# * ``pre-commit`` — fast checks (ruff, mypy, manifest sort). Run on every commit.
+# * ``pre-push`` — the full pytest suite. Runs once per push so a commit-heavy
+#   local workflow isn't slowed down by re-running tests on each fixup.
+#
+# Enable both stages once with:
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep in sync with the ruff pin in requirements_test.txt and ci.yml.
@@ -19,3 +27,25 @@ repos:
         language: system
         files: ^custom_components/sungrow/manifest\.json$
         pass_filenames: false
+
+      # Strict mypy on the whole integration + tests. Runs once per commit
+      # regardless of which files staged — mypy's cross-file inference means
+      # a change in one module can surface an error in another.
+      - id: mypy
+        name: mypy (strict)
+        entry: .venv/bin/mypy
+        language: system
+        pass_filenames: false
+        # Any Python source touched should trip mypy; the config in pyproject.toml
+        # narrows scope to custom_components/ + tests/.
+        files: \.py$
+        stages: [pre-commit]
+
+      # Full pytest run on push so no broken commit reaches origin. ``--no-cov -q``
+      # keeps the pre-push wait short; CI still runs the coverage-gated variant.
+      - id: pytest
+        name: pytest (no-cov)
+        entry: .venv/bin/python -m pytest tests/ --no-cov -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

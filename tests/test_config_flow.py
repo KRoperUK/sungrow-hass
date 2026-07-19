@@ -788,6 +788,82 @@ async def test_options_flow_parses_extra_measure_points(hass: HomeAssistant, moc
     }
 
 
+async def test_options_flow_saves_schedule_windows(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Filled schedule slots are normalised into ``CONF_SCHEDULE_WINDOWS`` (#359)."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            "schedule_1_end": "05:00:00",
+            "schedule_1_mode": "force_charge",
+            # Slot 2 left blank → disabled.
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    # Per-slot fields are stripped; only the normalised list is stored.
+    for slot in (1, 2):
+        assert f"schedule_{slot}_start" not in entry.options
+    assert entry.options[CONF_SCHEDULE_WINDOWS] == [{"start": "01:00:00", "end": "05:00:00", "mode": "force_charge"}]
+
+
+async def test_options_flow_rejects_half_populated_schedule_slot(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """Slot 1 has a start but no end → surfaces ``invalid_schedule_window`` (#359).
+
+    The HA frontend omits an unfilled TimeSelector key from the payload rather than
+    sending an empty string, so we simulate that by leaving ``schedule_1_end`` out
+    entirely.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            # schedule_1_end deliberately omitted — half-populated.
+            "schedule_1_mode": "force_charge",
+        },
+    )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["step_id"] == "init"
+    assert result2["errors"]["base"] == "invalid_schedule_window"
+
+
+async def test_options_flow_empty_schedule_stores_empty_list(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """No schedule slots filled → an empty list is stored, not the raw fields (#359)."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(result["flow_id"], user_input={CONF_SCAN_INTERVAL: 30})
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_SCHEDULE_WINDOWS] == []
+
+
 async def test_options_flow_cloud_has_no_modbus_host(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
     """Cloud options no longer expose a modbus_host field — #348 retired the cloud_modbus transport."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")

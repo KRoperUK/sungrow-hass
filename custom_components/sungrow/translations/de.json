@@ -106,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud hat den Autorisierungscode abgelehnt — er wurde möglicherweise bereits verwendet oder ist abgelaufen. Öffne den Autorisierungslink oben, um einen neuen Code zu erhalten, und füge ihn hier ein (oder füge die vollständige Weiterleitungs-URL ein).",
       "invalid_extra_measure_points": "Zusätzliche Messpunkte müssen im Format point_id=code, durch Kommata getrennt, angegeben werden",
       "invalid_redirect_uri": "Die Redirect-URI muss auf /api/sungrow_hass/callback enden. Passe sie hier UND im iSolarCloud-Entwicklerportal so an, dass beide identisch sind — sonst leitet iSolarCloud auf die Home-Assistant-Startseite um und der Autorisierungscode geht verloren.",
+      "invalid_schedule_window": "Zeitplan-Zeilen benötigen sowohl Start- als auch Endzeit und einen unterstützten Modus. Lassen Sie beide Zeiten leer, um eine Zeile zu deaktivieren.",
       "no_plants_selected": "Wählen Sie mindestens eine Anlage aus.",
       "unknown": "Unerwarteter Fehler"
     },
@@ -124,11 +125,17 @@
     "step": {
       "init": {
         "title": "Sungrow-Optionen",
-        "description": "Legen Sie fest, wie oft Home Assistant iSolarCloud abfragt. Niedrigere Werte aktualisieren häufiger, verbrauchen aber mehr Ihres API-Kontingents. Der kostenlose Tarif erlaubt ~2000 Aufrufe/Stunde; das Minimum beträgt 10 Sekunden.",
+        "description": "Legen Sie fest, wie oft Home Assistant iSolarCloud abfragt. Niedrigere Werte aktualisieren häufiger, verbrauchen aber mehr Ihres API-Kontingents. Der kostenlose Tarif erlaubt ~2000 Aufrufe/Stunde; das Minimum beträgt 10 Sekunden.\n\nOptionale geplante Zwangslade-/Zwangsentlade-Fenster wiederholen sich täglich. Lassen Sie Start und Ende leer, um einen Zeitraum zu deaktivieren; ein Umschlag über Mitternacht (z. B. 23:30 → 06:00) ist erlaubt.",
         "data": {
           "scan_interval": "Abfrageintervall (Sekunden)",
           "extra_measure_points": "Zusätzliche Messpunkte (point_id=code, durch Kommata getrennt)",
           "enable_device_sensors": "Sensoren pro Gerät erstellen (EV-Ladegeräte, Zähler, zusätzliche Batterien)",
+          "schedule_1_start": "Zeitplan 1 — Start (HH:MM, lokale Zeit)",
+          "schedule_1_end": "Zeitplan 1 — Ende (HH:MM, lokale Zeit)",
+          "schedule_1_mode": "Zeitplan 1 — Batteriemodus",
+          "schedule_2_start": "Zeitplan 2 — Start (HH:MM, lokale Zeit)",
+          "schedule_2_end": "Zeitplan 2 — Ende (HH:MM, lokale Zeit)",
+          "schedule_2_mode": "Zeitplan 2 — Batteriemodus",
           "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
         }
       },
