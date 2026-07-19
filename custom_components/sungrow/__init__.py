@@ -315,7 +315,7 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
                 _LOGGER.debug("Modbus control support probe failed: %s", err)
                 coordinator.dispatch_update_supported = False
             if coordinator.dispatch_update_supported:
-                control = modbus_control  # type: ignore[assignment]
+                control = modbus_control  # type: ignore[assignment,unused-ignore]
             else:
                 _LOGGER.info(
                     "Local Modbus control map not readable on %s; dispatch entities disabled",
@@ -492,8 +492,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         token_updater=_save_tokens,
     )
     # Restore previously stored tokens (a copy so we never mutate entry.data in place).
-    # pysolarcloud annotates Auth.tokens as None, but it holds a dict at runtime.
-    auth.tokens = dict(entry.data["tokens"])  # type: ignore[assignment]
+    # Pre-0.15.0 pysolarcloud annotated ``Auth.tokens`` as ``None``; 0.15.0 fixed it to
+    # ``dict[str, Any] | None``. The ``unused-ignore`` on the ignore code keeps this
+    # working on both the older and newer library type shapes.
+    auth.tokens = dict(entry.data["tokens"])  # type: ignore[assignment,unused-ignore]
 
     plants_service = Plants(auth)
     control_service = Control(auth)

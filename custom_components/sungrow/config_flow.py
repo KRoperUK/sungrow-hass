@@ -47,10 +47,13 @@ from .oauth_view import OAUTH_CALLBACK_PATH
 try:
     from pysolarcloud import Auth, AuthError, PySolarCloudException, UserAuth
 except ImportError:
-    # Optional import for local dev; production always has it via requirements.
-    Auth = None  # type: ignore[assignment,misc]
-    UserAuth = None  # type: ignore[assignment,misc]
-    AuthError = PySolarCloudException = Exception  # type: ignore[assignment,misc]
+    # Optional import for local dev; production always has it via requirements. The
+    # ``unused-ignore`` keeps this compatible with both pre-0.15.0 library type shapes
+    # (where the fallback assignments needed the ignore) and 0.15.0+ (where the strict
+    # types make it unnecessary).
+    Auth = None  # type: ignore[assignment,misc,unused-ignore]
+    UserAuth = None  # type: ignore[assignment,misc,unused-ignore]
+    AuthError = PySolarCloudException = Exception  # type: ignore[assignment,misc,unused-ignore]
 
 _LOGGER = logging.getLogger(__name__)
 
