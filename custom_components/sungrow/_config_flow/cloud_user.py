@@ -26,11 +26,12 @@ from ..const import (
 )
 from . import _base
 from ._base import _SungrowFlowBase
+from .plant_selection import PlantSelectionMixin
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class CloudUserMixin(_SungrowFlowBase):
+class CloudUserMixin(PlantSelectionMixin, _SungrowFlowBase):
     """User-account cloud transport step for :class:`SungrowConfigFlow`."""
 
     async def async_step_cloud_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -56,6 +57,7 @@ class CloudUserMixin(_SungrowFlowBase):
             email = (user_input.get(CONF_USER_ACCOUNT) or "").strip()
             password = user_input.get(CONF_USER_PASSWORD) or ""
             gateway = user_input.get(CONF_GATEWAY) or "Europe"
+            plant_list: list[dict[str, Any]] = []
             if _base.UserAuth is None:
                 errors["base"] = "unknown"
             else:
@@ -63,7 +65,7 @@ class CloudUserMixin(_SungrowFlowBase):
                 client = _base.UserAuth(GATEWAYS[gateway], email, password, websession=session)
                 try:
                     async with asyncio.timeout(30):
-                        await client.async_get_plants()
+                        plant_list = list(await client.async_get_plants() or [])
                 except _base.AuthError:
                     errors["base"] = "invalid_auth"
                 except (_base.PySolarCloudException, ClientError, TimeoutError):
@@ -78,11 +80,14 @@ class CloudUserMixin(_SungrowFlowBase):
                     CONF_USER_PASSWORD: password,
                     CONF_GATEWAY: gateway,
                 }
-                if reauth_entry is not None:
-                    return self.async_update_reload_and_abort(reauth_entry, data=data)
-                await self.async_set_unique_id(f"user_{email.lower()}")
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=f"Sungrow ({email})", data=data)
+                # Multi-plant accounts route through the picker (#358); single-plant
+                # accounts skip it so the flow shape stays identical to pre-#358 for
+                # the common case.
+                if len(plant_list) > 1:
+                    self._pending_plant_list = plant_list
+                    self._pending_entry_data = data
+                    return await self.async_step_plant_selection()
+                return await self._finalise_cloud_user_entry(data)
 
         default_email = reauth_entry.data.get(CONF_USER_ACCOUNT, "") if reauth_entry is not None else ""
         default_gateway = reauth_entry.data.get(CONF_GATEWAY, "Europe") if reauth_entry is not None else "Europe"
@@ -97,3 +102,18 @@ class CloudUserMixin(_SungrowFlowBase):
             }
         )
         return self.async_show_form(step_id="cloud_user", data_schema=schema, errors=errors)
+
+    async def _finalise_cloud_user_entry(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Create / update the cloud_user entry with the plant selection merged in.
+
+        Called by :class:`PlantSelectionMixin._dispatch_plant_selection_finalise`
+        after the user submits the picker, and by :meth:`async_step_cloud_user`
+        directly for single-plant accounts that skip the picker entirely.
+        """
+        reauth_entry = self._reauth_entry
+        if reauth_entry is not None:
+            return self.async_update_reload_and_abort(reauth_entry, data=entry_data)
+        email = str(entry_data.get(CONF_USER_ACCOUNT) or "")
+        await self.async_set_unique_id(f"user_{email.lower()}")
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=f"Sungrow ({email})", data=entry_data)

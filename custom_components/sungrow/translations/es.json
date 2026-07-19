@@ -49,6 +49,13 @@
           "gateway": "Región"
         }
       },
+      "plant_selection": {
+        "title": "Seleccionar plantas",
+        "description": "Tu cuenta tiene más de una planta. Elige qué plantas debe integrar Home Assistant. Todas las plantas están seleccionadas por defecto; desmarca las que no quieras incluir. Puedes cambiar la selección más tarde mediante Reconfigurar.",
+        "data": {
+          "plant_ids": "Plantas"
+        }
+      },
       "auth_callback": {
         "title": "Esperando la autorización",
         "description": "Abra el enlace siguiente para autorizar la aplicación:\n\n{auth_url}\n\nDespués de iniciar sesión y aprobar la aplicación, será redirigido de vuelta y esta pantalla se actualizará automáticamente.\n\nSi la redirección no se completa (por ejemplo, si la página muestra un error), espere un momento y podrá pegar el código manualmente."
@@ -99,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud rechazó el código de autorización — puede que ya se haya usado o haya caducado. Abre el enlace de autorización de arriba para obtener un código nuevo y pégalo aquí (o pega la URL completa de redirección).",
       "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
       "invalid_redirect_uri": "La URI de redirección debe terminar en /api/sungrow_hass/callback. Actualízala aquí Y en el portal de desarrollador de iSolarCloud para que coincidan — de lo contrario, iSolarCloud redirige a la página de inicio de Home Assistant y se pierde el código de autorización.",
+      "no_plants_selected": "Selecciona al menos una planta para integrar.",
       "unknown": "Error inesperado"
     },
     "abort": {

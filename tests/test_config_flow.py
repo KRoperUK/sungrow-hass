@@ -1097,6 +1097,117 @@ async def test_cloud_user_invalid_auth_shows_error(hass: HomeAssistant):
 
 
 # ---------------------------------------------------------------------------
+# Multi-plant selection (#358)
+# ---------------------------------------------------------------------------
+# Accounts serving more than one plant are shown a picker after auth; the
+# selection is stored in ``CONF_PLANT_IDS`` and setup filters the plant list
+# accordingly. Single-plant accounts skip the picker entirely, so the flow
+# shape is unchanged for the common case.
+
+
+async def test_cloud_user_multi_plant_shows_picker(hass: HomeAssistant):
+    """Multi-plant accounts route through the plant-selection step (#358)."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_PLANT_IDS,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_USER})
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(
+        return_value=[
+            {"ps_id": 111, "ps_name": "Home"},
+            {"ps_id": 222, "ps_name": "Holiday"},
+            {"ps_id": 333, "ps_name": "Office"},
+        ]
+    )
+    with patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+        # Multi-plant → picker is shown, no entry yet.
+        assert result2["type"] == data_entry_flow.FlowResultType.FORM
+        assert result2["step_id"] == "plant_selection"
+
+        # Submit a subset — Home + Office, leaving Holiday out.
+        result3 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_PLANT_IDS: ["111", "333"]}
+        )
+
+    assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result3["data"][CONF_PLANT_IDS] == ["111", "333"]
+
+
+async def test_cloud_user_multi_plant_no_selection_shows_error(hass: HomeAssistant):
+    """Submitting the picker with zero plants selected surfaces a clear error (#358)."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_PLANT_IDS,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_USER})
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 1, "ps_name": "A"}, {"ps_id": 2, "ps_name": "B"}])
+    with patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USER_ACCOUNT: "me@example.com", CONF_USER_PASSWORD: "pw", CONF_GATEWAY: "Europe"},
+        )
+        # Submit picker with empty list.
+        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_PLANT_IDS: []})
+
+    assert result3["type"] == data_entry_flow.FlowResultType.FORM
+    assert result3["step_id"] == "plant_selection"
+    assert result3["errors"][CONF_PLANT_IDS] == "no_plants_selected"
+
+
+async def test_cloud_user_single_plant_skips_picker(hass: HomeAssistant):
+    """Single-plant accounts skip the picker so the flow shape is unchanged (#358)."""
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_PLANT_IDS,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_CLOUD_USER})
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 42, "ps_name": "Home"}])
+    with patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    # No plant selection stored — setup will serve the one plant the account has,
+    # matching pre-#358 behaviour for single-plant users.
+    assert CONF_PLANT_IDS not in result2["data"]
+
+
+# ---------------------------------------------------------------------------
 # Redirect URI validation (#340)
 # ---------------------------------------------------------------------------
 # iSolarCloud silently drops the ``code`` query parameter if it redirects to

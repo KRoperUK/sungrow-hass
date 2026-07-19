@@ -49,6 +49,13 @@ CONF_MODEL = "model"
 CONF_SERIAL = "serial"
 DEFAULT_MODBUS_SCAN_INTERVAL = 30
 
+# Subset of the account's plants this entry serves (#358). A list of ``ps_id`` strings.
+# When absent or empty the entry serves *every* plant returned by the API — the
+# pre-#358 behaviour, so existing entries need no migration. The config flow inserts
+# a multi-select picker after auth for accounts with more than one plant and stores
+# the selected IDs here.
+CONF_PLANT_IDS = "plant_ids"
+
 # Backfill historical statistics (see specs/backfill-historical-statistics).
 # The History_Window defaults to 30 days back from now, is user-configurable via the
 # CONF_BACKFILL_DAYS option, and is clamped to [1, 365] days so a run can never request

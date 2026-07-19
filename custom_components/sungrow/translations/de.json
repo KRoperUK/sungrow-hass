@@ -49,6 +49,13 @@
           "gateway": "Region"
         }
       },
+      "plant_selection": {
+        "title": "Anlagen auswählen",
+        "description": "Ihr Konto hat mehr als eine Anlage. Wählen Sie, welche Anlagen Home Assistant einbinden soll. Standardmäßig ist jede Anlage ausgewählt; entfernen Sie das Häkchen bei denen, die Sie nicht einbeziehen möchten. Sie können die Auswahl später über Neu konfigurieren ändern.",
+        "data": {
+          "plant_ids": "Anlagen"
+        }
+      },
       "auth_callback": {
         "title": "Warten auf Autorisierung",
         "description": "Öffnen Sie den folgenden Link, um die Anwendung zu autorisieren:\n\n{auth_url}\n\nNachdem Sie sich angemeldet und die App genehmigt haben, werden Sie zurückgeleitet und diese Ansicht aktualisiert sich automatisch.\n\nFalls die Weiterleitung nicht abgeschlossen wird (zum Beispiel, wenn die Seite einen Fehler anzeigt), warten Sie einen Moment und Sie können den Code manuell einfügen."
@@ -99,6 +106,7 @@
       "invalid_auth_code": "iSolarCloud hat den Autorisierungscode abgelehnt — er wurde möglicherweise bereits verwendet oder ist abgelaufen. Öffne den Autorisierungslink oben, um einen neuen Code zu erhalten, und füge ihn hier ein (oder füge die vollständige Weiterleitungs-URL ein).",
       "invalid_extra_measure_points": "Zusätzliche Messpunkte müssen im Format point_id=code, durch Kommata getrennt, angegeben werden",
       "invalid_redirect_uri": "Die Redirect-URI muss auf /api/sungrow_hass/callback enden. Passe sie hier UND im iSolarCloud-Entwicklerportal so an, dass beide identisch sind — sonst leitet iSolarCloud auf die Home-Assistant-Startseite um und der Autorisierungscode geht verloren.",
+      "no_plants_selected": "Wählen Sie mindestens eine Anlage aus.",
       "unknown": "Unerwarteter Fehler"
     },
     "abort": {

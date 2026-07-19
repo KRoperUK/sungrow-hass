@@ -49,6 +49,13 @@
           "gateway": "Rhanbarth"
         }
       },
+      "plant_selection": {
+        "title": "Dewiswch orsafoedd",
+        "description": "Mae gan eich cyfrif fwy nag un orsaf. Dewiswch pa orsafoedd y dylai Home Assistant eu cynnwys. Mae pob gorsaf wedi'i dewis yn ddiofyn; dad-diciwch unrhyw un nad ydych am ei chynnwys. Gallwch newid y dewis yn nes ymlaen drwy Ailgyflunio.",
+        "data": {
+          "plant_ids": "Gorsafoedd"
+        }
+      },
       "auth_callback": {
         "title": "Yn aros am awdurdodiad",
         "description": "Agorwch y ddolen isod i awdurdodi'r cymhwysiad:\n\n{auth_url}\n\nAr ôl i chi fewngofnodi a chymeradwyo'r ap, cewch eich ailgyfeirio yn ôl a bydd y sgrin hon yn diweddaru'n awtomatig.\n\nOs na fydd yr ailgyfeirio'n cwblhau (er enghraifft mae'r dudalen yn dangos gwall), arhoswch am eiliad a byddwch yn gallu gludo'r cod â llaw."
@@ -99,6 +106,7 @@
       "invalid_auth_code": "Gwrthododd iSolarCloud y cod awdurdodi — efallai ei fod eisoes wedi'i ddefnyddio neu wedi dod i ben. Agor y ddolen awdurdodi uchod i gael cod newydd, yna gludwch ef yma (neu gludwch yr URL ailgyfeirio llawn).",
       "invalid_extra_measure_points": "Rhaid i bwyntiau mesur ychwanegol fod ar ffurf point_id=code, wedi'u gwahanu gan atalnodau",
       "invalid_redirect_uri": "Rhaid i'r URI ailgyfeirio orffen gyda /api/sungrow_hass/callback. Diweddara ef yma AC yn y porth datblygwyr iSolarCloud fel bod y ddau yn cydweddu — fel arall mae iSolarCloud yn ailgyfeirio i dudalen gartref Home Assistant a chollir y cod awdurdodi.",
+      "no_plants_selected": "Dewiswch o leiaf un orsaf i'w chynnwys.",
       "unknown": "Gwall annisgwyl"
     },
     "abort": {
