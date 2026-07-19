@@ -100,6 +100,26 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             removed,
         )
 
+    if config_entry.version == 4:
+        # v4→v5: retire the ``cloud_modbus`` transport (#348). The transport was
+        # selectable in the config flow but ``async_setup_entry`` never wired the
+        # Modbus side (the deferred #217 was closed as ``not_planned``), so existing
+        # entries loaded to zero entities. Convert them to ``cloud_only`` — dropping
+        # the now-unused ``modbus_host`` — so the cloud coordinator takes over and
+        # users get working entities on the next reload.
+        new_data = dict(config_entry.data)
+        if new_data.get(CONF_TRANSPORT) == TRANSPORT_CLOUD_MODBUS:
+            new_data[CONF_TRANSPORT] = TRANSPORT_CLOUD_ONLY
+            dropped_host = new_data.pop(CONF_MODBUS_HOST, None)
+            _LOGGER.warning(
+                "Migrated config entry %s from cloud_modbus to cloud_only (#348); "
+                "the local Modbus side was never wired. Dropped modbus_host=%s. "
+                "Set up local Modbus via a separate 'Modbus Only' entry if you need it.",
+                config_entry.title,
+                dropped_host,
+            )
+        hass.config_entries.async_update_entry(config_entry, data=new_data, version=5)
+
     # Defensive back-fill: ensure cloud entries carry app_id (#245).
     # The unique_id for cloud entries IS the app_id (set during initial setup).
     # If the data key was lost (corrupt storage, partial migration, older RC builds)
@@ -130,9 +150,10 @@ def _async_split_legacy_hybrid(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
         return
-    # cloud_modbus entries legitimately carry modbus_host — don't strip it (#216).
-    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_CLOUD_MODBUS:
-        return
+    # ``cloud_modbus`` was retired in #348; the v4→v5 migration above converts those
+    # entries to ``cloud_only`` (dropping ``modbus_host``) before this runs, so the
+    # legacy-hybrid split now only fires on genuinely-legacy hybrid options-shape
+    # entries where a stale ``modbus_host`` still lingers in options.
     host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "").strip()
     has_hybrid_keys = any(k in entry.options or k in entry.data for k in _HYBRID_OPTION_KEYS)
     if not host and not has_hybrid_keys:

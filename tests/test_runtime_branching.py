@@ -13,7 +13,6 @@ from custom_components.sungrow.const import (
     CONF_SERIAL,
     CONF_TRANSPORT,
     DOMAIN,
-    TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
     TRANSPORT_MODBUS_ONLY,
 )
@@ -41,32 +40,9 @@ async def test_setup_entry_cloud_only(hass: HomeAssistant, mock_setup_auth, mock
     assert entry.runtime_data.coordinators
 
 
-# ---------------------------------------------------------------------------
-# cloud_modbus → cloud coordinator + info log
-# ---------------------------------------------------------------------------
-
-
-async def test_setup_entry_cloud_modbus_logs_deferred(
-    hass: HomeAssistant, mock_setup_auth, mock_plants_service, caplog
-):
-    """cloud_modbus transport sets up cloud coordinator and logs deferred message."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={
-            **MOCK_CONFIG_DATA,
-            CONF_TRANSPORT: TRANSPORT_CLOUD_MODBUS,
-            CONF_MODBUS_HOST: "192.168.1.50",
-        },
-        unique_id="test_app_id",
-    )
-    entry.add_to_hass(hass)
-
-    with caplog.at_level(logging.INFO, logger="custom_components.sungrow"):
-        await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-
-    assert entry.state.name == "LOADED"
-    assert any("deferred to #217" in msg for msg in caplog.messages)
+# ``cloud_modbus`` transport retired in #348; the runtime branch that logged the
+# ``deferred to #217`` message is gone and legacy entries are migrated to
+# ``cloud_only`` in the v4→v5 migration (covered in test_migration_properties.py).
 
 
 # ---------------------------------------------------------------------------
