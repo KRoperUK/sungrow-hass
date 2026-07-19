@@ -26,15 +26,33 @@ async def test_reachability_uses_correct_port_and_timeout(host: str):
     mock_writer.close = lambda: None
     mock_writer.wait_closed = AsyncMock()
 
-    with patch("custom_components.sungrow.helpers.asyncio.open_connection", new_callable=AsyncMock) as mock_conn:
-        mock_conn.return_value = (AsyncMock(), mock_writer)
+    captured: dict[str, object] = {}
 
-        with patch("custom_components.sungrow.helpers.asyncio.wait_for", new_callable=AsyncMock) as mock_wait:
-            mock_wait.return_value = (AsyncMock(), mock_writer)
-            await async_test_modbus_host(host)
-            mock_wait.assert_called_once()
-            args, kwargs = mock_wait.call_args
-            assert kwargs.get("timeout") == 5.0 or (len(args) >= 2 and args[1] == 5.0)
+    async def _spy_wait_for(coro, *, timeout):
+        # Actually consume the coroutine returned by open_connection so it
+        # doesn't leak as an unawaited coroutine (RuntimeWarning noise).
+        captured["timeout"] = timeout
+        return await coro
+
+    with (
+        patch(
+            "custom_components.sungrow.helpers.asyncio.open_connection",
+            new_callable=AsyncMock,
+            return_value=(AsyncMock(), mock_writer),
+        ) as mock_conn,
+        patch(
+            "custom_components.sungrow.helpers.asyncio.wait_for",
+            side_effect=_spy_wait_for,
+        ) as mock_wait,
+    ):
+        await async_test_modbus_host(host)
+
+    mock_wait.assert_called_once()
+    assert captured["timeout"] == 5.0
+    # open_connection was called with (host, port=502) via wait_for's spy.
+    mock_conn.assert_awaited_once()
+    conn_args, _ = mock_conn.call_args
+    assert conn_args == (host, 502)
 
 
 # ---------------------------------------------------------------------------
