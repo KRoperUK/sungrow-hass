@@ -409,9 +409,18 @@ def build_series_target(
         source = DOMAIN
         is_external = True
 
+    # ``mean_type`` replaces the deprecated ``has_mean`` bool from HA 2026.11 onwards:
+    # power series need an ARITHMETIC mean over each hour, energy series don't need a
+    # mean at all (they use ``has_sum``). Both fields are set for backward compatibility
+    # with older HA that still consults ``has_mean``.
+    from homeassistant.components.recorder.models.statistics import StatisticMeanType
+
+    mean_type = StatisticMeanType.ARITHMETIC if kind == "power" else StatisticMeanType.NONE
+
     resolved_unit = unit if unit else _DEFAULT_UNIT[kind]
     metadata: StatisticMetaData = {  # type: ignore[typeddict-item]
         "has_mean": kind == "power",
+        "mean_type": mean_type,
         "has_sum": kind == "energy",
         "name": None,
         "source": source,
