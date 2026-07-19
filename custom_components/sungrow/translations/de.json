@@ -281,6 +281,16 @@
           "description": "Sungrow-Konfigurationseintrag."
         }
       }
+    },
+    "refresh_tokens": {
+      "name": "OAuth-Tokens aktualisieren",
+      "description": "Erzwingt eine sofortige OAuth-Token-Aktualisierung für den angegebenen Cloud-Eintrag (oder alle geladenen Cloud-Einträge, wenn keiner angegeben ist). Nützlich für Support-Triage, wenn Tokens hängen. Modbus-only und Benutzerkonto-Einträge haben keine OAuth-Tokens und werden abgelehnt.",
+      "fields": {
+        "config_entry": {
+          "name": "Integration",
+          "description": "Sungrow-OAuth-Konfigurationseintrag zum Aktualisieren. Leer lassen, um alle geladenen Cloud-Einträge zu aktualisieren."
+        }
+      }
     }
   }
 }

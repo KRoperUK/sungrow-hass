@@ -47,3 +47,10 @@ set_battery_mode:
       selector:
         config_entry:
           integration: sungrow
+refresh_tokens:
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: sungrow

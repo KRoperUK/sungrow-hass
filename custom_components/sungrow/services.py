@@ -21,12 +21,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_MODBUS_ONLY
+from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_CLOUD_USER, TRANSPORT_MODBUS_ONLY
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_BACKFILL = "backfill"
 SERVICE_SET_BATTERY_MODE = "set_battery_mode"
+SERVICE_REFRESH_TOKENS = "refresh_tokens"
 ATTR_CONFIG_ENTRY = "config_entry"
 ATTR_START_DATE = "start_date"
 ATTR_MODE = "mode"
@@ -53,6 +54,12 @@ _SET_BATTERY_MODE_SCHEMA = vol.Schema(
     }
 )
 
+_REFRESH_TOKENS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
+    }
+)
+
 
 def _cloud_backfill_entries(hass: HomeAssistant) -> list[Any]:
     """Return every loaded cloud Sungrow config entry (those that own a manager)."""
@@ -74,6 +81,47 @@ def _resolve_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
         raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
     if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
         raise ServiceValidationError(f"Config entry '{entry_id}' is a local Modbus entry; Backfill is cloud-only")
+    return [entry]
+
+
+def _oauth_cloud_entries(hass: HomeAssistant) -> list[Any]:
+    """Return every loaded OAuth cloud entry — those that own a token pair we can refresh.
+
+    Excludes ``cloud_user`` entries (email/password login, no OAuth refresh token) and
+    ``modbus_only`` entries (no cloud at all). Only loaded entries are eligible since
+    the auth client isn't reachable when an entry is failed/unloaded.
+    """
+    return [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.state is ConfigEntryState.LOADED
+        and entry.data.get(CONF_TRANSPORT) not in (TRANSPORT_MODBUS_ONLY, TRANSPORT_CLOUD_USER)
+    ]
+
+
+def _resolve_oauth_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
+    """Resolve the addressed OAuth entries, defaulting to every loaded OAuth entry.
+
+    Raises :class:`ServiceValidationError` when a specific entry is targeted but
+    isn't loaded, isn't a Sungrow entry, or is a non-OAuth transport (``cloud_user``
+    or ``modbus_only``) that doesn't have refreshable OAuth tokens.
+    """
+    if entry_id is None:
+        return _oauth_cloud_entries(hass)
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN:
+        raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
+    if entry.state is not ConfigEntryState.LOADED:
+        raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
+    transport = entry.data.get(CONF_TRANSPORT)
+    if transport == TRANSPORT_MODBUS_ONLY:
+        raise ServiceValidationError(
+            f"Config entry '{entry_id}' is a local Modbus entry; there are no OAuth tokens to refresh"
+        )
+    if transport == TRANSPORT_CLOUD_USER:
+        raise ServiceValidationError(
+            f"Config entry '{entry_id}' uses user-account login; there is no OAuth refresh token to force"
+        )
     return [entry]
 
 
@@ -190,3 +238,61 @@ def async_setup_services(hass: HomeAssistant) -> None:
             schema=_SET_BATTERY_MODE_SCHEMA,
         )
         _LOGGER.debug("Registered %s.%s service", DOMAIN, SERVICE_SET_BATTERY_MODE)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_REFRESH_TOKENS):
+
+        async def _handle_refresh_tokens(call: ServiceCall) -> None:
+            """Force an OAuth token refresh on every addressed cloud entry (#356).
+
+            Support flow: users report a "tokens went dead" symptom and the maintainer
+            asks them to invoke this service to see whether the refresh actually
+            runs — the outcome shows up in the log and in the persisted ``tokens``
+            on the config entry. Failures are re-raised as :class:`HomeAssistantError`
+            so the service call surfaces them in the UI.
+            """
+            entry_id = call.data.get(ATTR_CONFIG_ENTRY)
+            entries = _resolve_oauth_entries(hass, entry_id)
+            if not entries:
+                raise ServiceValidationError("No loaded OAuth Sungrow entries found to refresh")
+
+            errors: list[tuple[str, str]] = []
+            for entry in entries:
+                data = getattr(entry, "runtime_data", None)
+                coordinators = getattr(data, "coordinators", None) or []
+                # Every OAuth entry's coordinators share the same ``Auth`` instance
+                # via ``Plants(auth)``, so any coordinator gets us there.
+                auth = None
+                for coordinator in coordinators:
+                    service_client = getattr(coordinator, "plants_service", None)
+                    if service_client is not None:
+                        auth = getattr(service_client, "auth", None)
+                        break
+                if auth is None or getattr(auth, "tokens", None) is None:
+                    errors.append((entry.entry_id, "no auth client bound to the entry (not fully loaded?)"))
+                    continue
+                # Force the refresh path in ``Auth.async_get_access_token`` by
+                # invalidating the cached expiry. The lock + double-check in the
+                # library handles concurrent callers, and ``SungrowAuth`` persists
+                # the rotated tokens back to the entry via ``token_updater`` so
+                # they survive a restart.
+                auth.tokens["expires_at"] = 0
+                try:
+                    await auth.async_get_access_token()
+                except Exception as err:  # pylint: disable=broad-except
+                    _LOGGER.warning("Token refresh failed for entry %s: %s", entry.entry_id, err)
+                    errors.append((entry.entry_id, str(err)))
+                    continue
+                _LOGGER.info("Forced token refresh succeeded for entry %s", entry.entry_id)
+
+            if errors:
+                summary = "; ".join(f"{eid}: {msg}" for eid, msg in errors)
+                raise HomeAssistantError(f"Token refresh failed for {len(errors)} entry/entries: {summary}")
+
+        async_register_admin_service(
+            hass,
+            DOMAIN,
+            SERVICE_REFRESH_TOKENS,
+            _handle_refresh_tokens,
+            schema=_REFRESH_TOKENS_SCHEMA,
+        )
+        _LOGGER.debug("Registered %s.%s service", DOMAIN, SERVICE_REFRESH_TOKENS)
