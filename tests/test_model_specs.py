@@ -106,3 +106,75 @@ def test_catalog_covers_every_sh_family_code_in_family_map():
 
     missing = modern_names - set(MODEL_SPECS)
     assert not missing, f"models named in DEVICE_MODEL_NAMES without catalog entries: {sorted(missing)}"
+
+
+# ---------------------------------------------------------------------------
+# #349 unverified rows — audit / conservative-fallback semantics
+# ---------------------------------------------------------------------------
+
+
+# Every MG hybrid row is an unverified TCzerny estimate (per docstring on the
+# comprehension that builds them). The battery-slider resolver must fall back
+# to the AC rating for these until Sungrow datasheets confirm the values.
+UNVERIFIED_MODELS = frozenset({"MG5RL", "MG6RL", "MG8RL", "MG10RL"})
+
+
+@pytest.mark.parametrize("model", sorted(UNVERIFIED_MODELS))
+def test_unverified_rows_are_flagged(model):
+    """Every known-unverified row must carry ``unverified=True`` so the resolver clamps."""
+    spec = spec_for(model)
+    assert spec is not None, f"{model} missing from the catalog"
+    assert spec.unverified is True, f"{model} lost its unverified flag"
+
+
+def test_no_new_unverified_rows_slip_in_untracked():
+    """Any newly-added ``unverified=True`` row must be added to ``UNVERIFIED_MODELS``.
+
+    This is the audit guardrail — adding an unverified row without acknowledging
+    it here would let a family estimate through without the maintainer eyeballing
+    it. The reverse case (removing a row from ``UNVERIFIED_MODELS`` after a
+    datasheet check) is fine: the parametrised test above just runs fewer times.
+    """
+    unverified_in_catalog = {model for model, spec in MODEL_SPECS.items() if spec.unverified}
+    unexpected = unverified_in_catalog - UNVERIFIED_MODELS
+    assert not unexpected, (
+        f"catalog carries unverified rows not listed in tests.UNVERIFIED_MODELS: {sorted(unexpected)}. "
+        "If you added a new unverified row, add its model code to that set (and consider whether the "
+        "battery slider needs a specific ceiling test)."
+    )
+
+
+@pytest.mark.parametrize("model", sorted(UNVERIFIED_MODELS))
+def test_unverified_battery_slider_falls_back_to_ac_rating(model):
+    """Unverified rows must not drive a battery-slider ceiling above the AC nameplate.
+
+    Guards against a family-estimate battery value (potentially wrong for the
+    real hardware) leaking through to the dispatch slider. The resolver's
+    documented behavior on unverified specs is: fall back to the AC-side
+    rating so the ceiling never overshoots the inverter's nameplate.
+    """
+    from custom_components.sungrow.number import _resolve_ac_rated_power, _resolve_battery_rated_power
+
+    target = {"device_model_code": model}
+    ac_ceiling = _resolve_ac_rated_power(target)
+    battery_ceiling = _resolve_battery_rated_power(target)
+    # Same ceiling: the resolver ignored the datasheet's battery numbers.
+    assert battery_ceiling == ac_ceiling, (
+        f"{model}: unverified spec leaked a battery ceiling ({battery_ceiling} W) above the "
+        f"AC rating ({ac_ceiling} W) — the resolver must fall back on unverified rows"
+    )
+
+
+def test_verified_rows_use_their_datasheet_battery_ceiling():
+    """Guard the opposite direction: verified specs must NOT fall back to the AC rating.
+
+    Regression test in case someone flips ``unverified`` to True by mistake — the
+    slider ceiling would silently drop to the AC nameplate and users on SH-RS
+    with a 6.6 kW battery would suddenly see a 5 kW cap.
+    """
+    from custom_components.sungrow.number import _resolve_battery_rated_power
+
+    # SH5.0RS: AC 5000 W, battery 6600 W. The resolver must return the battery number.
+    assert _resolve_battery_rated_power({"device_model_code": "SH5.0RS"}) == 6600
+    # SH10RT-20: AC 10000 W, battery 10600 W.
+    assert _resolve_battery_rated_power({"device_model_code": "SH10RT-20"}) == 10600

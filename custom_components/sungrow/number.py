@@ -210,9 +210,16 @@ def _resolve_battery_rated_power(target: dict[str, Any]) -> int:
     AC rating for models without battery entries in the catalog, and finally to
     :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
     :func:`_resolve_ac_rated_power`.
+
+    Rows flagged ``unverified=True`` in the catalog (#349) are treated
+    conservatively: their battery values are TCzerny family estimates, not
+    datasheet lookups, so this resolver ignores them and falls back to the
+    AC-side rating. That keeps the slider ceiling at or below the inverter's
+    nameplate — never overshooting into an estimated-battery value that could
+    exceed real hardware.
     """
     spec = spec_for(str(target.get("device_model_code") or ""))
-    if spec is not None:
+    if spec is not None and not spec.unverified:
         battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
         if battery_limits:
             return max(battery_limits)
