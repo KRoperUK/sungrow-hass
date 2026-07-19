@@ -96,6 +96,7 @@
       "cannot_connect": "Failed to connect",
       "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
       "invalid_auth": "Invalid authentication",
+      "invalid_auth_code": "iSolarCloud rejected the authorization code — it may have already been used or expired. Open the authorization link above to get a fresh code, then paste it here (or paste the full redirect URL).",
       "invalid_extra_measure_points": "Extra measure points must be in the form point_id=code, comma separated",
       "invalid_redirect_uri": "The Redirect URI must end with /api/sungrow_hass/callback. Update it here AND in the iSolarCloud developer portal so both match — otherwise iSolarCloud redirects to the Home Assistant homepage and the authorization code is lost.",
       "unknown": "Unexpected error"

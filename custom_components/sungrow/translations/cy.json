@@ -96,6 +96,7 @@
       "cannot_connect": "Methwyd â chysylltu",
       "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
       "invalid_auth": "Dilysiad annilys",
+      "invalid_auth_code": "Gwrthododd iSolarCloud y cod awdurdodi — efallai ei fod eisoes wedi'i ddefnyddio neu wedi dod i ben. Agor y ddolen awdurdodi uchod i gael cod newydd, yna gludwch ef yma (neu gludwch yr URL ailgyfeirio llawn).",
       "invalid_extra_measure_points": "Rhaid i bwyntiau mesur ychwanegol fod ar ffurf point_id=code, wedi'u gwahanu gan atalnodau",
       "invalid_redirect_uri": "Rhaid i'r URI ailgyfeirio orffen gyda /api/sungrow_hass/callback. Diweddara ef yma AC yn y porth datblygwyr iSolarCloud fel bod y ddau yn cydweddu — fel arall mae iSolarCloud yn ailgyfeirio i dudalen gartref Home Assistant a chollir y cod awdurdodi.",
       "unknown": "Gwall annisgwyl"

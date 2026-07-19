@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from pysolarcloud.plants import DeviceType
 
@@ -146,3 +147,32 @@ def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
                     if domain_key == DOMAIN:
                         return str(ident)
     return None
+
+
+def unique_id_owned_by_other_entry(
+    hass: HomeAssistant,
+    platform: str,
+    unique_id: str,
+    entry_id: str,
+) -> bool:
+    """Return True when ``unique_id`` is already registered under a *different* config entry.
+
+    HA's entity registry keys on ``(platform, domain, unique_id)``. When a user configures
+    two or more Sungrow cloud entries that share the same iSolarCloud plant (e.g. duplicate
+    accounts, migration in progress) each entry's ``_add_new_entities`` closure will try to
+    add the same dispatch/binary entities and the second registration produces a noisy
+    ``Platform sungrow does not generate unique IDs`` ERROR log per entity, per coordinator
+    tick. This helper lets the platforms skip an entity silently (INFO-level) when it is
+    already owned by another Sungrow entry, without touching the entry that *does* own it.
+
+    Ownership by the current entry (or by a stale/orphaned registry entry with no
+    ``config_entry_id``) still returns False so the entity is created as normal.
+    """
+    registry = er.async_get(hass)
+    existing_entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
+    if existing_entity_id is None:
+        return False
+    existing = registry.async_get(existing_entity_id)
+    if existing is None or existing.config_entry_id is None:
+        return False
+    return existing.config_entry_id != entry_id

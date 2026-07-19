@@ -68,6 +68,8 @@ def test_select_backfill_points_picks_energy_and_power():
 
 def test_build_series_target_energy_metadata_shape():
     """Energy live series -> recorder source, has_sum, unit from the live entity (7.1, 7.5)."""
+    from homeassistant.components.recorder.models.statistics import StatisticMeanType
+
     target = build_series_target(
         plant_id="123",
         point_code="total_yield",
@@ -83,6 +85,7 @@ def test_build_series_target_energy_metadata_shape():
         is_external=False,
         metadata={
             "has_mean": False,
+            "mean_type": StatisticMeanType.NONE,
             "has_sum": True,
             "name": None,
             "source": "recorder",
@@ -93,7 +96,9 @@ def test_build_series_target_energy_metadata_shape():
 
 
 def test_build_series_target_power_metadata_shape():
-    """Power series -> has_mean, W default unit when the live entity supplies none (7.2)."""
+    """Power series -> has_mean + ARITHMETIC mean_type, W default unit when live entity has none (7.2)."""
+    from homeassistant.components.recorder.models.statistics import StatisticMeanType
+
     target = build_series_target(
         plant_id="123",
         point_code="power",
@@ -102,6 +107,7 @@ def test_build_series_target_power_metadata_shape():
         unit=None,
     )
     assert target.metadata["has_mean"] is True
+    assert target.metadata["mean_type"] == StatisticMeanType.ARITHMETIC
     assert target.metadata["has_sum"] is False
     assert target.unit == "W"
     assert target.metadata["unit_of_measurement"] == "W"
