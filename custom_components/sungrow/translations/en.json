@@ -234,6 +234,11 @@
       "battery_mode": {
         "name": "Battery Mode"
       }
+    },
+    "sensor": {
+      "modbus_status": {
+        "name": "Modbus Status"
+      }
     }
   },
   "exceptions": {

@@ -1036,3 +1036,162 @@ async def test_ess_partial_mppt_only_reported_sensors_created(hass: HomeAssistan
     assert by_code["mppt1_voltage"].device_class == SensorDeviceClass.VOLTAGE
     assert by_code["mppt2_current"].entity_category == EntityCategory.DIAGNOSTIC
     assert by_code["mppt2_current"].device_class == SensorDeviceClass.CURRENT
+
+
+# ---------------------------------------------------------------------------
+# SungrowModbusStatusSensor — Modbus-only diagnostic status text sensor (#361)
+# ---------------------------------------------------------------------------
+
+
+def _modbus_only_coordinator(*, modbus_diagnostics: dict | None = None, last_update_success: bool = True):
+    """Build a Modbus-only coordinator with an inverter device."""
+    devices = [
+        {
+            "uuid": "inv-1",
+            "device_name": "Inverter1",
+            "device_type": DeviceType.INVERTER,
+            "device_model_code": "SG3.6RS",
+            "device_sn": "A1",
+            "factory_name": "SUNGROW",
+        }
+    ]
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.plant_name = "Test Plant"
+    coordinator.data = {}
+    coordinator.plant_detail = {}
+    coordinator.devices = devices
+    coordinator.device_data = {}
+    coordinator.enable_device_sensors = False
+    coordinator.plants_service = None  # Modbus-only path
+    coordinator.via_plant_id = None
+    coordinator.local_configuration_url = "http://10.0.0.9"
+    coordinator.last_update_success = last_update_success
+    coordinator.modbus_diagnostics = (
+        modbus_diagnostics
+        if modbus_diagnostics is not None
+        else {
+            "device_family": "sg_rs",
+            "skipped_blocks": [],
+            "last_error": None,
+        }
+    )
+    return coordinator
+
+
+async def test_modbus_status_sensor_created_on_modbus_only_entry(hass: HomeAssistant):
+    """A local Modbus entry gets a per-inverter status sensor (#361)."""
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator()
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={"12345": coordinator.devices})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    status = next((e for e in added if isinstance(e, SungrowModbusStatusSensor)), None)
+    assert status is not None
+    assert status._attr_unique_id == "12345_inv-1_modbus_status"
+    # Disabled by default so it doesn't clutter the default UI.
+    assert status._attr_entity_registry_enabled_default is False
+    assert status._attr_translation_key == "modbus_status"
+
+
+async def test_modbus_status_sensor_state_is_ok_on_success(hass: HomeAssistant):
+    """A successful last poll reports ``"ok"`` — the actionable "no problem" signal."""
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator(last_update_success=True)
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    status = next(e for e in added if isinstance(e, SungrowModbusStatusSensor))
+    assert status.native_value == "ok"
+
+
+async def test_modbus_status_sensor_state_is_last_error_on_failure(hass: HomeAssistant):
+    """A failed last poll surfaces the ``modbus_diagnostics["last_error"]`` string."""
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator(
+        modbus_diagnostics={"device_family": "sg_rs", "skipped_blocks": [], "last_error": "connection refused"},
+        last_update_success=False,
+    )
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    status = next(e for e in added if isinstance(e, SungrowModbusStatusSensor))
+    assert status.native_value == "connection refused"
+
+
+async def test_modbus_status_sensor_state_falls_back_to_unknown(hass: HomeAssistant):
+    """Poll failed but no ``last_error`` was recorded — state is ``"unknown"``, not None.
+
+    HA renders ``None`` as "unknown" in the UI anyway, but returning an explicit
+    string keeps the state deterministic for automations that match on it.
+    """
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator(
+        modbus_diagnostics={"device_family": "sg_rs", "skipped_blocks": [], "last_error": None},
+        last_update_success=False,
+    )
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    status = next(e for e in added if isinstance(e, SungrowModbusStatusSensor))
+    assert status.native_value == "unknown"
+
+
+async def test_modbus_status_sensor_attributes_expose_family_and_skipped_blocks(hass: HomeAssistant):
+    """Attributes carry ``device_family`` and non-empty ``skipped_blocks`` for triage."""
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator(
+        modbus_diagnostics={
+            "device_family": "sh_rt",
+            "skipped_blocks": [{"start": 13035, "count": 12}],
+            "last_error": None,
+        }
+    )
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    status = next(e for e in added if isinstance(e, SungrowModbusStatusSensor))
+    attrs = status.extra_state_attributes
+    assert attrs["device_family"] == "sh_rt"
+    assert attrs["skipped_blocks"] == [{"start": 13035, "count": 12}]
+
+
+async def test_modbus_status_sensor_not_created_on_cloud_entry(hass: HomeAssistant):
+    """A cloud entry (plants_service present) never gets the Modbus status sensor (#361)."""
+    from custom_components.sungrow.sensor import SungrowModbusStatusSensor, async_setup_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    coordinator = _modbus_only_coordinator()
+    coordinator.plants_service = MagicMock()  # cloud path
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=None, devices={})
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert not any(isinstance(e, SungrowModbusStatusSensor) for e in added)
