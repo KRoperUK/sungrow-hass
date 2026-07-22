@@ -34,6 +34,50 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.6.1...v6.0.0) (2026-07-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* sensor.*_running_state_raw and sensor.*_device_type_code now emit human-readable enum labels ("Running", "Emergency Stop", "SG3.6RS", …) instead of the raw integer state codes they used to hold ([#325](https://github.com/KRoperUK/sungrow-hass/issues/325)). Automations that compared to a numeric-looking string on those entities need to be updated to the enum label — HA does not warn about the mismatch, they just silently stop firing.
+
+### Features
+
+* **config_flow:** clarify transport-mode selector labels ([#377](https://github.com/KRoperUK/sungrow-hass/issues/377)) ([a948b59](https://github.com/KRoperUK/sungrow-hass/commit/a948b594dd8459bd17ae943242f5dc84aed4b5f7))
+* **config_flow:** guided Modbus setup wizard ([#374](https://github.com/KRoperUK/sungrow-hass/issues/374)) ([#378](https://github.com/KRoperUK/sungrow-hass/issues/378)) ([4b1b4b5](https://github.com/KRoperUK/sungrow-hass/commit/4b1b4b57b88bc66d3674bbbb442d5eec11ab1640))
+* **config_flow:** plant selection picker for multi-plant accounts ([#358](https://github.com/KRoperUK/sungrow-hass/issues/358)) ([#372](https://github.com/KRoperUK/sungrow-hass/issues/372)) ([eb75109](https://github.com/KRoperUK/sungrow-hass/commit/eb75109bb3b609f5dab1c88a1c8fbd16bb397889))
+* **diagnostics:** include active Repair issues in the diagnostics bundle ([#365](https://github.com/KRoperUK/sungrow-hass/issues/365)) ([918d458](https://github.com/KRoperUK/sungrow-hass/commit/918d458bd6c5efafbc3f93a33072305a30606a9e))
+* **dispatch:** scheduled forced-charge / forced-discharge windows ([#359](https://github.com/KRoperUK/sungrow-hass/issues/359)) ([#373](https://github.com/KRoperUK/sungrow-hass/issues/373)) ([6b8af7f](https://github.com/KRoperUK/sungrow-hass/commit/6b8af7f2f4d6cdd8cb5919ea6bf05fa0b77cb27b))
+* **modbus:** add string data_type for firmware/serial identity registers ([#329](https://github.com/KRoperUK/sungrow-hass/issues/329)) ([5368674](https://github.com/KRoperUK/sungrow-hass/commit/5368674b2fd3289c257dd5ed989ec18a269192ff))
+* **modbus:** ARM + DSP software version strings ([#344](https://github.com/KRoperUK/sungrow-hass/issues/344)) ([abf7a91](https://github.com/KRoperUK/sungrow-hass/commit/abf7a9148ca1c1310924983524d127c424a0bd11))
+* **modbus:** decode power_flow_status bits into per-flow binary sensors ([#328](https://github.com/KRoperUK/sungrow-hass/issues/328)) ([451790e](https://github.com/KRoperUK/sungrow-hass/commit/451790ed226f0ae3c3182d665223cde6bbf856ff))
+* **modbus:** decode running_state_raw and device_type_code as enum sensors ([#325](https://github.com/KRoperUK/sungrow-hass/issues/325)) ([2f76d2d](https://github.com/KRoperUK/sungrow-hass/commit/2f76d2d9790c3e3d3e8db4dc189c28dfe27e5ef2))
+* **modbus:** expand device_type_code coverage to full SG-RS/SG-RT/MG lineup ([#337](https://github.com/KRoperUK/sungrow-hass/issues/337)) ([889819b](https://github.com/KRoperUK/sungrow-hass/commit/889819b38a8a376d4a4458c4b65f869284f10507))
+* **modbus:** per-model datasheet catalog sizes battery power slider ([#339](https://github.com/KRoperUK/sungrow-hass/issues/339)) ([150ddb3](https://github.com/KRoperUK/sungrow-hass/commit/150ddb3b729b15fbee3750090a0fbfdbda5953e1))
+* **modbus:** SH hybrid local holding-register control ([#338](https://github.com/KRoperUK/sungrow-hass/issues/338)) ([57a8ff6](https://github.com/KRoperUK/sungrow-hass/commit/57a8ff628fc4470fcde9002fc3de3e0ca5607237))
+* **modbus:** Sungrow protocol version diagnostic sensor ([#345](https://github.com/KRoperUK/sungrow-hass/issues/345)) ([d3ad584](https://github.com/KRoperUK/sungrow-hass/commit/d3ad58412e9291ceebadffa6fbf1b845cfe394de))
+* **sensor:** expose modbus_diagnostics as a diagnostic entity ([#367](https://github.com/KRoperUK/sungrow-hass/issues/367)) ([a185df4](https://github.com/KRoperUK/sungrow-hass/commit/a185df4d27aed1afacff18482f259b67b2533826))
+* **services:** sungrow.refresh_tokens for support triage ([#368](https://github.com/KRoperUK/sungrow-hass/issues/368)) ([ffc04e1](https://github.com/KRoperUK/sungrow-hass/commit/ffc04e117bdc7537277ab68695087635fffe5ec6))
+
+
+### Bug Fixes
+
+* **backfill:** specify mean_type for HA 2026.11 compatibility ([09c68e7](https://github.com/KRoperUK/sungrow-hass/commit/09c68e7335db56a37d116feee2ded501a28f4eb5))
+* clean up SBH SOC scaling and legacy charge_discharge select ([#314](https://github.com/KRoperUK/sungrow-hass/issues/314)) ([ded469e](https://github.com/KRoperUK/sungrow-hass/commit/ded469e62efe9ed35fb0d655c752722a441e600b))
+* **config_flow:** catch OAuth invalid_grant gracefully ([8b97774](https://github.com/KRoperUK/sungrow-hass/commit/8b9777473b5215b445b61b4f1666463da84daa97))
+* **config_flow:** normalize and validate the OAuth redirect URI ([#342](https://github.com/KRoperUK/sungrow-hass/issues/342)) ([46c1299](https://github.com/KRoperUK/sungrow-hass/commit/46c1299a38c3dffa6b4d730f3afb78b34d7b9da2))
+* **config_flow:** retire the cloud+modbus transport ([#348](https://github.com/KRoperUK/sungrow-hass/issues/348)) ([#364](https://github.com/KRoperUK/sungrow-hass/issues/364)) ([54f5592](https://github.com/KRoperUK/sungrow-hass/commit/54f55925db4ceec1c833ec7c719bb4c792bb3b32))
+* **dispatch:** skip cross-entry unique_id collisions cleanly ([114c92a](https://github.com/KRoperUK/sungrow-hass/commit/114c92a7cf668322057e12acb7548974c0aba0b1))
+* **migration:** sweep stale charge_discharge_command select rows ([#314](https://github.com/KRoperUK/sungrow-hass/issues/314)) ([05971b3](https://github.com/KRoperUK/sungrow-hass/commit/05971b34e4724fddc96f5ec710ae67d0b5c62dbd))
+* rc10 follow-ups (backfill mean_type, invalid_grant, cross-entry dedup) ([f4028a5](https://github.com/KRoperUK/sungrow-hass/commit/f4028a5dbb1b00b327eb2fdb7820dc181d649ce1))
+* **sensor:** scale 0-1 battery SOC to percentage for cloud SBH plants ([#314](https://github.com/KRoperUK/sungrow-hass/issues/314)) ([da48eb8](https://github.com/KRoperUK/sungrow-hass/commit/da48eb851b505555688ab350b689aa82b98c4252))
+* **tests:** stop leaking coroutines in reachability property test ([#376](https://github.com/KRoperUK/sungrow-hass/issues/376)) ([d2a86a5](https://github.com/KRoperUK/sungrow-hass/commit/d2a86a520e82b68eb2d350790c715aaeda840b34)), closes [#375](https://github.com/KRoperUK/sungrow-hass/issues/375)
+
+
+### Documentation
+
+* v6 upgrading notes for enum-sensor and SBH SOC changes ([#379](https://github.com/KRoperUK/sungrow-hass/issues/379)) ([1e07965](https://github.com/KRoperUK/sungrow-hass/commit/1e07965a32702d1d5d6a90f6ab931ed6a57b814f))
+
 ## [5.6.1](https://github.com/KRoperUK/sungrow-hass/compare/v5.6.0...v5.6.1) (2026-07-18)
 
 

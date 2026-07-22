@@ -1,6 +1,6 @@
 [project]
 name = "sungrow-hass"
-version = "5.6.1"
+version = "6.0.0"
 description = "Sungrow iSolarCloud custom integration for Home Assistant"
 requires-python = ">=3.13"
 
