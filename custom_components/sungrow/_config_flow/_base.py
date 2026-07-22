@@ -22,6 +22,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import DOMAIN
+from ._helpers import WinetDongle
 
 # Try to import pysolarcloud, handle if missing gracefully for development.
 try:
@@ -81,6 +82,16 @@ class _SungrowFlowBase(config_entries.ConfigFlow):
         self._discovered_modbus_host: str | None = None
         # Transport mode selected in the transport step (#216).
         self._transport: str | None = None
+        # Guided local-Modbus wizard state (#374). The three ``_local_wizard_*``
+        # fields carry host / serial / model between the discovery, manual-IP,
+        # confirm and fallback-manual steps so a back-navigation doesn't lose
+        # what earlier steps already learned. ``_discovered_winet_dongles``
+        # caches the last successful zeroconf scan so re-entering the picker
+        # doesn't re-scan the LAN needlessly.
+        self._local_wizard_host: str | None = None
+        self._local_wizard_serial: str | None = None
+        self._local_wizard_model: str | None = None
+        self._discovered_winet_dongles: list[WinetDongle] | None = None
 
     @callback
     def async_remove(self) -> None:

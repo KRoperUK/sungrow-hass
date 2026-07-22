@@ -89,28 +89,57 @@ async def test_cloud_modbus_transport_no_longer_offered(hass: HomeAssistant):
 
 
 async def test_modbus_only_flow_creates_correct_entry(hass: HomeAssistant):
-    """user → local_setup → creates entry with transport=modbus_only + host/serial/model."""
+    """user → local_discovery → local_manual_ip → local_confirm_identified → entry (#374)."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
-    )
-    assert result2["step_id"] == "local_setup"
 
+    # Empty discovery result funnels the user straight into the manual-IP step.
+    with patch(
+        "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles",
+        return_value=[],
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
+        )
+    assert result2["step_id"] == "local_discovery"
+
+    # Pick "Enter IP manually" from the picker.
+    with patch(
+        "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles",
+        return_value=[],
+    ):
+        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "manual_ip"})
+    assert result3["step_id"] == "local_manual_ip"
+
+    # Reachability + Modbus identity both succeed → routes to confirm.
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
+        patch(
+            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
+            return_value=("SG3.6RS", "SN123"),
+        ),
+    ):
+        result4 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_MODBUS_HOST: "10.0.0.5"}
+        )
+    assert result4["step_id"] == "local_confirm_identified"
+    assert result4["description_placeholders"] == {"host": "10.0.0.5", "model": "SG3.6RS", "serial": "SN123"}
+
+    # Submitting the confirm step re-runs identity as a comms probe, then creates the entry.
+    with (
+        patch(
+            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
+            return_value=("SG3.6RS", "SN123"),
+        ),
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
-        result3 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            user_input={CONF_MODBUS_HOST: "10.0.0.5", CONF_SERIAL: "SN123", CONF_MODEL: "SG3.6RS"},
-        )
+        result5 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
         await hass.async_block_till_done()
 
-    assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result3["data"][CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
-    assert result3["data"][CONF_MODBUS_HOST] == "10.0.0.5"
-    assert result3["data"][CONF_SERIAL] == "SN123"
-    assert result3["data"][CONF_MODEL] == "SG3.6RS"
+    assert result5["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result5["data"][CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
+    assert result5["data"][CONF_MODBUS_HOST] == "10.0.0.5"
+    assert result5["data"][CONF_SERIAL] == "SN123"
+    assert result5["data"][CONF_MODEL] == "SG3.6RS"
 
 
 # ---------------------------------------------------------------------------
@@ -142,17 +171,24 @@ async def test_zeroconf_bypasses_transport_step(hass: HomeAssistant):
 
 
 async def test_local_setup_unreachable_shows_error(hass: HomeAssistant):
-    """Submitting an unreachable host in local_setup shows an error."""
+    """Submitting an unreachable host on the manual-IP step surfaces host_unreachable (#374)."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
-    )
+
+    with patch(
+        "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles",
+        return_value=[],
+    ):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
+        )
+        await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "manual_ip"})
 
     with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=False):
         result_local = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={CONF_MODBUS_HOST: "10.0.0.99", CONF_SERIAL: "SN1", CONF_MODEL: "SG3.6RS"},
+            user_input={CONF_MODBUS_HOST: "10.0.0.99"},
         )
 
     assert result_local["type"] == data_entry_flow.FlowResultType.FORM
+    assert result_local["step_id"] == "local_manual_ip"
     assert result_local["errors"]["base"] == "host_unreachable"

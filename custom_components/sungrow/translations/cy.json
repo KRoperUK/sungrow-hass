@@ -31,13 +31,31 @@
           "modbus_host": "WiNet-S IP / hostname"
         }
       },
-      "local_setup": {
-        "title": "Local Modbus Setup",
-        "description": "Enter the connection details for your local WiNet-S dongle. No cloud account is required.",
+      "local_discovery": {
+        "title": "Dod o hyd i'ch gwrthdröydd Sungrow",
+        "description": "Sganiwyd y rhwydwaith a chanfuwyd **{count}** dyngl WiNet-S. Dewiswch un i barhau, dewiswch **Rhowch IP â llaw** i deipio cyfeiriad, neu **Ail-sganio** i chwilio eto.",
         "data": {
-          "modbus_host": "WiNet-S IP / hostname",
-          "serial": "Inverter serial number",
-          "model": "Inverter model"
+          "choice": "Dyngl a ganfuwyd"
+        }
+      },
+      "local_manual_ip": {
+        "title": "Rhowch gyfeiriad eich WiNet-S",
+        "description": "Teipiwch gyfeiriad IP neu enw gwesteiwr eich dyngl WiNet-S. Bydd Home Assistant yn gwirio ei fod yn ymateb ar borth Modbus 502 cyn parhau.",
+        "data": {
+          "modbus_host": "IP / enw gwesteiwr WiNet-S"
+        }
+      },
+      "local_confirm_identified": {
+        "title": "Cadarnhau gwrthdröydd",
+        "description": "Canfuwyd Sungrow **{model}** (rhif cyfresol **{serial}**) yn **{host}**. Cyflwynwch i redeg darlleniad Modbus terfynol a'i ychwanegu fel cofnod lleol."
+      },
+      "local_setup": {
+        "title": "Gosodiad Modbus Lleol",
+        "description": "Ni allem ganfod model neu rif cyfresol y gwrthdröydd yn awtomatig. Llenwch y manylion â llaw — mae unrhyw beth a ddarllenwyd wedi'i gynnwys eisoes.",
+        "data": {
+          "modbus_host": "IP / enw gwesteiwr WiNet-S",
+          "serial": "Rhif cyfresol y gwrthdröydd",
+          "model": "Model y gwrthdröydd"
         }
       },
       "cloud_user": {
@@ -101,7 +119,9 @@
     },
     "error": {
       "cannot_connect": "Methwyd â chysylltu",
-      "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
+      "comms_probe_failed": "Methodd y prawf cyfathrebu Modbus terfynol. Ni atebodd y gwrthdröydd — gwiriwch fod y WiNet-S ar-lein a rhoi cynnig arall arni.",
+      "host_unreachable": "Ni ellir cyrraedd gwesteiwr WiNet-S ar borth 502. Gwiriwch yr IP a sicrhau bod y dyngl ar-lein.",
+      "serial_mismatch": "Newidiodd rhif cyfresol Modbus y gwrthdröydd rhwng canfod a'r prawf terfynol. Mae dyfais wahanol yn ateb ar y gwesteiwr hwn — dewiswch ddyngl arall neu rhowch ei gyfeiriad â llaw.",
       "invalid_auth": "Dilysiad annilys",
       "invalid_auth_code": "Gwrthododd iSolarCloud y cod awdurdodi — efallai ei fod eisoes wedi'i ddefnyddio neu wedi dod i ben. Agor y ddolen awdurdodi uchod i gael cod newydd, yna gludwch ef yma (neu gludwch yr URL ailgyfeirio llawn).",
       "invalid_extra_measure_points": "Rhaid i bwyntiau mesur ychwanegol fod ar ffurf point_id=code, wedi'u gwahanu gan atalnodau",
@@ -319,6 +339,12 @@
         "cloud_only": "Cwmwl (Cyfrif Datblygwr drwy OpenAPI Swyddogol - Holi'r Cwmwl)",
         "cloud_user": "Cwmwl (Cyfrif Defnyddiwr drwy API Answyddogol - Holi'r Cwmwl)",
         "modbus_only": "Modbus (Holi Lleol)"
+      }
+    },
+    "local_discovery": {
+      "options": {
+        "manual_ip": "Rhowch IP â llaw",
+        "rescan": "Ail-sganio'r rhwydwaith"
       }
     }
   }

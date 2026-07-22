@@ -108,6 +108,30 @@ If the same inverter is already on a **cloud** entry (matched by serial), the lo
 inverter device is placed **under that cloud plant** in the UI. Entities stay separate —
 nothing is merged.
 
+## Modbus-only: guided manual setup
+
+If Home Assistant hasn't (yet) offered a Discovered card — the dongle is on another
+subnet, mDNS is blocked, or the announcement was missed — you can walk the same setup
+manually via **Add Integration → Sungrow → Modbus (Local Polling)**. The wizard tries
+to do as much for you as it can:
+
+1. **Discovery** — a short mDNS scan runs. Any WiNet-S dongles that answer are listed by
+   model + serial + IP; pick one to skip straight past IP entry. If nothing is found (or
+   you want a specific host), choose **Enter IP manually**; **Rescan** re-runs the scan.
+2. **Manual IP** *(if used)* — type the WiNet-S IP or hostname. Home Assistant
+   checks that TCP port 502 answers before continuing.
+3. **Identify** — with a reachable host, Home Assistant reads the inverter model
+   (register 4999) and serial (register 4989) directly over Modbus and shows them for
+   confirmation. No wiring diagrams or portal spelunking needed for the common case.
+4. **Confirm** — submitting runs a final Modbus read as the create-entry probe: if the
+   inverter is still reachable and the serial matches what identify saw, the entry is
+   created. Otherwise the wizard surfaces the reason and lets you back up without losing
+   what you've entered so far.
+
+If model or serial can't be read (older firmware, non-standard model code), the wizard
+falls through to a **manual details form** pre-filled with whatever it did manage to
+read — you supply the missing pieces and it creates the entry.
+
 ### Reconfigure / IP change
 
 - **Options** on the local entry: poll interval and optional daily-yield register debug.
