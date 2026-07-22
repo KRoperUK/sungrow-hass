@@ -316,9 +316,9 @@
   "selector": {
     "transport": {
       "options": {
-        "cloud_only": "Cloud (Developer Account via Official OpenAPI - Cloud Polling)",
-        "cloud_user": "Cloud (User Account via Unofficial API - Cloud Polling)",
-        "modbus_only": "Modbus (Local Polling)"
+        "cloud_only": "Cloud (Compte développeur via l'OpenAPI officielle - Interrogation cloud)",
+        "cloud_user": "Cloud (Compte utilisateur via API non officielle - Interrogation cloud)",
+        "modbus_only": "Modbus (Interrogation locale)"
       }
     }
   }
