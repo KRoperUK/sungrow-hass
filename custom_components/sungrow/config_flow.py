@@ -103,7 +103,10 @@ class SungrowConfigFlow(
             transport = user_input[CONF_TRANSPORT]
             self._transport = transport
             if transport == TRANSPORT_MODBUS_ONLY:
-                return await self.async_step_local_setup()
+                # Route to the guided wizard (#374) rather than the single-page manual
+                # form. The wizard's own steps fall back to ``async_step_local_setup``
+                # when Modbus identity can't be auto-detected.
+                return await self.async_step_local_discovery()
             if transport == TRANSPORT_CLOUD_USER:
                 return await self.async_step_cloud_user()
             # cloud_only / (retired cloud_modbus) → cloud credentials

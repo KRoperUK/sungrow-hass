@@ -31,13 +31,31 @@
           "modbus_host": "WiNet-S IP / hostname"
         }
       },
-      "local_setup": {
-        "title": "Local Modbus Setup",
-        "description": "Enter the connection details for your local WiNet-S dongle. No cloud account is required.",
+      "local_discovery": {
+        "title": "Encuentre su inversor Sungrow",
+        "description": "Se exploró la red y se encontraron **{count}** dongle(s) WiNet-S. Elija uno para continuar, seleccione **Introducir IP manualmente** para escribir una dirección, o **Volver a explorar** para buscar de nuevo.",
         "data": {
-          "modbus_host": "WiNet-S IP / hostname",
-          "serial": "Inverter serial number",
-          "model": "Inverter model"
+          "choice": "Dongle detectado"
+        }
+      },
+      "local_manual_ip": {
+        "title": "Introducir la dirección del WiNet-S",
+        "description": "Escriba la dirección IP o el nombre de host de su dongle WiNet-S. Home Assistant comprobará que responde en el puerto Modbus 502 antes de continuar.",
+        "data": {
+          "modbus_host": "IP / nombre de host del WiNet-S"
+        }
+      },
+      "local_confirm_identified": {
+        "title": "Confirmar inversor",
+        "description": "Se encontró un Sungrow **{model}** (número de serie **{serial}**) en **{host}**. Envíe para ejecutar una lectura Modbus final y añadirlo como entrada local."
+      },
+      "local_setup": {
+        "title": "Configuración de Modbus local",
+        "description": "No se pudo detectar automáticamente el modelo o el número de serie del inversor. Rellene los datos manualmente — lo que se pudo leer ya se ha rellenado por usted.",
+        "data": {
+          "modbus_host": "IP / nombre de host del WiNet-S",
+          "serial": "Número de serie del inversor",
+          "model": "Modelo del inversor"
         }
       },
       "cloud_user": {
@@ -101,7 +119,9 @@
     },
     "error": {
       "cannot_connect": "No se pudo conectar",
-      "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
+      "comms_probe_failed": "La prueba final de comunicación Modbus falló. El inversor no respondió — compruebe que el WiNet-S sigue en línea e inténtelo de nuevo.",
+      "host_unreachable": "El host WiNet-S no es accesible en el puerto 502. Compruebe la IP y asegúrese de que el dongle esté en línea.",
+      "serial_mismatch": "El número de serie Modbus del inversor cambió entre la detección y la prueba final. Un dispositivo diferente está respondiendo en este host — elija otro dongle o introduzca su dirección manualmente.",
       "invalid_auth": "Autenticación no válida",
       "invalid_auth_code": "iSolarCloud rechazó el código de autorización — puede que ya se haya usado o haya caducado. Abre el enlace de autorización de arriba para obtener un código nuevo y pégalo aquí (o pega la URL completa de redirección).",
       "invalid_extra_measure_points": "Los puntos de medición adicionales deben tener el formato point_id=code, separados por comas",
@@ -319,6 +339,12 @@
         "cloud_only": "Nube (Cuenta de desarrollador vía OpenAPI oficial - Sondeo en la nube)",
         "cloud_user": "Nube (Cuenta de usuario vía API no oficial - Sondeo en la nube)",
         "modbus_only": "Modbus (Sondeo local)"
+      }
+    },
+    "local_discovery": {
+      "options": {
+        "__manual__": "Introducir IP manualmente",
+        "__rescan__": "Volver a explorar la red"
       }
     }
   }

@@ -31,13 +31,31 @@
           "modbus_host": "WiNet-S IP / hostname"
         }
       },
-      "local_setup": {
-        "title": "Local Modbus Setup",
-        "description": "Enter the connection details for your local WiNet-S dongle. No cloud account is required.",
+      "local_discovery": {
+        "title": "Ihren Sungrow-Wechselrichter finden",
+        "description": "Das Netzwerk wurde durchsucht und **{count}** WiNet-S-Dongle(s) wurden gefunden. Wählen Sie einen aus, um fortzufahren, wählen Sie **IP manuell eingeben**, um eine Adresse selbst einzugeben, oder **Erneut suchen**.",
         "data": {
-          "modbus_host": "WiNet-S IP / hostname",
-          "serial": "Inverter serial number",
-          "model": "Inverter model"
+          "choice": "Erkanntes Dongle"
+        }
+      },
+      "local_manual_ip": {
+        "title": "WiNet-S-Adresse eingeben",
+        "description": "Geben Sie die IP-Adresse oder den Hostnamen Ihres WiNet-S-Dongles ein. Home Assistant prüft, ob es auf Modbus-Port 502 antwortet, bevor es fortfährt.",
+        "data": {
+          "modbus_host": "WiNet-S IP / Hostname"
+        }
+      },
+      "local_confirm_identified": {
+        "title": "Wechselrichter bestätigen",
+        "description": "Ein Sungrow **{model}** (Seriennummer **{serial}**) wurde unter **{host}** gefunden. Zum Abschließen wird noch einmal per Modbus gelesen und der Eintrag als lokaler Eintrag angelegt."
+      },
+      "local_setup": {
+        "title": "Lokale Modbus-Einrichtung",
+        "description": "Modell und Seriennummer des Wechselrichters konnten nicht automatisch erkannt werden. Geben Sie die Details manuell ein — bereits gelesene Werte sind vorausgefüllt.",
+        "data": {
+          "modbus_host": "WiNet-S IP / Hostname",
+          "serial": "Seriennummer des Wechselrichters",
+          "model": "Wechselrichtermodell"
         }
       },
       "cloud_user": {
@@ -101,7 +119,9 @@
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen",
-      "host_unreachable": "The WiNet-S host is unreachable on port 502. Check the IP and ensure the dongle is online.",
+      "comms_probe_failed": "Der abschließende Modbus-Kommunikationstest ist fehlgeschlagen. Der Wechselrichter hat nicht geantwortet — prüfen Sie, ob das WiNet-S online ist, und versuchen Sie es erneut.",
+      "host_unreachable": "Der WiNet-S-Host ist auf Port 502 nicht erreichbar. Prüfen Sie die IP-Adresse und stellen Sie sicher, dass das Dongle online ist.",
+      "serial_mismatch": "Die Modbus-Seriennummer des Wechselrichters hat sich zwischen Erkennung und abschließendem Test geändert. Auf diesem Host antwortet ein anderes Gerät — wählen Sie ein anderes Dongle oder geben Sie dessen Adresse manuell ein.",
       "invalid_auth": "Ungültige Authentifizierung",
       "invalid_auth_code": "iSolarCloud hat den Autorisierungscode abgelehnt — er wurde möglicherweise bereits verwendet oder ist abgelaufen. Öffne den Autorisierungslink oben, um einen neuen Code zu erhalten, und füge ihn hier ein (oder füge die vollständige Weiterleitungs-URL ein).",
       "invalid_extra_measure_points": "Zusätzliche Messpunkte müssen im Format point_id=code, durch Kommata getrennt, angegeben werden",
@@ -319,6 +339,12 @@
         "cloud_only": "Cloud (Entwicklerkonto über offizielle OpenAPI - Cloud-Abfrage)",
         "cloud_user": "Cloud (Benutzerkonto über inoffizielle API - Cloud-Abfrage)",
         "modbus_only": "Modbus (lokale Abfrage)"
+      }
+    },
+    "local_discovery": {
+      "options": {
+        "__manual__": "IP manuell eingeben",
+        "__rescan__": "Netzwerk erneut durchsuchen"
       }
     }
   }
