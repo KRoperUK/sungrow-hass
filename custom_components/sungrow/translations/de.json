@@ -2,10 +2,10 @@
   "config": {
     "step": {
       "user": {
-        "title": "Mit iSolarCloud verbinden",
-        "description": "Geben Sie Ihre iSolarCloud-API-Zugangsdaten ein. Sie finden diese hier: [iSolarCloud]({url})\n\nNach dem Absenden wird der Hub erstellt und Home Assistant fordert Sie auf, ihn in Ihrem Browser zu autorisieren.",
+        "title": "Transportmodus wählen",
+        "description": "Wählen Sie, wie die Integration eine Verbindung zu Ihrem Sungrow-Wechselrichter herstellt.",
         "data": {
-          "transport": "Transport mode"
+          "transport": "Transportmodus"
         }
       },
       "cloud_credentials": {
@@ -310,6 +310,15 @@
           "name": "Integration",
           "description": "Sungrow-OAuth-Konfigurationseintrag zum Aktualisieren. Leer lassen, um alle geladenen Cloud-Einträge zu aktualisieren."
         }
+      }
+    }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "cloud_only": "Cloud (Developer Account via Official OpenAPI - Cloud Polling)",
+        "cloud_user": "Cloud (User Account via Unofficial API - Cloud Polling)",
+        "modbus_only": "Modbus (Local Polling)"
       }
     }
   }

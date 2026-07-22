@@ -312,5 +312,14 @@
         }
       }
     }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "cloud_only": "Cloud (Developer Account via Official OpenAPI - Cloud Polling)",
+        "cloud_user": "Cloud (User Account via Unofficial API - Cloud Polling)",
+        "modbus_only": "Modbus (Local Polling)"
+      }
+    }
   }
 }

@@ -2,10 +2,10 @@
   "config": {
     "step": {
       "user": {
-        "title": "Cysylltu ag iSolarCloud",
-        "description": "Rhowch eich manylion mynediad API iSolarCloud. Gallwch ddod o hyd iddynt yma: [iSolarCloud]({url})\n\nAr ôl i chi gyflwyno, caiff yr hyb ei greu a bydd Home Assistant yn gofyn i chi ei awdurdodi yn eich porwr.",
+        "title": "Dewiswch Fodd Cludiant",
+        "description": "Dewiswch sut mae'r integreiddiad yn cysylltu â'ch gwrthdröydd Sungrow.",
         "data": {
-          "transport": "Transport mode"
+          "transport": "Modd cludiant"
         }
       },
       "cloud_credentials": {
@@ -310,6 +310,15 @@
           "name": "Integreiddio",
           "description": "Cofnod OAuth Sungrow i'w adnewyddu. Gadewch yn wag i adnewyddu pob cofnod cwmwl wedi'i lwytho."
         }
+      }
+    }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "cloud_only": "Cloud (Developer Account via Official OpenAPI - Cloud Polling)",
+        "cloud_user": "Cloud (User Account via Unofficial API - Cloud Polling)",
+        "modbus_only": "Modbus (Local Polling)"
       }
     }
   }
