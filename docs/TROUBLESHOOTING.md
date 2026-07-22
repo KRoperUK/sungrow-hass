@@ -260,6 +260,31 @@ Discovery uses **mDNS/zeroconf**, which does **not** cross subnets or VLANs by d
 - If discovery is dismissed, it reappears the next time the dongle is seen; you can also
   reload the integration or restart Home Assistant to re-trigger it.
 - A **DHCP reservation** for the dongle keeps the host stable after setup.
+- Alternatively, use the **guided manual setup** wizard — see the next section.
+
+### The guided Modbus wizard shows an error
+
+The manual **Add Integration → Sungrow → Modbus (Local Polling)** flow surfaces specific
+errors instead of a generic "cannot connect", so each has its own fix:
+
+- **"The WiNet-S host is unreachable on port 502"** — the IP you entered doesn't answer on
+  Modbus TCP. Confirm the address, that TCP 502 is open between Home Assistant and the
+  dongle (a firewall or VLAN ACL is the usual culprit), and that no other client is already
+  holding the socket (the dongle only allows a small number of concurrent Modbus TCP
+  clients). You can retry immediately on the same form — nothing is persisted yet.
+- **"The final Modbus comms probe failed"** — happens when the wizard's confirmation step
+  can't get a Modbus response from an inverter that was reachable a moment earlier. The
+  dongle may have dropped the socket (WiNet-S does this on idle) or the inverter may have
+  briefly gone offline. Wait a few seconds and press Submit again; if it keeps failing,
+  step back to the manual IP form and re-enter the host to run the full identify again.
+- **"The inverter's Modbus serial changed between discovery and the final probe"** — a
+  different device is now answering on the host you selected. Usually a stale mDNS entry
+  or DHCP shuffle (the IP you picked has been reassigned). Choose **Rescan** on the
+  discovery step, or enter the correct IP manually.
+- **Wizard falls through to the manual details form with fields pre-filled** — HA reached
+  the inverter over TCP 502 but couldn't read the model / serial registers cleanly (older
+  firmware or a non-standard model code). Fill in the gaps by hand and submit; the pre-
+  filled fields are whatever the wizard did manage to read.
 
 ### Local reads fail / "Cannot connect" over Modbus
 

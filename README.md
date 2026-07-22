@@ -6,42 +6,58 @@
 [![GitHub Release][release-badge]][release-url]
 [![Contributor Covenant][coc-badge]][coc-url]
 
-Custom component that integrates Sungrow inverters via the iSolarCloud API into Home Assistant using the [`sungrow-isolarcloud`](https://github.com/KRoperUK/pysolarcloud) library (a maintained fork of `pysolarcloud`).
+Custom component that integrates Sungrow inverters into Home Assistant — via the [official iSolarCloud OpenAPI](https://developer-api.isolarcloud.com/), the [unofficial user-account API](https://sungrow-hass.kroper.uk/local-modbus/#cloud-user-account-unofficial), or the WiNet-S dongle's [local Modbus TCP](https://sungrow-hass.kroper.uk/local-modbus/) interface. Powered by the [`sungrow-isolarcloud`](https://github.com/KRoperUK/pysolarcloud) library.
 
-It authorizes **once** against your iSolarCloud OpenAPI application, discovers every plant on the account, and polls each on a schedule — mapping your inverters, batteries, meters and WiNet-S onto Home Assistant's device tree, with the correct device/state classes so everything feeds straight into the Energy dashboard.
+Set it up in the Home Assistant UI, pick your transport, and the integration discovers every plant on the account and maps your inverters, batteries, meters and WiNet-S onto Home Assistant's device tree — with the correct device/state classes so everything feeds straight into the Energy dashboard.
 
 📖 **[Full documentation & setup guide → sungrow-hass.kroper.uk](https://sungrow-hass.kroper.uk/)**
+
+## Transport modes
+
+Choose one when you add the integration:
+
+| Transport | Data source | Credentials | Control | Best for |
+| --- | --- | --- | --- | --- |
+| **Cloud (Developer Account via Official OpenAPI - Cloud Polling)** | iSolarCloud OpenAPI | Developer app (App Key/Secret/ID) | ✅ Full dispatch | Full plant sensors and battery/dispatch controls on the official API. |
+| **Cloud (User Account via Unofficial API - Cloud Polling)** | iSolarCloud app/web API | Just email + password | ✅ Yes (experimental) | No developer app to register — sensors + dispatch via the unofficial API. |
+| **Modbus (Local Polling)** | WiNet-S · TCP 502 | None | ✅ Active power limit (SG string) | Fast local reads without an API quota; keeps working when iSolarCloud is down. |
+
+You can run **more than one** transport in parallel (e.g. a cloud entry and a local Modbus entry for the same inverter) — they stay as separate config entries and never merge state.
 
 ```mermaid
 flowchart LR
     subgraph HA["🏠 Home Assistant"]
         direction TB
-        E["Config entry<br/>(iSolarCloud account)"] --> C["Coordinator<br/>per plant"]
-        C --> S["Sensors · binary sensors<br/>numbers · selects"]
+        E1["Cloud entry<br/>Developer or User Account"]
+        E2["Local entry<br/>WiNet-S Modbus"]
     end
-    HA <-->|"OAuth 2.0 · token refresh"| API["☁️ iSolarCloud<br/>OpenAPI"]
-    C -.->|"poll ~5 min"| API
-    API --> HW["🔌 Inverters · batteries<br/>meters · WiNet-S"]
+    E1 <-->|"OAuth · poll ~5 min"| API["☁️ iSolarCloud API"]
+    E2 <-->|"Modbus TCP :502"| WN["🔌 WiNet-S"]
+    API --> HW["Plants · inverters · batteries · meters"]
+    WN --> HW
 ```
 
 Your hardware maps onto Home Assistant as **one account → many plants → each plant's physical devices** (inverter, battery, meter, WiNet-S) nested underneath it. See [Sensors → Device grouping](https://sungrow-hass.kroper.uk/SENSORS/#device-grouping).
 
 ## Features
 
-- **Cloud Polling** — fetches real-time data from the iSolarCloud API.
-- **Auto-Discovery** — automatically finds all plants linked to your account.
-- **Sensors** — creates sensors for every available data point (power, energy, battery SOC, etc.) with correct device/state classes for the Energy dashboard.
-- **Device health & diagnostics** — a per-device **Fault** (problem) and **Connectivity** (online/offline) binary sensor, plus device-level diagnostic sensors (inverter temperature, MPPT voltages/currents, grid frequency, WLAN/wireless signal strength). Device cards are enriched with model, serial number and manufacturer; the Fault sensor exposes a human-readable reason (operating status) so you see *why*, and the Connectivity sensor exposes the commissioning date.
-- **Per-device grouping** — plant readings are automatically grouped under the physical device they come from (inverter, battery, meter, WiNet-S), nested beneath the plant, so the Home Assistant device tree mirrors your hardware. Entity IDs and history are unchanged; aggregate readings on multi-inverter plants stay on the plant device.
-- **Plant health & tariffs** — plant-wide alarm/fault counts, nameplate power, and your configured import/export electricity prices, surfaced as sensors on the plant device.
-- **Custom measure points** — request additional iSolarCloud point IDs (e.g. battery charge/discharge power or EV charger values) via the options flow.
-- **Dispatch / control entities** — number and select entities for charge/discharge command, power, SOC limits, forced charging, and export/active-power limiting, with automatic EMS heartbeat when dispatching. Battery-only controls are hidden on PV-only plants so they can't be triggered on a system without a battery.
-- **Safer dispatch (auto-revert)** — set a **Forced Dispatch Duration** and a forced charge/discharge automatically reverts to *Stop* after that long (surviving restarts), so a command can't silently persist and curtail your solar. Leave it at 0 to keep the legacy always-on behaviour.
-- **Resilient polling** — rides out brief network/API hiccups instead of flapping every entity to *unavailable*, and automatically backs off the polling interval when iSolarCloud rate-limits the account.
-- **Guided repairs** — surfaces iSolarCloud whitelist (E918/E919) and rate-limit (E998/E999) rejections as actionable Home Assistant **Repairs** with fix instructions.
-- **Config Flow** — set up entirely through the Home Assistant UI.
-- **Token persistence & re-auth** — refreshed tokens are saved automatically, so entities stay available across restarts; if credentials expire you're prompted to re-authorize in place (no delete & re-add).
-- **Configurable polling interval** — tune how often data is fetched via the integration options.
+- **Three transport modes** — official OAuth OpenAPI, unofficial user-account login (no developer app required), or local Modbus over the WiNet-S. Pick one per config entry — you can run several side-by-side.
+- **Auto-discovery** — finds every plant on the account (cloud), and offers a **Discovered** card when a WiNet-S dongle appears on your LAN (local). Cloud OAuth entries with more than one plant open a **plant picker** so you choose which plants to integrate.
+- **Guided Modbus wizard** — manual local setup scans the LAN, reads the inverter model + serial straight from Modbus registers, and confirms comms before creating the entry, so you rarely have to type more than an IP.
+- **Rich sensors** — power, energy, battery SOC, per-string DC, per-phase AC and more, classified with the correct `device_class` / `state_class` so they land in the Energy dashboard automatically.
+- **Device health & diagnostics** — per-device **Fault** (problem) + **Connectivity** (online/offline) binary sensors, human-readable operating status as a reason, model/serial/manufacturer on every device card, plus opt-in per-device diagnostic sensors (inverter temperature, MPPT V/I, grid frequency, WLAN signal).
+- **Device grouping** — inverter, battery, meter and WiNet-S readings are grouped under the physical device that reports them, nested beneath the plant. Multi-inverter aggregates stay on the plant device. Entity IDs and history are unchanged.
+- **Plant health & tariffs** — plant-wide alarm/fault counts, nameplate power, and your configured import/export tariffs, surfaced as sensors on the plant device.
+- **Battery dispatch (`sungrow.set_battery_mode`)** — a single **Battery Mode** select (Self-consumption / Force charge / Force discharge / Stop) plus charge/discharge power, SOC limits, forced charging and battery-first mode. Battery-only controls are hidden on PV-only plants so a battery-less inverter can't be forced into External-EMS mode.
+- **Scheduled forced charge/discharge windows** — two configurable daily windows (start/end in local time, wrap-over-midnight supported) that automatically enter Force charge or Force discharge for the window and revert afterwards.
+- **Safer dispatch (auto-revert)** — **Forced Dispatch Duration** (default 60 min) auto-reverts a forced mode after the set time, surviving restarts. Set to 0 for unbounded commands (not recommended).
+- **Grid / export limiting** — number + select entities for export limit (power and %), active-power limiting, and reactive-power regulation (Off / Power Factor / Q(t) / Q(P) / Q(U)). Available on PV-only plants too.
+- **Custom measure points** — add any iSolarCloud point ID via the options flow (`point_id=code` pairs) to surface hardware-specific points that aren't in the default map.
+- **Resilient polling** — rides out brief network/API blips (15-min grace window) instead of flapping to *unavailable*, and auto-backs-off when iSolarCloud rate-limits the account (up to a 1-hour interval, then recovers).
+- **Guided repairs** — whitelist (E918/E919) and rate-limit (E998/E999) rejections, unexpectedly-stopped dispatch keepalives, and dispatch commands the inverter didn't actually apply, surface as actionable Home Assistant **Repairs**.
+- **Historical backfill (`sungrow.backfill`)** — service to import iSolarCloud historical data into Home Assistant long-term statistics so the History and Energy dashboards are populated immediately after setup.
+- **Token persistence + re-auth** — refreshed tokens are saved automatically so entities stay available across restarts. If credentials expire, Home Assistant prompts you to re-authorize in place (no delete + re-add). A **`sungrow.refresh_tokens`** service is available for support triage.
+- **Configurable polling** — tune the poll interval via the options flow (minimum 10 s; default 5 min for cloud, 30 s for local Modbus).
 
 ## Use cases
 
@@ -75,35 +91,24 @@ Or manually:
 
 ## Configuration
 
-1. Go to **Settings** → **Devices & Services**.
-2. Click **Add Integration** and search for **Sungrow iSolarCloud**.
-3. Enter your iSolarCloud API credentials:
+The full setup guide with per-transport screens is at [sungrow-hass.kroper.uk/installation](https://sungrow-hass.kroper.uk/installation/). The short version:
 
-| Field | Description |
-|---|---|
-| **Gateway** | Your region: **Europe**, **International**, **China**, or **Australia** |
-| **App Key** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
-| **App Secret** | AppSecret from the Developer Platform |
-| **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
-| **Redirect URI** | Pre-filled; leave as default unless you know what you're doing |
-
-4. Click **Submit**. The **hub is created immediately** and Home Assistant prompts you to **authorize** it (shown as a "reconfigure/authorize" notification on the integration). Creating the hub first is what registers the callback endpoint, so the redirect resolves reliably even on a brand-new install.
-5. Open the authorization prompt → a **"Waiting for authorization"** screen appears with a link. Open the link, log in to iSolarCloud, and approve the application. You're redirected back and Home Assistant captures the authorization code automatically (via the `/api/sungrow_hass/callback` endpoint) and finishes — no copy-and-paste needed.
-6. If the automatic redirect doesn't complete within a couple of minutes (for example because iSolarCloud strips query parameters from your redirect URI), the screen falls back to a **manual entry** form. Paste the `code` from the redirect URL — or the whole redirect URL — to finish authorizing the hub.
-
-### Obtaining Credentials
-
-Register an application on the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) to get your App Key, App Secret, and App ID.
-
-> **Note:** New developer applications must be **approved by Sungrow** (and have **OAuth 2.0** enabled) before authorization will work — this can take up to a week.
+1. **Settings → Devices & Services → Add Integration → Sungrow iSolarCloud.**
+2. **Pick a transport mode:**
+   - **Cloud (Developer Account via Official OpenAPI - Cloud Polling)** — enter your **Gateway region**, **App Key**, **App Secret**, **App ID** and Redirect URI, then authorize in your browser. Register an application on the [iSolarCloud Developer Portal](https://developer-api.isolarcloud.com/) first (with **OAuth 2.0** enabled). New apps take up to a week to be approved by Sungrow.
+   - **Cloud (User Account via Unofficial API - Cloud Polling)** — enter the **email**, **password** and **region** you use for the iSolarCloud app. No developer app required. See [caveats](https://sungrow-hass.kroper.uk/local-modbus/#cloud-user-account-unofficial).
+   - **Modbus (Local Polling)** — the wizard scans your LAN for WiNet-S dongles, reads the model + serial from Modbus, and creates a local entry. If your dongle isn't discoverable, choose **Enter IP manually** and type its address. See [Local Modbus (WiNet-S)](https://sungrow-hass.kroper.uk/local-modbus/).
+3. **Multi-plant cloud accounts** get a plant picker after authorization so you choose which plants to integrate.
 
 ### Options
 
-After setup, go to **Settings → Devices & Services → Sungrow → Configure** to change:
+After setup, **Settings → Devices & Services → Sungrow → Configure** offers, depending on the transport:
 
-- **Polling interval** (default 5 minutes)
-- **Extra measure points** — add custom `point_id=code` pairs to request additional data points from iSolarCloud
-- **Create per-device sensors** — off by default. When enabled, each discovered device (EV charger, meter, extra battery) is polled for its own realtime points and exposed as sensors under its own device card, grouped beneath the plant. Combine with **Extra measure points** to surface device-specific point IDs (e.g. an EV charger). Adds extra API calls, so leave it off if you only need plant-level data.
+- **Polling interval** — minimum 10 s. Default 5 min (cloud) or 30 s (local Modbus).
+- **Extra measure points** — comma-separated `point_id=code` pairs to request additional iSolarCloud points not in the default map (e.g. an EV charger).
+- **Create per-device sensors** *(cloud)* — polls each discovered device (EV charger, meter, extra battery) for its own realtime points; adds a call per device type per poll.
+- **Scheduled forced-charge / forced-discharge windows** — two daily windows (start/end HH:MM local time, wrap-over-midnight allowed) that automatically enter **Force charge** or **Force discharge** for the window and revert afterwards. Leave times blank to disable a slot.
+- **Modbus daily-yield debug** *(local)* — exposes the raw daily-yield register dump on the sensor attributes; off by default.
 
 ### Changing region or credentials
 
@@ -112,6 +117,12 @@ Devices & Services → Sungrow → ⋮ → Reconfigure** to update the region, A
 App Secret, or redirect URI without deleting and re-adding the integration (your
 entity history is kept). You'll be asked to authorize again in the browser, since
 new credentials or a new region need fresh tokens. The App ID stays fixed.
+
+### Services
+
+- **`sungrow.set_battery_mode`** — set the plant Battery Mode (Self-consumption / Force charge / Force discharge / Stop). Optional per-call `duration_minutes` overrides the Forced Dispatch Duration for one command.
+- **`sungrow.backfill`** — import historical iSolarCloud data into Home Assistant long-term statistics so History and Energy dashboards are populated immediately after setup.
+- **`sungrow.refresh_tokens`** — force an OAuth token refresh on the addressed cloud entry (or every loaded cloud entry). For support triage when tokens appear stuck.
 
 ### Removing the integration
 
@@ -122,14 +133,12 @@ the code). Your iSolarCloud account and developer application are unaffected.
 
 ### Sensor mapping
 
-Not sure which sensor corresponds to which value in the iSolarCloud app? See [docs/SENSORS.md](docs/SENSORS.md).
+Not sure which sensor corresponds to which value in the iSolarCloud app? See [Sensor mapping](https://sungrow-hass.kroper.uk/SENSORS/) or [`docs/SENSORS.md`](docs/SENSORS.md).
 
 ## How data updates
 
-This is a **cloud-polling** integration — it does not talk to the inverter locally.
-
-- **Polling.** Home Assistant polls the iSolarCloud API on a fixed interval using one data update coordinator **per plant**. Every sensor for a plant refreshes together on each poll.
-- **Interval.** The default is **5 minutes**. Change it under **Configure → Polling interval** (minimum 10 seconds). Lower intervals update sooner but use more of your API quota (the free developer plan allows ~2000 calls/hour); enabling per-device sensors adds a call per device type each poll.
+- **Cloud transports** poll iSolarCloud on a fixed interval (default **5 minutes**, minimum 10 s) using one data update coordinator **per plant**. Every sensor for a plant refreshes together on each poll. Lower intervals update sooner but use more of your API quota (the free developer plan allows ~2000 calls/hour); enabling per-device sensors adds a call per device type each poll.
+- **Local Modbus** polls the WiNet-S directly on TCP 502 (default **30 s**, minimum 10 s). No API quota; keeps working when iSolarCloud is unreachable.
 - **Availability.** Entity state reflects the last successful poll. A single failed poll (network/API blip) no longer flips everything to *unavailable* — the integration keeps serving the last-known values through a short grace period (~15 minutes) and retries on the next interval. Only a sustained outage marks entities unavailable; no restart is needed to recover.
 - **Rate limiting.** If iSolarCloud rejects a poll for exceeding the call quota (E998/E999), the integration automatically **backs off** — doubling the effective interval up to a 1-hour cap — and raises a Home Assistant **Repair** suggesting a higher polling interval. It returns to your configured interval once the quota recovers.
 - **Authentication.** Access tokens are refreshed automatically and the rotated tokens are persisted, so entities stay available across restarts. If your credentials are revoked or expire, the integration triggers a **re-authorization** prompt rather than silently failing.

@@ -9,15 +9,32 @@ iSolarCloud → Configure**.
 
 ## Polling interval
 
-The integration polls the iSolarCloud API on a fixed interval (default: 5 minutes). Lower it for
-fresher data or raise it to stay within the API's rate limits.
+- **Cloud entries** default to **5 minutes** — matches how often iSolarCloud actually updates
+  values. Minimum 10 s.
+- **Local Modbus entries** default to **30 seconds** — no API quota, so much lower intervals
+  are safe. Minimum 10 s.
 
-!!! tip "Rate limits"
+!!! tip "Rate limits (cloud)"
     iSolarCloud enforces hourly and monthly call quotas. If the quota is exceeded (E998/E999), the
     integration **automatically backs off** — doubling the effective interval up to a 1-hour cap —
     and raises a Home Assistant **Repair** (Settings → System → Repairs). To fix the root cause,
     **increase the polling interval** so fewer calls are made; the integration returns to your
     configured interval once the quota recovers.
+
+## Scheduled forced-charge / forced-discharge windows
+
+Two daily windows can automatically enter **Force charge** or **Force discharge** at a set
+time and revert afterwards, without an external automation. Configure them under **Configure**:
+
+- **Schedule 1 / 2 — start** — `HH:MM` local time (blank to disable the slot).
+- **Schedule 1 / 2 — end** — `HH:MM` local time. If `end < start` the window wraps over
+  midnight (e.g. `23:30 → 06:00`).
+- **Schedule 1 / 2 — battery mode** — Force charge or Force discharge.
+
+Overlapping windows resolve to the **most recently started** one. Windows respect the
+**Forced Dispatch Duration** auto-revert unless the window's end fires first. Leave both
+start and end blank to disable a slot; the two slots are independent, so you can have one
+for overnight cheap-tariff charging and another for morning peak-shift discharge.
 
 ## Custom measure points
 
@@ -69,6 +86,26 @@ Regardless of this option, every device gets a **Fault** (problem) and **Connect
 manufacturer. The Fault sensor exposes an `operating_status` attribute with a human-readable
 reason for inverter/ESS devices (e.g. *Shut down due to faults*, *Low insulation resistance*),
 and the Connectivity sensor exposes the commissioning date as an attribute.
+
+## Services
+
+The integration registers three services you can call from automations or Developer Tools:
+
+- **`sungrow.set_battery_mode`** — set the plant's Battery Mode (Self-consumption / Force
+  charge / Force discharge / Stop). Optional `duration_minutes` overrides the Forced Dispatch
+  Duration for a single call (`0` = no auto-revert for this command). Optional
+  `entity_id` / `device_id` / `config_entry` target a specific plant; omit them to target
+  every battery plant on every loaded entry.
+
+- **`sungrow.backfill`** — import historical iSolarCloud data into Home Assistant long-term
+  statistics so the History and Energy dashboards are populated immediately after setup.
+  Optional `start_date` overrides the default backfill window; optional `config_entry`
+  targets a specific cloud entry (empty = every loaded cloud entry).
+
+- **`sungrow.refresh_tokens`** — force an OAuth token refresh on the addressed cloud entry
+  (or every loaded cloud entry when none is specified). Useful for support triage when tokens
+  appear stuck. Modbus-only and user-account entries have no OAuth tokens to refresh and are
+  rejected.
 
 ## Local Modbus (separate entry)
 
