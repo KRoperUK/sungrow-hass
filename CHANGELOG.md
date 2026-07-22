@@ -40,6 +40,7 @@
 ### ⚠ BREAKING CHANGES
 
 * sensor.*_running_state_raw and sensor.*_device_type_code now emit human-readable enum labels ("Running", "Emergency Stop", "SG3.6RS", …) instead of the raw integer state codes they used to hold ([#325](https://github.com/KRoperUK/sungrow-hass/issues/325)). Automations that compared to a numeric-looking string on those entities need to be updated to the enum label — HA does not warn about the mismatch, they just silently stop firing.
+* sensor.*_battery_soc on SBH cloud plants now reports a proper 0-100 percentage instead of the previous 0.00-1.00 fraction ([#228](https://github.com/KRoperUK/sungrow-hass/issues/228)). Remove any manual `* 100` from templates, automations or Lovelace cards built against the old values. Long-term statistics for these entities are not rewritten on upgrade — use the sungrow.backfill service if you want a clean history for the affected period.
 
 ### Features
 
