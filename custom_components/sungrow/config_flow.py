@@ -112,9 +112,15 @@ class SungrowConfigFlow(
         from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig
 
         transport_options = [
-            SelectOptionDict(value=TRANSPORT_CLOUD_ONLY, label="Cloud Only"),
-            SelectOptionDict(value=TRANSPORT_CLOUD_USER, label="Cloud (user account, unofficial)"),
-            SelectOptionDict(value=TRANSPORT_MODBUS_ONLY, label="Modbus Only"),
+            SelectOptionDict(
+                value=TRANSPORT_CLOUD_ONLY,
+                label="Cloud (Developer Account via Official OpenAPI - Cloud Polling)",
+            ),
+            SelectOptionDict(
+                value=TRANSPORT_CLOUD_USER,
+                label="Cloud (User Account via Unofficial API - Cloud Polling)",
+            ),
+            SelectOptionDict(value=TRANSPORT_MODBUS_ONLY, label="Modbus (Local Polling)"),
         ]
         return self.async_show_form(
             step_id="user",

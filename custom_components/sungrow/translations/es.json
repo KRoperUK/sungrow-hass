@@ -2,10 +2,10 @@
   "config": {
     "step": {
       "user": {
-        "title": "Conectar con iSolarCloud",
-        "description": "Introduzca sus credenciales de la API de iSolarCloud. Puede encontrarlas aquí: [iSolarCloud]({url})\n\nDespués de enviarlas, se crea el concentrador y Home Assistant le pedirá que lo autorice en su navegador.",
+        "title": "Elegir modo de transporte",
+        "description": "Seleccione cómo la integración se conecta a su inversor Sungrow.",
         "data": {
-          "transport": "Transport mode"
+          "transport": "Modo de transporte"
         }
       },
       "cloud_credentials": {
@@ -310,6 +310,15 @@
           "name": "Integración",
           "description": "Entrada OAuth de Sungrow a actualizar. Dejar vacío para actualizar todas las entradas de nube cargadas."
         }
+      }
+    }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "cloud_only": "Nube (Cuenta de desarrollador vía OpenAPI oficial - Sondeo en la nube)",
+        "cloud_user": "Nube (Cuenta de usuario vía API no oficial - Sondeo en la nube)",
+        "modbus_only": "Modbus (Sondeo local)"
       }
     }
   }
