@@ -343,8 +343,8 @@
     },
     "local_discovery": {
       "options": {
-        "__manual__": "Rhowch IP â llaw",
-        "__rescan__": "Ail-sganio'r rhwydwaith"
+        "manual_ip": "Rhowch IP â llaw",
+        "rescan": "Ail-sganio'r rhwydwaith"
       }
     }
   }

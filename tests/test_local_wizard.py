@@ -73,7 +73,7 @@ async def test_discovery_lists_dongles_in_picker(hass: HomeAssistant):
         )
     assert step["step_id"] == "local_discovery"
     options = {opt["value"] for opt in step["data_schema"].schema["choice"].config["options"]}
-    assert options == {"192.168.1.42", "__manual__", "__rescan__"}
+    assert options == {"192.168.1.42", "manual_ip", "rescan"}
     assert step["description_placeholders"] == {"count": "1"}
 
 
@@ -93,7 +93,7 @@ async def test_discovery_rescan_reruns_the_scan(hass: HomeAssistant):
         "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles",
         return_value=[WinetDongle(host="10.0.0.7", serial="A9", model="SH5.0RT", mdns_name=None)],
     ) as m:
-        step = await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "__rescan__"})
+        step = await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "rescan"})
     assert m.called
     assert step["step_id"] == "local_discovery"
     assert step["description_placeholders"] == {"count": "1"}
@@ -107,7 +107,7 @@ async def test_discovery_rescan_reruns_the_scan(hass: HomeAssistant):
 async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
     """Manual IP → reachable + full identify → confirm → CREATE_ENTRY (#374 happy path)."""
     flow_id = await _start_local_flow(hass, [])
-    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "__manual__"})
+    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "manual_ip"})
 
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
@@ -143,7 +143,7 @@ async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
 async def test_manual_ip_unreachable_stays_on_form(hass: HomeAssistant):
     """A failed reachability probe keeps the user on the manual-IP form with an error."""
     flow_id = await _start_local_flow(hass, [])
-    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "__manual__"})
+    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "manual_ip"})
 
     with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=False):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.99"})
@@ -154,7 +154,7 @@ async def test_manual_ip_unreachable_stays_on_form(hass: HomeAssistant):
 async def test_identify_partial_falls_back_to_manual_prefilled(hass: HomeAssistant):
     """Reachable host + only the serial identified → fallback manual form pre-filled."""
     flow_id = await _start_local_flow(hass, [])
-    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "__manual__"})
+    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "manual_ip"})
 
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
@@ -176,7 +176,7 @@ async def test_identify_partial_falls_back_to_manual_prefilled(hass: HomeAssista
 async def test_identify_total_failure_falls_back_to_manual_form(hass: HomeAssistant):
     """Reachable host but both identify fields missing → manual fallback with host only."""
     flow_id = await _start_local_flow(hass, [])
-    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "__manual__"})
+    await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "manual_ip"})
 
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),

@@ -343,8 +343,8 @@
     },
     "local_discovery": {
       "options": {
-        "__manual__": "Saisir l'IP manuellement",
-        "__rescan__": "Rescanner le réseau"
+        "manual_ip": "Saisir l'IP manuellement",
+        "rescan": "Rescanner le réseau"
       }
     }
   }

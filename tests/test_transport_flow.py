@@ -107,7 +107,7 @@ async def test_modbus_only_flow_creates_correct_entry(hass: HomeAssistant):
         "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles",
         return_value=[],
     ):
-        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "__manual__"})
+        result3 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "manual_ip"})
     assert result3["step_id"] == "local_manual_ip"
 
     # Reachability + Modbus identity both succeed → routes to confirm.
@@ -181,7 +181,7 @@ async def test_local_setup_unreachable_shows_error(hass: HomeAssistant):
         await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
         )
-        await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "__manual__"})
+        await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"choice": "manual_ip"})
 
     with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=False):
         result_local = await hass.config_entries.flow.async_configure(

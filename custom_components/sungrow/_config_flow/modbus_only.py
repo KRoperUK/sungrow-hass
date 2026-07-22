@@ -50,10 +50,13 @@ from ._helpers import (
 _LOGGER = logging.getLogger(__name__)
 
 # Sentinel values for the discovery picker so the SelectSelector can carry
-# non-host actions alongside actual dongle hosts. Prefixed with "__" so they
-# can't collide with a legitimate IP or hostname (colons/slashes forbidden).
-_DISCOVERY_MANUAL = "__manual__"
-_DISCOVERY_RESCAN = "__rescan__"
+# non-host actions alongside actual dongle hosts. Plain identifier-style
+# tokens so they can't collide with a legitimate IP (has dots) or hostname
+# (typically has dots too, and can't be an underscore-only word). Also legal
+# translation keys under HA's ``[a-z0-9-_]+, not leading/trailing hyphen/
+# underscore`` rule for the ``selector.local_discovery.options.*`` block.
+_DISCOVERY_MANUAL = "manual_ip"
+_DISCOVERY_RESCAN = "rescan"
 
 
 class ModbusOnlyMixin(_SungrowFlowBase):
@@ -67,7 +70,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         """Scan for WiNet-S dongles and present a picker (entry step for Modbus Only).
 
         The picker holds one option per discovered dongle plus two synthetic actions:
-        ``__manual__`` (user wants to type an IP) and ``__rescan__`` (re-run this
+        ``manual_ip`` (user wants to type an IP) and ``rescan`` (re-run this
         step). Selecting an actual dongle carries its ``host`` / ``serial`` / ``model``
         into :meth:`async_step_local_confirm_identified` without a Modbus round-trip;
         we still gate creation on a real Modbus read there so we never build an entry
@@ -123,7 +126,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
     async def async_step_local_manual_ip(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Collect a WiNet-S host manually, probe TCP:502, then hand off to identify.
 
-        Reached from the discovery picker's ``__manual__`` option (or automatically
+        Reached from the discovery picker's ``manual_ip`` option (or automatically
         when discovery finds nothing). On a reachable host we try to read the model
         + serial via :func:`async_read_modbus_identity`; a full identify goes to the
         confirmation step, a partial or complete identify miss falls through to

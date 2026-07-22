@@ -343,8 +343,8 @@
     },
     "local_discovery": {
       "options": {
-        "__manual__": "Introducir IP manualmente",
-        "__rescan__": "Volver a explorar la red"
+        "manual_ip": "Introducir IP manualmente",
+        "rescan": "Volver a explorar la red"
       }
     }
   }
