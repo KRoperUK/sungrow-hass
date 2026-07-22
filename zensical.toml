@@ -17,6 +17,7 @@ nav = [
   { "Sensors" = "SENSORS.md" },
   { "Model support" = "model-support.md" },
   { "Troubleshooting" = "TROUBLESHOOTING.md" },
+  { "Upgrading" = "upgrading.md" },
 ]
 
 [project.theme]

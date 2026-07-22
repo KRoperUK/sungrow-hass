@@ -94,6 +94,12 @@ modelled.
     setup? See [Local Modbus (WiNet-S)](local-modbus.md). If something goes wrong, the
     [Troubleshooting](TROUBLESHOOTING.md) page covers the common auth and "unavailable" issues.
 
+!!! warning "Upgrading from v5.x?"
+    Two behaviour changes need a check on your automations: `running_state_raw` and
+    `device_type_code` now emit enum labels instead of raw integers, and SBH cloud plants
+    report battery SOC as a proper 0-100 percentage. See [Upgrading](upgrading.md) for the
+    full list and how to fix affected automations/templates.
+
 ## Links
 
 - Source & issues: [github.com/KRoperUK/sungrow-hass](https://github.com/KRoperUK/sungrow-hass)
