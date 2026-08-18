@@ -62,7 +62,7 @@ class _SungrowFlowBase(config_entries.ConfigFlow):
     :mod:`config_flow` passes ``domain=DOMAIN`` and enters HA's flow manager.
     """
 
-    VERSION = 5
+    VERSION = 6
 
     def __init__(self) -> None:
         """Initialize the config flow."""

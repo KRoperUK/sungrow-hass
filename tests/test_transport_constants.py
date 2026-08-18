@@ -29,5 +29,9 @@ def test_transport_modbus_only_value():
 
 
 def test_config_flow_version_is_current():
-    """SungrowConfigFlow.VERSION reflects the latest schema (v4→v5 retires cloud_modbus, #348)."""
-    assert SungrowConfigFlow.VERSION == 5
+    """SungrowConfigFlow.VERSION reflects the latest schema.
+
+    v4→v5 retires cloud_modbus (#348); v5→v6 restores the canonical local-Modbus
+    yield codes (#382).
+    """
+    assert SungrowConfigFlow.VERSION == 6

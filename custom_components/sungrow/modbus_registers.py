@@ -388,8 +388,13 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5745, "meter_phase_c_current", "u16", 0.01, "A", nan_value=NAN_U16),
     ModbusPoint(12999, "running_state_raw", "u16", 1, None),
     ModbusPoint(13000, "power_flow_status", "u16", 1, None),
-    ModbusPoint(13001, "daily_pv_generation", "u16", 0.1, "kWh"),
-    ModbusPoint(13002, "total_pv_generation", "u32", 0.1, "kWh"),
+    # Canonical yield codes, shared with the SG string-inverter map so a dashboard
+    # or Energy-dashboard config keeps working across inverter families (#382).
+    # These were briefly named ``daily_pv_generation`` / ``total_pv_generation``,
+    # which silently orphaned every pre-existing ``daily_yield`` / ``total_yield``
+    # entity when the SH map landed; ``migration`` renames them back.
+    ModbusPoint(13001, "daily_yield", "u16", 0.1, "kWh"),
+    ModbusPoint(13002, "total_yield", "u32", 0.1, "kWh"),
     ModbusPoint(13004, "daily_exported_energy_from_pv", "u16", 0.1, "kWh"),
     ModbusPoint(13005, "total_exported_energy_from_pv", "u32", 0.1, "kWh"),
     ModbusPoint(13007, "load_power", "s32", 1, "W", nan_value=NAN_S32),
@@ -433,6 +438,30 @@ REGISTER_MAPS: dict[str, tuple[ModbusPoint, ...]] = {
     "sh_rt": SH_RT_INPUT_POINTS,
     "sh_rs": SH_RT_INPUT_POINTS,  # SH-RS shares the same input-register layout
 }
+
+# Families whose raw daily-yield register does not reset at local midnight, so
+# ``daily_yield`` has to be derived from the lifetime ``total_yield`` instead
+# (see :mod:`daily_yield`). Observed on SG-RS wire 5002 (#223); the SH hybrids
+# reset wire 13001 correctly, so deriving there would only under-report until
+# the first midnight after install (#382).
+DERIVED_DAILY_YIELD_FAMILIES: frozenset[str] = frozenset({"sg_rs", "sg_rt"})
+
+
+def needs_derived_daily_yield(family: object) -> bool:
+    """Return whether ``family``'s raw daily-yield register needs the derived override.
+
+    Only a recognised family opts out. An undetected family (``None``) or anything
+    that is not a family string keeps the historical behaviour of deriving, which is
+    what every Modbus entry did before per-family register maps existed — better to
+    derive an accurate-by-tomorrow value than to trust a register we know some
+    firmware never resets.
+    """
+    if not isinstance(family, str):
+        return True
+    if family in DERIVED_DAILY_YIELD_FAMILIES:
+        return True
+    return family not in REGISTER_MAPS
+
 
 # Map device-type codes reported in register 5000 to a register-map family.
 # SH codes from the mkaiser SHx YAML (MIT) device-type map; SG-RS validated live.
