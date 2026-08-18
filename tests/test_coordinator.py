@@ -1439,6 +1439,108 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
     assert "83106" in data
 
 
+def _user_battery_device():
+    """A device-list entry shaped like the #389 report (SBR096 battery, SOC 58604)."""
+    return {
+        "uuid": "dev-battery-1",
+        "device_type": 43,
+        "device_name": "SBR096",
+        "point_data": [
+            {"point_id": 58604, "point_name": "Battery SOC", "unit": "%", "value": "32.2"},
+        ],
+    }
+
+
+async def test_user_update_populates_device_data_from_device_list(hass: HomeAssistant):
+    """Per-device points come from the user-API device list's embedded point_data (#389).
+
+    Before this, ``_async_user_update`` returned before the OAuth path's per-device
+    fetch, so ``device_data`` stayed empty and the sensor platform's per-device loop
+    never ran — Battery SOC was returned by the API but produced no entity.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_devices.assert_awaited_once_with("12345")
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+    assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
+
+
+async def test_user_update_skips_device_fetch_when_option_off(hass: HomeAssistant):
+    """Nothing else consumes device_data on this transport, so the call isn't spent."""
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_devices.assert_not_awaited()
+    assert coordinator.device_data == {}
+
+
+async def test_user_update_device_fetch_failure_is_non_fatal(hass: HomeAssistant):
+    """A failed device fetch must not fail the poll; plant points still update."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    client.async_get_devices = AsyncMock(side_effect=PySolarCloudException({"error": "rate_limit"}))
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["current_power"]["value"] == 490.0
+    assert coordinator.device_data == {}
+
+
+async def test_user_update_refreshes_the_live_device_list(hass: HomeAssistant):
+    """A device that appears after setup is picked up, so its sensors arrive at runtime.
+
+    The entity builders read ``coordinator.devices`` on every poll, so refreshing it
+    here is what lets a newly-added battery surface without a reload.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(
+        hass, entry, None, "12345", "Test Plant", [{"uuid": "stale", "device_type": 1}], user_auth=client
+    )
+
+    await coordinator._async_update_data()
+
+    assert [d["uuid"] for d in coordinator.devices] == ["dev-battery-1"]
+
+
+async def test_user_update_keeps_devices_when_refresh_returns_empty(hass: HomeAssistant):
+    """An empty device list is treated as a blip, not as "all devices removed"."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    known = [_user_battery_device()]
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", known, user_auth=client)
+
+    await coordinator._async_update_data()
+
+    assert [d["uuid"] for d in coordinator.devices] == ["dev-battery-1"]
+    # Points still mapped from the retained list.
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+
+
 async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):
     """A dead user-account credential raises ConfigEntryAuthFailed so HA starts reauth (#268)."""
     from homeassistant.exceptions import ConfigEntryAuthFailed

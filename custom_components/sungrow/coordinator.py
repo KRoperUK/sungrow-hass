@@ -394,8 +394,42 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.data
             raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
+        await self._async_refresh_user_device_data()
         points = map_plant_detail_to_points(detail)
         return normalize_power_units(normalize_energy_units(tag_source(points, "cloud_user")))
+
+    async def _async_refresh_user_device_data(self) -> None:
+        """Populate ``device_data`` from the user-API device list (best effort, #389).
+
+        The app/web device-list response embeds each device's current ``point_data``, so
+        it is the per-device realtime source on this transport and is re-fetched every
+        poll — unlike the OAuth path, where the device list is slow-changing metadata
+        refreshed on ``DEVICE_REFRESH_INTERVAL`` and realtime is a separate call.
+
+        Gated on ``enable_device_sensors`` because nothing else on this transport
+        consumes ``device_data``, so the extra call is only spent when it produces
+        entities. Failures are non-fatal: the plant-level points still update.
+        """
+        if not self.enable_device_sensors:
+            return
+        assert self._user_auth is not None
+        from .user_realtime import map_device_list_to_points
+
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                devices = await self._user_auth.async_get_devices(self.plant_id)
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Could not refresh user-account devices for plant %s: %s", self.plant_id, err)
+            return
+        if devices:
+            # Update the coordinator's own list in place: the entity builders read
+            # ``coordinator.devices`` on every poll, so a battery that appears later
+            # gets its sensors at runtime.
+            self.devices[:] = list(devices)
+        mapped = map_device_list_to_points(self.devices)
+        self.device_data = {
+            uuid: normalize_energy_units(tag_source(points, "cloud_user")) for uuid, points in mapped.items()
+        }
 
     async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
         """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.

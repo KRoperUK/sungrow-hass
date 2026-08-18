@@ -1195,3 +1195,60 @@ async def test_modbus_status_sensor_not_created_on_cloud_entry(hass: HomeAssista
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     assert not any(isinstance(e, SungrowModbusStatusSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# cloud_user per-device battery sensors (issue #389)
+# ---------------------------------------------------------------------------
+
+
+async def test_cloud_user_battery_soc_becomes_a_sensor(hass: HomeAssistant):
+    """An SBR battery's SOC from the user-API device list becomes a proper entity.
+
+    End-to-end guard for #389: point 58604 was returned by the API and visible in
+    diagnostics, but the cloud_user poll never populated ``device_data``, so the
+    per-device loop was skipped and no entity was created.
+    """
+    from custom_components.sungrow.user_realtime import map_device_list_to_points
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"current_power": {"value": "372", "unit": "W"}})
+    coordinator.enable_device_sensors = True
+    coordinator.via_plant_id = None
+    coordinator.local_configuration_url = None
+    coordinator.plants_service = None
+    coordinator.devices = [
+        {
+            "uuid": "dev-battery-1",
+            "device_type": 43,
+            "device_name": "SBR096",
+            "device_model_code": "SBR096",
+            "device_sn": "B1234567",
+            "point_data": [
+                {"point_id": 58604, "point_name": "Battery SOC", "unit": "%", "value": "32.2"},
+            ],
+        }
+    ]
+    # Exactly what the coordinator now derives from that device list.
+    coordinator.device_data = map_device_list_to_points(coordinator.devices)
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator],
+        control=MagicMock(),
+        devices={"12345": coordinator.devices},
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    soc = next(e for e in added if isinstance(e, SungrowDeviceSensor) and e.point_code == "58604")
+    assert soc._attr_unique_id == "12345_dev-battery-1_58604"
+    # Catalog naming/classification via the bare-numeric code, as on the OAuth path.
+    assert soc._attr_name == "Battery Level"
+    assert soc._attr_device_class == SensorDeviceClass.BATTERY
+    assert soc._attr_state_class == SensorStateClass.MEASUREMENT
+    assert soc._attr_native_unit_of_measurement == "%"
+    assert soc.native_value == 32.2
+    # Attached to the battery device, not the plant.
+    assert (DOMAIN, "dev-battery-1") in soc._attr_device_info["identifiers"]
