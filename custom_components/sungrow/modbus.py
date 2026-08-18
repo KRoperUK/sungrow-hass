@@ -27,6 +27,7 @@ from .modbus_registers import (
     daily_yield_diagnostic_dump,
     decode_registers,
     family_for_device_type_code,
+    suppress_absent_meter_points,
 )
 from .model_capabilities import ModelFamily, resolve_model_family
 
@@ -108,6 +109,17 @@ class SungrowModbusClient:
                         continue
                     raise
                 out.update(decode_registers(points, start, registers))
+        # An uncommissioned grid meter answers 0 instead of the "not available"
+        # sentinel, which would otherwise feed the Energy dashboard a permanent and
+        # entirely plausible 0 kWh of import/export (#387).
+        out, meter_present = suppress_absent_meter_points(out)
+        self.modbus_diagnostics["meter_present"] = meter_present
+        if not meter_present:
+            _LOGGER.debug(
+                "No external grid meter detected for %s; suppressing zero-valued "
+                "meter-derived points (load/import/export)",
+                self.host,
+            )
         return out
 
     async def async_read_daily_yield_diagnostic(self) -> dict[str, Any]:
