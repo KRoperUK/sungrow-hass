@@ -47,6 +47,7 @@ from .const import (
 )
 from .energy_units import normalize_energy_units, normalize_power_units, tag_source
 from .modbus import SungrowModbusError
+from .modbus_registers import needs_derived_daily_yield
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
@@ -437,10 +438,17 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         SG-RS wire 5002 does not reset at midnight on observed firmware; lifetime
         ``total_yield`` is trustworthy. Baseline is persisted so a restart mid-day
         keeps counting from the same day start.
+
+        Only applied to families whose raw register is known-broken: the SH hybrids
+        reset wire 13001 correctly, and overriding it would under-report until the
+        first midnight after install (#382).
         """
         from .daily_yield import DailyYieldBaseline, apply_derived_daily_yield
 
         if self._daily_yield_store is None:
+            return data
+        family = getattr(self._modbus_client, "model", None)
+        if not needs_derived_daily_yield(family):
             return data
         if not self._daily_yield_baseline_loaded:
             stored = await self._daily_yield_store.async_load()

@@ -1018,6 +1018,8 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
     coordinator._modbus_client = MagicMock()
+    # SG-RS wire 5002 is the register that never resets, so this family derives (#382).
+    coordinator._modbus_client.model = "sg_rs"
     coordinator._modbus_client.async_read_realtime = AsyncMock(
         return_value={
             "total_yield": {"code": "total_yield", "value": 6467.0, "unit": "kWh", "source": "modbus"},
@@ -1042,6 +1044,45 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     assert data["daily_yield"]["source"] == "modbus_derived"
     assert data["total_yield"]["value"] == 6467.0
     coordinator._daily_yield_store.async_save.assert_awaited()
+
+
+async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
+    """SH hybrids reset wire 13001 nightly, so the raw register is kept as-is (#382).
+
+    Deriving here would under-report until the first midnight after install, because
+    the persisted baseline starts at whatever the lifetime total happened to be.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-SH", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_yield": {"code": "total_yield", "value": 1492.0, "unit": "kWh", "source": "modbus"},
+            "daily_yield": {"code": "daily_yield", "value": 31.3, "unit": "kWh", "source": "modbus"},
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline(
+        baseline=1400.0, baseline_date=date(2026, 7, 13), last_total=1400.0
+    )
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 7, 13)
+        data = await coordinator._async_modbus_only_update()
+
+    # Raw register value survives; no derived override, no baseline write.
+    assert data["daily_yield"]["value"] == 31.3
+    assert data["daily_yield"]["source"] == "modbus"
+    coordinator._daily_yield_store.async_save.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
