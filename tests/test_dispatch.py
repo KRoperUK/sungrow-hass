@@ -1627,3 +1627,104 @@ async def test_self_consumption_and_stop_share_safe_payload(hass: HomeAssistant)
         "ess-1",
         {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Local Modbus entries must never invent a via_device parent (issue #383)
+# ---------------------------------------------------------------------------
+
+
+def _local_coordinator(serial="A22A1574727", via_plant_id=None):
+    """A Modbus-only coordinator, where plant_id is the (unregistered) inverter serial."""
+    coordinator = _coordinator_with(serial, "SH6.0RT (local)")
+    coordinator.plants_service = None
+    coordinator.local_configuration_url = "http://10.0.0.5"
+    coordinator.via_plant_id = via_plant_id
+    coordinator.dispatch_update_supported = True
+    return coordinator
+
+
+def _local_entry_data(entry, devices, **kwargs) -> SungrowData:
+    control = MagicMock()
+    control.async_update_parameters = AsyncMock(return_value=[])
+    control.async_heartbeat = AsyncMock()
+    control.heartbeat_loop = AsyncMock()
+    coordinator = _local_coordinator(**kwargs)
+    coordinator.devices = devices
+    data = SungrowData(
+        coordinators=[coordinator],
+        control=control,
+        devices={coordinator.plant_id: devices},
+    )
+    entry.runtime_data = data
+    return data
+
+
+@pytest.mark.parametrize("platform_setup", [number_setup_entry, select_setup_entry])
+async def test_local_dispatch_entities_have_no_phantom_via_device(hass: HomeAssistant, platform_setup):
+    """No local dispatch entity may point via_device at the inverter serial.
+
+    Regression for #383. ``coordinator.plant_id`` on a Modbus-only entry is the
+    inverter serial, which is deliberately never registered as a device. Defaulting
+    ``via_device`` to it made HA log "referencing a non existing via_device" and it
+    will stop being accepted. ``SungrowForcedDispatchDurationNumber`` was the one
+    entity that still open-coded ``build_device_info`` and so kept doing this.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {
+            "uuid": "A22A1574727_inv",
+            "device_type": DeviceType.INVERTER,
+            "device_name": "SH6.0RT (local)",
+            "device_sn": "A22A1574727",
+        }
+    ]
+    _local_entry_data(entry, devices)
+
+    added: list = []
+    await platform_setup(hass, entry, lambda entities: added.extend(entities))
+
+    assert added, "expected local dispatch entities to be built"
+    for entity in added:
+        info = entity._attr_device_info
+        assert "via_device" not in info, f"{type(entity).__name__} invented a via_device parent: {info}"
+        assert info["identifiers"] == {(DOMAIN, "A22A1574727_inv")}
+
+
+async def test_local_forced_dispatch_duration_has_no_phantom_via_device(hass: HomeAssistant):
+    """Pin the specific entity from the #383 report."""
+    from custom_components.sungrow.number import SungrowForcedDispatchDurationNumber
+
+    device = {
+        "uuid": "A22A1574727_inv",
+        "device_type": DeviceType.INVERTER,
+        "device_name": "SH6.0RT (local)",
+        "device_sn": "A22A1574727",
+    }
+    entity = SungrowForcedDispatchDurationNumber(_local_coordinator(), device)
+
+    assert "via_device" not in entity._attr_device_info
+    assert entity._attr_device_info["configuration_url"] == "http://10.0.0.5"
+
+
+async def test_local_dispatch_entities_nest_under_matching_cloud_plant(hass: HomeAssistant):
+    """When a cloud entry owns the same serial, the local entities nest under it."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {
+            "uuid": "A22A1574727_inv",
+            "device_type": DeviceType.INVERTER,
+            "device_name": "SH6.0RT (local)",
+            "device_sn": "A22A1574727",
+        }
+    ]
+    _local_entry_data(entry, devices, via_plant_id="plant-99")
+
+    added: list = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert added
+    for entity in added:
+        assert entity._attr_device_info["via_device"] == (DOMAIN, "plant-99")
