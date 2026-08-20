@@ -19,6 +19,7 @@ from custom_components.sungrow.modbus_registers import (
     daily_yield_diagnostic_dump,
     decode_registers,
     family_for_device_type_code,
+    needs_derived_daily_yield,
 )
 
 # ---------------------------------------------------------------------------
@@ -923,3 +924,82 @@ async def test_modbus_client_diagnostic_dump_raises_on_read_error():
     ):
         await SungrowModbusClient("10.0.0.1").async_read_daily_yield_diagnostic()
     inner.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Cross-family code parity (issue #382)
+# ---------------------------------------------------------------------------
+
+
+def test_every_sg_code_exists_in_the_sh_map():
+    """No point code may exist on the SG map but be missing from the SH map.
+
+    Regression guard for #382: when the SH hybrid map landed it named wire
+    13001/13002 ``daily_pv_generation`` / ``total_pv_generation`` while the SG map
+    called the equivalent registers ``daily_yield`` / ``total_yield``. Because
+    ``decode_registers`` only emits keys present in the active map, every SH install
+    silently stopped producing ``daily_yield``/``total_yield``, leaving the existing
+    entities registered but permanently "unavailable".
+
+    A shared code means a dashboard, automation or Energy-dashboard config keeps
+    working when a user changes inverter family.
+    """
+    sg_codes = {p.code for p in SG_RS_INPUT_POINTS}
+    sh_codes = {p.code for p in SH_RT_INPUT_POINTS}
+    missing = sg_codes - sh_codes
+    assert not missing, f"codes present on SG but missing from SH: {sorted(missing)}"
+
+
+def test_canonical_yield_codes_present_in_every_family_map():
+    """``daily_yield``/``total_yield`` back every register map.
+
+    The derived-daily-yield override and the #223 raw-register diagnostic are both
+    keyed on these codes, so a family that omits them silently disables that
+    machinery as well as the entities.
+    """
+    for family, points in REGISTER_MAPS.items():
+        codes = {p.code for p in points}
+        assert "daily_yield" in codes, f"{family} map has no daily_yield point"
+        assert "total_yield" in codes, f"{family} map has no total_yield point"
+
+
+def test_sh_yield_points_read_the_pv_generation_registers():
+    """The SH canonical yield codes decode wire 13001/13002 at 0.1 kWh resolution."""
+    by_code = {p.code: p for p in SH_RT_INPUT_POINTS}
+    assert by_code["daily_yield"].address == 13001
+    assert by_code["daily_yield"].data_type == "u16"
+    assert by_code["daily_yield"].scale == 0.1
+    assert by_code["total_yield"].address == 13002
+    assert by_code["total_yield"].data_type == "u32"
+    assert by_code["total_yield"].scale == 0.1
+
+
+def test_needs_derived_daily_yield_only_for_string_families():
+    """Only the SG families need ``daily_yield`` derived from the lifetime total.
+
+    SH hybrids reset wire 13001 at local midnight, so overriding it would
+    under-report until the first midnight after install (#382).
+    """
+    assert needs_derived_daily_yield("sg_rs") is True
+    assert needs_derived_daily_yield("sg_rt") is True
+    assert needs_derived_daily_yield("sh_rt") is False
+    assert needs_derived_daily_yield("sh_rs") is False
+    # An undetected family keeps the historical behaviour.
+    assert needs_derived_daily_yield(None) is True
+
+
+def test_sh_map_decodes_canonical_yield_codes():
+    """A live-shaped SH read surfaces daily_yield/total_yield, not *_pv_generation."""
+    # Wire 13001 = 313 (31.3 kWh), 13002/13003 = 14920 (1492.0 kWh) low word first.
+    registers = [0] * 6
+    registers[13001 - 13000] = 313
+    registers[13002 - 13000] = 14920 & 0xFFFF
+    registers[13003 - 13000] = 14920 >> 16
+    points = tuple(p for p in SH_RT_INPUT_POINTS if p.code in ("daily_yield", "total_yield"))
+
+    out = decode_registers(points, 13000, registers)
+
+    assert out["daily_yield"]["value"] == 31.3
+    assert out["total_yield"]["value"] == 1492.0
+    assert "daily_pv_generation" not in out
+    assert "total_pv_generation" not in out

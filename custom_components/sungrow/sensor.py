@@ -11,7 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
 
-from . import SungrowConfigEntry, build_device_info, build_plant_device_info, resolve_point_device
+from . import (
+    SungrowConfigEntry,
+    build_device_info,
+    build_device_info_for,
+    build_plant_device_info,
+    resolve_point_device,
+)
 from .const import (
     BATTERY_DIAGNOSTIC_CODES,
     COMM_MODULE_POINTS,
@@ -455,17 +461,7 @@ class SungrowDeviceSensor(SungrowSensor):
         device_name = device.get("device_name") or device.get("device_model_name") or coordinator.plant_name
         self._attr_unique_id = f"{self.plant_id}_{self.device_uuid}_{point_code}"
         # Enrich the device card with the model/serial the cloud reports.
-        local_url = getattr(coordinator, "local_configuration_url", None)
-        if isinstance(local_url, str):
-            self._attr_device_info = build_device_info(
-                device,
-                self.plant_id,
-                fallback_name=coordinator.plant_name,
-                via_plant_id=getattr(coordinator, "via_plant_id", None),
-                configuration_url=local_url or None,
-            )
-        else:
-            self._attr_device_info = build_device_info(device, self.plant_id, fallback_name=coordinator.plant_name)
+        self._attr_device_info = build_device_info_for(coordinator, device)
         self._apply_point_metadata(point_code, init_data, device_name)
         # Inverter internals (operating status, MPPT, DC power, device type, ...) are diagnostics.
         if point_code in _DIAGNOSTIC_CODES or point_code == "device_type_code":
@@ -553,14 +549,7 @@ class SungrowModbusStatusSensor(CoordinatorEntity[SungrowPlantCoordinator], Sens
         super().__init__(coordinator)
         self.device_uuid = str(device["uuid"])
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_modbus_status"
-        local_url = getattr(coordinator, "local_configuration_url", None)
-        self._attr_device_info = build_device_info(
-            device,
-            coordinator.plant_id,
-            fallback_name=coordinator.plant_name,
-            via_plant_id=getattr(coordinator, "via_plant_id", None),
-            configuration_url=local_url if isinstance(local_url, str) else None,
-        )
+        self._attr_device_info = build_device_info_for(coordinator, device)
 
     @property
     def native_value(self) -> str:

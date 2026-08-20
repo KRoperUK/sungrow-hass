@@ -20,9 +20,10 @@ from custom_components.sungrow.const import (
     TRANSPORT_MODBUS_ONLY,
 )
 
-# The migration target after every v1/v2/v3/v4 upgrade path (v3→v4 sweeps legacy entities;
-# v4→v5 retires the ``cloud_modbus`` transport, see #348).
-CURRENT_VERSION = 5
+# The migration target after every v1..v5 upgrade path (v3→v4 sweeps legacy entities;
+# v4→v5 retires the ``cloud_modbus`` transport, see #348; v5→v6 restores the canonical
+# local-Modbus yield codes, see #382).
+CURRENT_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # Property 2: v2→v4 migration correctly sets or preserves transport
@@ -188,7 +189,7 @@ async def test_v3_to_v4_removes_legacy_charge_discharge_select(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
     assert registry.async_get(legacy.entity_id) is None
     assert registry.async_get(keep.entity_id) is not None
     assert registry.async_get(foreign.entity_id) is not None
@@ -208,7 +209,7 @@ async def test_v3_to_v4_no_legacy_entities_is_noop(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +241,7 @@ async def test_v4_to_v5_converts_cloud_modbus_to_cloud_only(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
     assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
     assert CONF_MODBUS_HOST not in entry.data
 
@@ -259,7 +260,7 @@ async def test_v4_to_v5_leaves_cloud_only_entry_alone(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
     assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
 
 
@@ -280,7 +281,7 @@ async def test_v4_to_v5_leaves_modbus_only_entry_alone(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
     assert entry.data[CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
     assert entry.data[CONF_MODBUS_HOST] == "10.0.0.9"
 
@@ -305,8 +306,130 @@ async def test_full_chain_v1_to_v5_carries_cloud_modbus_through(hass):
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    assert entry.version == 5
+    assert entry.version == CURRENT_VERSION
     assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
     assert CONF_MODBUS_HOST not in entry.data
     # scan_interval was converted from 5 minutes to 300 seconds in v1→v2.
     assert entry.options[CONF_SCAN_INTERVAL] == 300
+
+
+# ---------------------------------------------------------------------------
+# v5→v6: restore canonical local-Modbus yield codes (issue #382)
+# ---------------------------------------------------------------------------
+
+
+def _modbus_entry(hass, version: int = 5) -> MockConfigEntry:
+    """Build a Modbus-only entry at ``version`` for the yield-rename tests."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, "serial": "A22A1574727"},
+        version=version,
+        unique_id="modbus_A22A1574727",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_renames_pv_generation_to_yield(hass):
+    """The SH-map ``*_pv_generation`` codes are renamed to the canonical yield codes."""
+    entry = _modbus_entry(hass)
+    registry = er.async_get(hass)
+    daily = registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="A22A1574727_daily_pv_generation",
+        config_entry=entry,
+    )
+    total = registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="A22A1574727_total_pv_generation",
+        config_entry=entry,
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == CURRENT_VERSION
+    # Renamed in place: same entity_id (history preserved), new unique_id.
+    assert registry.async_get(daily.entity_id).unique_id == "A22A1574727_daily_yield"
+    assert registry.async_get(total.entity_id).unique_id == "A22A1574727_total_yield"
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_orphaned_yield_row_yields_to_live_sensor(hass):
+    """When both codes exist, the orphaned ``*_yield`` row is dropped, not the live one.
+
+    An SH install that predated the SH register map has a stale ``daily_yield`` row
+    (stopped updating when the map landed) plus a live ``daily_pv_generation`` row.
+    The live one must win and take over the canonical unique_id.
+    """
+    entry = _modbus_entry(hass)
+    registry = er.async_get(hass)
+    orphan = registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="A22A1574727_daily_yield",
+        config_entry=entry,
+        suggested_object_id="sh_daily_yield",
+    )
+    live = registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="A22A1574727_daily_pv_generation",
+        config_entry=entry,
+        suggested_object_id="sh_daily_pv_generation",
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert registry.async_get(orphan.entity_id) is None
+    assert registry.async_get(live.entity_id).unique_id == "A22A1574727_daily_yield"
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_leaves_sg_yield_entities_untouched(hass):
+    """An SG install already on the canonical codes is not modified."""
+    entry = _modbus_entry(hass)
+    registry = er.async_get(hass)
+    daily = registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="A22A1574727_daily_yield",
+        config_entry=entry,
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert registry.async_get(daily.entity_id).unique_id == "A22A1574727_daily_yield"
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_ignores_foreign_platform_entities(hass):
+    """The rename is scoped to this integration's own registry rows."""
+    entry = _modbus_entry(hass)
+    registry = er.async_get(hass)
+    foreign = registry.async_get_or_create(
+        domain="sensor",
+        platform="zha",
+        unique_id="something_daily_pv_generation",
+        config_entry=entry,
+    )
+
+    await async_migrate_entry(hass, entry)
+
+    assert registry.async_get(foreign.entity_id).unique_id == "something_daily_pv_generation"
+
+
+@pytest.mark.asyncio
+async def test_v5_to_v6_is_noop_on_clean_registry(hass):
+    """A fresh entry with no yield entities just bumps the version."""
+    entry = _modbus_entry(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.version == CURRENT_VERSION
