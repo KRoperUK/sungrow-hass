@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
 
-from . import SungrowConfigEntry, build_device_info
+from . import SungrowConfigEntry, build_device_info_for
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
 from .measure_points import resolve_enum_value
@@ -127,7 +127,7 @@ class SungrowDeviceFaultBinarySensor(CoordinatorEntity[SungrowPlantCoordinator],
         super().__init__(coordinator)
         self.device_uuid = str(device["uuid"])
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_fault"
-        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+        self._attr_device_info = build_device_info_for(coordinator, device)
 
     def _device(self) -> dict[str, Any] | None:
         """Return this sensor's device from the coordinator's live list, if still present."""
@@ -185,7 +185,7 @@ class SungrowDeviceConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordi
         super().__init__(coordinator)
         self.device_uuid = str(device["uuid"])
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_online"
-        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+        self._attr_device_info = build_device_info_for(coordinator, device)
 
     def _device(self) -> dict[str, Any] | None:
         """Return this sensor's device from the coordinator's live list, if still present."""
@@ -223,14 +223,7 @@ class SungrowModbusConnectivityBinarySensor(CoordinatorEntity[SungrowPlantCoordi
         super().__init__(coordinator)
         self.device_uuid = str(device["uuid"])
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_online"
-        local_url = getattr(coordinator, "local_configuration_url", None)
-        self._attr_device_info = build_device_info(
-            device,
-            coordinator.plant_id,
-            fallback_name=coordinator.plant_name,
-            via_plant_id=getattr(coordinator, "via_plant_id", None),
-            configuration_url=local_url if isinstance(local_url, str) else None,
-        )
+        self._attr_device_info = build_device_info_for(coordinator, device)
 
     @property
     def is_on(self) -> bool | None:
@@ -288,14 +281,7 @@ class SungrowModbusPowerFlowBinarySensor(CoordinatorEntity[SungrowPlantCoordinat
         device_class = _POWER_FLOW_DEVICE_CLASSES.get(bit_index)
         if device_class is not None:
             self._attr_device_class = device_class
-        local_url = getattr(coordinator, "local_configuration_url", None)
-        self._attr_device_info = build_device_info(
-            device,
-            coordinator.plant_id,
-            fallback_name=coordinator.plant_name,
-            via_plant_id=getattr(coordinator, "via_plant_id", None),
-            configuration_url=local_url if isinstance(local_url, str) else None,
-        )
+        self._attr_device_info = build_device_info_for(coordinator, device)
 
     def _raw(self) -> int | None:
         """Return the current ``power_flow_status`` register value, or None if missing."""

@@ -42,6 +42,66 @@ _HYBRID_OPTION_KEYS = frozenset(
 # "unavailable" until we sweep it (issue #314).
 _LEGACY_SELECT_SUFFIXES: tuple[str, ...] = ("_charge_discharge_command",)
 
+# Local-Modbus yield codes renamed back to the canonical family-neutral names (#382).
+# When the SH hybrid register map landed it named wire 13001/13002
+# ``daily_pv_generation`` / ``total_pv_generation``. Every SH install that predated
+# that map already had ``daily_yield`` / ``total_yield`` entities, which stopped being
+# produced and so sat permanently "unavailable"; installs created after it got the
+# ``*_pv_generation`` names instead. Mapping is ``legacy suffix -> canonical suffix``.
+_YIELD_CODE_RENAMES: dict[str, str] = {
+    "_daily_pv_generation": "_daily_yield",
+    "_total_pv_generation": "_total_yield",
+}
+
+
+def _rename_yield_entities(hass: HomeAssistant, config_entry: ConfigEntry) -> int:
+    """Rename ``*_pv_generation`` yield entities to the canonical ``*_yield`` unique_ids.
+
+    Preserves recorder history by renaming the registry row in place rather than
+    creating a new entity. When both the legacy and the canonical row exist (an
+    install that predated the SH map and kept running after it), the stale canonical
+    row is the orphaned one — it stopped receiving values when the SH map landed — so
+    it is removed first and the live ``*_pv_generation`` row takes its unique_id.
+
+    Idempotent, and safe on entries that have neither code. Returns the number of
+    entities renamed for logging/testing.
+    """
+    registry = er.async_get(hass)
+    entries = list(er.async_entries_for_config_entry(registry, config_entry.entry_id))
+    by_unique_id = {e.unique_id: e for e in entries if e.platform == DOMAIN and e.unique_id}
+    renamed = 0
+    for entity in entries:
+        if entity.platform != DOMAIN:
+            continue
+        unique_id = entity.unique_id or ""
+        legacy_suffix = next((s for s in _YIELD_CODE_RENAMES if unique_id.endswith(s)), None)
+        if legacy_suffix is None:
+            continue
+        target = unique_id[: -len(legacy_suffix)] + _YIELD_CODE_RENAMES[legacy_suffix]
+        if target == unique_id:
+            continue
+        clash = by_unique_id.get(target)
+        if clash is not None and clash.entity_id != entity.entity_id:
+            registry.async_remove(clash.entity_id)
+            by_unique_id.pop(target, None)
+            _LOGGER.info(
+                "Removed orphaned Sungrow entity %s (unique_id=%s) so the live "
+                "local-Modbus yield sensor can reclaim it (#382)",
+                clash.entity_id,
+                target,
+            )
+        registry.async_update_entity(entity.entity_id, new_unique_id=target)
+        by_unique_id.pop(unique_id, None)
+        by_unique_id[target] = entity
+        renamed += 1
+        _LOGGER.info(
+            "Renamed Sungrow entity %s unique_id %s -> %s (#382)",
+            entity.entity_id,
+            unique_id,
+            target,
+        )
+    return renamed
+
 
 def _remove_legacy_entities(hass: HomeAssistant, config_entry: ConfigEntry) -> int:
     """Purge entity-registry rows renamed away in earlier releases.
@@ -119,6 +179,20 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
                 dropped_host,
             )
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=5)
+
+    if config_entry.version == 5:
+        # v5→v6: restore the canonical local-Modbus yield codes (#382). The SH hybrid
+        # register map briefly renamed wire 13001/13002 to ``*_pv_generation``, which
+        # orphaned the pre-existing ``daily_yield`` / ``total_yield`` entities on every
+        # SH install (they went permanently "unavailable" and the Energy dashboard lost
+        # them). Rename in place so recorder history survives.
+        renamed = _rename_yield_entities(hass, config_entry)
+        hass.config_entries.async_update_entry(config_entry, version=6)
+        _LOGGER.info(
+            "Migrated config entry %s to version 6 (renamed %d yield entities)",
+            config_entry.title,
+            renamed,
+        )
 
     # Defensive back-fill: ensure cloud entries carry app_id (#245).
     # The unique_id for cloud entries IS the app_id (set during initial setup).
