@@ -1,7 +1,10 @@
 """Tests for the user-account getPsDetail -> measure-point mapper (#269)."""
 
 from custom_components.sungrow.measure_points import resolve_name
-from custom_components.sungrow.user_realtime import map_plant_detail_to_points
+from custom_components.sungrow.user_realtime import (
+    map_device_list_to_points,
+    map_plant_detail_to_points,
+)
 
 
 def test_mapped_codes_resolve_to_catalog_names():
@@ -146,3 +149,94 @@ def test_named_field_with_unit_does_not_warn(caplog):
         map_plant_detail_to_points({"curr_power": {"value": "0.49", "unit": "kW"}})
 
     assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+# ---------------------------------------------------------------------------
+# Per-device points embedded in the user-API device list (issue #389)
+# ---------------------------------------------------------------------------
+
+# Shape taken from the #389 report: an SBR096 battery (device_type 43) whose
+# Battery SOC (58604) the API returns but which produced no entity.
+_SBR_DEVICE = {
+    "uuid": "dev-battery-1",
+    "device_type": 43,
+    "type_name": "Battery",
+    "device_name": "SBR096",
+    "point_data": [
+        {
+            "point_id": 58604,
+            "point_name": "Battery SOC",
+            "unit": "%",
+            "value": "32.2",
+            "raw_value": "0.322",
+            "original_value": "32.2",
+        },
+        {"point_id": 58601, "point_name": "Battery Voltage", "unit": "V", "value": "290.6"},
+        {"point_id": 58603, "point_name": "Battery Temperature", "unit": "℃", "value": "22.6"},
+    ],
+}
+
+
+def test_device_list_points_are_mapped_by_uuid():
+    """Each device's embedded point_data becomes per-device realtime keyed by uuid."""
+    out = map_device_list_to_points([_SBR_DEVICE])
+    assert set(out) == {"dev-battery-1"}
+    soc = out["dev-battery-1"]["58604"]
+    assert soc == {
+        "id": "58604",
+        "code": "58604",
+        "value": "32.2",
+        "unit": "%",
+        "name": "Battery SOC",
+    }
+
+
+def test_battery_soc_resolves_to_catalog_name_and_class():
+    """The bare numeric code takes the catalog path, matching the OAuth transport.
+
+    This is the actual regression in #389: point 58604 was returned by the API and
+    visible in diagnostics but never reached the resolver, so no entity was created.
+    """
+    from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+
+    from custom_components.sungrow.measure_points import resolve_classification
+
+    point = map_device_list_to_points([_SBR_DEVICE])["dev-battery-1"]["58604"]
+    assert resolve_name(point["id"], point["code"], point["name"]) == "Battery Level"
+    assert resolve_classification(point["unit"], point["code"], point["id"]) == (
+        SensorDeviceClass.BATTERY,
+        SensorStateClass.MEASUREMENT,
+    )
+
+
+def test_device_list_skips_placeholder_values():
+    """Points the device does not report are dropped rather than becoming Unknown."""
+    device = {
+        "uuid": "d1",
+        "point_data": [
+            {"point_id": 1, "value": "--", "unit": "%"},
+            {"point_id": 2, "value": "", "unit": "%"},
+            {"point_id": 3, "value": None, "unit": "%"},
+            {"point_id": 4, "value": "5.5", "unit": "%"},
+        ],
+    }
+    points = map_device_list_to_points([device])["d1"]
+    assert set(points) == {"4"}
+
+
+def test_device_list_ignores_devices_without_point_data():
+    """A device with no embedded points contributes nothing (no empty dict entry)."""
+    assert map_device_list_to_points([{"uuid": "d1", "device_type": 1}]) == {}
+    assert map_device_list_to_points([{"uuid": "d1", "point_data": []}]) == {}
+
+
+def test_device_list_tolerates_malformed_entries():
+    """Non-dict devices/points and missing uuid/point_id are skipped, not raised."""
+    devices = [
+        "not-a-dict",
+        {"device_type": 1, "point_data": [{"point_id": 1, "value": "1"}]},  # no uuid
+        {"uuid": "d2", "point_data": ["nope", {"value": "1"}, {"point_id": 9, "value": "2"}]},
+    ]
+    assert map_device_list_to_points(devices) == {  # type: ignore[arg-type]
+        "d2": {"9": {"id": "9", "code": "9", "value": "2", "unit": "", "name": None}}
+    }

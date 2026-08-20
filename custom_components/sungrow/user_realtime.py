@@ -105,3 +105,61 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
             points[code] = {"id": code, "code": code, "value": val, "unit": ""}
 
     return points
+
+
+# Placeholders the app/web API uses for "this device does not report this point".
+_EMPTY_VALUES = frozenset({"", "--", "-", "null", "none", "unknown"})
+
+
+def map_device_list_to_points(devices: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Extract each device's embedded ``point_data`` into the per-device realtime shape.
+
+    Unlike the OAuth transport — where the device list is slow-changing metadata and
+    realtime values come from a separate per-device endpoint — the app/web device-list
+    response embeds every device's *current* readings as a ``point_data`` array:
+
+    .. code-block:: python
+
+        {"device_type": 43, "uuid": ..., "point_data": [
+            {"point_id": 58604, "point_name": "Battery SOC", "unit": "%", "value": "32.2"},
+        ]}
+
+    So this list is both the device inventory and the per-device data source (#389).
+    Returns ``{device_uuid: {code: {id, code, value, unit, name}}}``.
+
+    As in :func:`map_plant_detail_to_points`, the *bare numeric* point ID becomes the
+    code so ``resolve_name`` / ``resolve_classification`` take the catalog path and
+    produce the same English names and classes the OAuth transport gives. The display
+    ``value``/``unit`` pair is used rather than ``raw_value``, which is in the point's
+    base unit but carries no unit field to interpret it with.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for device in devices:
+        if not isinstance(device, dict):
+            continue
+        uuid = device.get("uuid")
+        raw_points = device.get("point_data")
+        if uuid is None or not isinstance(raw_points, list):
+            continue
+        points: dict[str, Any] = {}
+        for entry in raw_points:
+            if not isinstance(entry, dict):
+                continue
+            point_id = entry.get("point_id")
+            if point_id is None:
+                continue
+            value = entry.get("value")
+            if value is None or str(value).strip().lower() in _EMPTY_VALUES:
+                continue
+            code = str(point_id)
+            points[code] = {
+                "id": code,
+                "code": code,
+                "value": value,
+                "unit": entry.get("unit") or "",
+                # Only used if the catalog has no row for this ID.
+                "name": entry.get("point_name") or None,
+            }
+        if points:
+            out[str(uuid)] = points
+    return out

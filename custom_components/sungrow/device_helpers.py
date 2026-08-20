@@ -7,7 +7,7 @@ compatibility.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -100,6 +100,46 @@ def build_device_info(
     if configuration_url:
         info["configuration_url"] = configuration_url
     return info
+
+
+class DevicePlacementContext(Protocol):
+    """The coordinator attributes that decide where a device sits in the registry.
+
+    A Protocol rather than the concrete coordinator so ``device_helpers`` stays free of
+    a circular import back to ``coordinator``.
+    """
+
+    plant_id: str
+    plant_name: str
+    # Set (to a possibly-empty string) only on a local Modbus entry; ``None`` on cloud.
+    local_configuration_url: str | None
+    # The cloud plant that owns this serial, when one does; ``None`` otherwise.
+    via_plant_id: str | None
+
+
+def build_device_info_for(coordinator: DevicePlacementContext, device: dict[str, Any]) -> DeviceInfo:
+    """Build a physical device's registry entry with the right parent for its transport.
+
+    Cloud entries nest the device under the plant service device. A local Modbus entry
+    has no plant device of its own — ``coordinator.plant_id`` is the inverter *serial*,
+    which is deliberately never registered — so it must nest under a real cloud plant
+    when one owns the same serial (``via_plant_id``) and otherwise have no parent at all.
+
+    Every entity platform must go through this helper. Open-coding the local/cloud
+    branch is what caused #383: one of seven call sites omitted ``via_plant_id`` and so
+    pointed ``via_device`` at the unregistered serial, which Home Assistant warns about
+    and will stop accepting.
+    """
+    local_url = coordinator.local_configuration_url
+    if isinstance(local_url, str):
+        return build_device_info(
+            device,
+            coordinator.plant_id,
+            fallback_name=coordinator.plant_name,
+            via_plant_id=coordinator.via_plant_id,
+            configuration_url=local_url or None,
+        )
+    return build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
 
 
 def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) -> DeviceInfo:

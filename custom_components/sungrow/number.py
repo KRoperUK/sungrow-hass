@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import DispatchControl, SungrowConfigEntry, build_device_info, select_dispatch_device
+from . import DispatchControl, SungrowConfigEntry, build_device_info_for, select_dispatch_device
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
@@ -330,21 +330,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # Entity name comes from translations (entity.number.<param>.name).
         self._attr_translation_key = param
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_{param}"
-        # Cloud: default via_device = plant_id. Local Modbus: nest only under a real cloud
-        # plant (via_plant_id set); otherwise omit parent (via_plant_id=None).
-        local_url = getattr(coordinator, "local_configuration_url", None)
-        if isinstance(local_url, str):
-            self._attr_device_info = build_device_info(
-                device,
-                coordinator.plant_id,
-                fallback_name=coordinator.plant_name,
-                via_plant_id=getattr(coordinator, "via_plant_id", None),
-                configuration_url=local_url or None,
-            )
-        else:
-            self._attr_device_info = build_device_info(
-                device, coordinator.plant_id, fallback_name=coordinator.plant_name
-            )
+        self._attr_device_info = build_device_info_for(coordinator, device)
         self._attr_device_class = meta.get("device_class")
         self._attr_native_unit_of_measurement = meta.get("native_unit_of_measurement")
         self._attr_native_min_value = meta["native_min_value"]
@@ -415,7 +401,9 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         # Identifies the entity (like the dispatch numbers) though it writes no param.
         self.param = "forced_dispatch_duration"
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_forced_dispatch_duration"
-        self._attr_device_info = build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+        # Was open-coded without via_plant_id, which pointed via_device at the
+        # unregistered inverter serial on local Modbus entries (#383).
+        self._attr_device_info = build_device_info_for(coordinator, device)
         self._attr_native_value = DEFAULT_FORCED_DISPATCH_DURATION
         coordinator.forced_dispatch_duration_minutes = DEFAULT_FORCED_DISPATCH_DURATION
 
