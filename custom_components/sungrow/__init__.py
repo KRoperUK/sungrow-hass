@@ -54,6 +54,9 @@ from .device_helpers import (
     build_device_info as build_device_info,
 )
 from .device_helpers import (
+    build_device_info_for as build_device_info_for,
+)
+from .device_helpers import (
     build_plant_device_info as build_plant_device_info,
 )
 from .device_helpers import (
@@ -315,7 +318,11 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     }
     coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
     coordinator.via_plant_id = via_plant_id
-    coordinator.local_configuration_url = winet_url
+    # A *string* (even empty) marks this coordinator as local, which is what decides
+    # whether ``build_device_info_for`` may use ``plant_id`` as the via_device parent.
+    # Leaving it None on a hostless entry would look like a cloud entry and re-introduce
+    # the phantom via_device of #383, so normalise to "" instead of None.
+    coordinator.local_configuration_url = winet_url or ""
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:

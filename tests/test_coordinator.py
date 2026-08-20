@@ -1018,6 +1018,8 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
     coordinator._modbus_client = MagicMock()
+    # SG-RS wire 5002 is the register that never resets, so this family derives (#382).
+    coordinator._modbus_client.model = "sg_rs"
     coordinator._modbus_client.async_read_realtime = AsyncMock(
         return_value={
             "total_yield": {"code": "total_yield", "value": 6467.0, "unit": "kWh", "source": "modbus"},
@@ -1042,6 +1044,45 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     assert data["daily_yield"]["source"] == "modbus_derived"
     assert data["total_yield"]["value"] == 6467.0
     coordinator._daily_yield_store.async_save.assert_awaited()
+
+
+async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
+    """SH hybrids reset wire 13001 nightly, so the raw register is kept as-is (#382).
+
+    Deriving here would under-report until the first midnight after install, because
+    the persisted baseline starts at whatever the lifetime total happened to be.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-SH", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_yield": {"code": "total_yield", "value": 1492.0, "unit": "kWh", "source": "modbus"},
+            "daily_yield": {"code": "daily_yield", "value": 31.3, "unit": "kWh", "source": "modbus"},
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline(
+        baseline=1400.0, baseline_date=date(2026, 7, 13), last_total=1400.0
+    )
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 7, 13)
+        data = await coordinator._async_modbus_only_update()
+
+    # Raw register value survives; no derived override, no baseline write.
+    assert data["daily_yield"]["value"] == 31.3
+    assert data["daily_yield"]["source"] == "modbus"
+    coordinator._daily_yield_store.async_save.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -1437,6 +1478,108 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
     assert data["current_power"]["source"] == "cloud_user"
     # The 83106 measure point is present (Wh normalised to kWh downstream).
     assert "83106" in data
+
+
+def _user_battery_device():
+    """A device-list entry shaped like the #389 report (SBR096 battery, SOC 58604)."""
+    return {
+        "uuid": "dev-battery-1",
+        "device_type": 43,
+        "device_name": "SBR096",
+        "point_data": [
+            {"point_id": 58604, "point_name": "Battery SOC", "unit": "%", "value": "32.2"},
+        ],
+    }
+
+
+async def test_user_update_populates_device_data_from_device_list(hass: HomeAssistant):
+    """Per-device points come from the user-API device list's embedded point_data (#389).
+
+    Before this, ``_async_user_update`` returned before the OAuth path's per-device
+    fetch, so ``device_data`` stayed empty and the sensor platform's per-device loop
+    never ran — Battery SOC was returned by the API but produced no entity.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_devices.assert_awaited_once_with("12345")
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+    assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
+
+
+async def test_user_update_skips_device_fetch_when_option_off(hass: HomeAssistant):
+    """Nothing else consumes device_data on this transport, so the call isn't spent."""
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_devices.assert_not_awaited()
+    assert coordinator.device_data == {}
+
+
+async def test_user_update_device_fetch_failure_is_non_fatal(hass: HomeAssistant):
+    """A failed device fetch must not fail the poll; plant points still update."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    client.async_get_devices = AsyncMock(side_effect=PySolarCloudException({"error": "rate_limit"}))
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["current_power"]["value"] == 490.0
+    assert coordinator.device_data == {}
+
+
+async def test_user_update_refreshes_the_live_device_list(hass: HomeAssistant):
+    """A device that appears after setup is picked up, so its sensors arrive at runtime.
+
+    The entity builders read ``coordinator.devices`` on every poll, so refreshing it
+    here is what lets a newly-added battery surface without a reload.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(
+        hass, entry, None, "12345", "Test Plant", [{"uuid": "stale", "device_type": 1}], user_auth=client
+    )
+
+    await coordinator._async_update_data()
+
+    assert [d["uuid"] for d in coordinator.devices] == ["dev-battery-1"]
+
+
+async def test_user_update_keeps_devices_when_refresh_returns_empty(hass: HomeAssistant):
+    """An empty device list is treated as a blip, not as "all devices removed"."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    known = [_user_battery_device()]
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", known, user_auth=client)
+
+    await coordinator._async_update_data()
+
+    assert [d["uuid"] for d in coordinator.devices] == ["dev-battery-1"]
+    # Points still mapped from the retained list.
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
 
 
 async def test_user_update_auth_error_triggers_reauth(hass: HomeAssistant):

@@ -201,6 +201,13 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
         if service is not None:
             all_devices, device_realtime, models_by_type = await _probe_plant_devices(service, plant_id)
 
+        # The cloud_user transport has no Plants service to probe, but its device list
+        # already embeds each device's points, and the coordinator maps them into
+        # ``device_data``. Surface those so per-device points appear in the bundle on
+        # this transport too, keyed by uuid rather than device type (#389).
+        if service is None and getattr(coordinator, "device_data", None):
+            device_realtime = anonymise_device_keys(jsonable(dict(coordinator.device_data)), {})
+
         modbus_diag: dict[str, Any] = {}
         if getattr(coordinator, "modbus_diagnostics", None):
             modbus_diag = dict(coordinator.modbus_diagnostics)
