@@ -353,6 +353,32 @@ If a model in a supported family isn't detected, the diagnostics dump for the lo
 entry includes the raw `device_type_code` and the resolved family; that's the fastest
 way to file a mapping issue.
 
+### No grid or house-load data over local Modbus
+
+`load_power`, `daily_imported_energy`, `daily_exported_energy` and the `meter_*` points
+all come from the **external grid meter** (a CT clamp or DTSU666), not from the inverter
+itself. With no meter wired or commissioned, the inverter answers those registers with
+`0` rather than the "not available" sentinel — indistinguishable from a real reading.
+
+Rather than publish a permanent and entirely plausible `0 kWh` of import/export into the
+Energy dashboard, the integration omits those points when it detects no meter, so the
+entities read `unknown` instead. Detection uses meter **voltage**: a wired meter always
+reports a live grid voltage even at zero power flow. Only zero values are dropped, so if
+your firmware doesn't expose meter voltage but does count import/export, those counters
+are kept.
+
+Check `modbus_diagnostics.meter_present` in the local entry's diagnostics download:
+
+- `false` — no meter detected. PV, battery and inverter-output metrics still work; use
+  the **cloud** entry for grid import/export, which iSolarCloud computes server-side.
+- `true` but the values still look wrong — that's a register-mapping problem worth
+  reporting. Attach the diagnostics download.
+
+Note that `total_active_power` is the inverter's AC output, not house consumption, and
+`battery_power` shows the battery covering load. A house drawing 411 W entirely from the
+battery will show `total_active_power: 411` with no grid import at all — that is correct,
+not a missing-data symptom.
+
 ---
 
 ## Still stuck?
