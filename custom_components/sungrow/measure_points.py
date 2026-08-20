@@ -145,6 +145,63 @@ _SOC_HINTS = ("soc", "battery_level", "state_of_charge")
 _SOH_HINTS = ("soh", "health")
 _POWER_FACTOR_HINTS = ("power_factor",)
 
+# Named ``getPsDetail`` fields (cloud_user transport) -> state class to fall back on
+# when the API omits the unit (#384).
+#
+# These codes are English names rather than numeric point IDs, so they have no row in
+# ``POINT_CATALOG`` and classification depended *entirely* on the payload carrying a
+# ``unit``. Some regions/firmware omit it, which dropped the sensor to an unclassified
+# text sensor: Home Assistant then raised "the entity no longer has a state class" and
+# stopped recording long-term statistics.
+#
+# Only the *state* class is recovered here, deliberately. The device class is not, and
+# no unit is invented: ``curr_power`` is observed arriving both as ``"3200" W`` and as
+# ``"0.49" kW``, so with the unit absent the scale is genuinely unknowable and guessing
+# would risk a 1000x magnitude error feeding the Energy dashboard. A state class alone
+# restores statistics and numeric coercion without asserting a dimension we cannot
+# verify. If a payload with a missing unit ever gets captured, add the real base unit
+# and the matching device class here.
+_NAMED_CODE_STATE_CLASSES: dict[str, SensorStateClass] = {
+    "current_power": _MEASUREMENT,
+    "today_energy": _TOTAL_INCREASING,
+    "month_energy": _TOTAL_INCREASING,
+    "total_energy": _TOTAL_INCREASING,
+    "co2_reduce_total": _TOTAL_INCREASING,
+    "today_income": _TOTAL_INCREASING,
+    "total_income": _TOTAL_INCREASING,
+}
+
+# Codes that read as categorical even though they contain a numeric-sounding token
+# (e.g. a hypothetical ``energy_management_mode``). The numeric substring hints below
+# are a heuristic that will meet codes this module has never seen, so anything naming
+# a mode/status/identifier is held back as text rather than being given a state class
+# that would make Home Assistant reject its string state.
+_CATEGORICAL_CODE_HINTS: tuple[str, ...] = (
+    "mode",
+    "status",
+    "state",
+    "version",
+    "serial",
+    "flag",
+    "type",
+    "_id",
+    "id_",
+)
+
+# Codes that have no unit and no catalog row are still numeric when the code names a
+# known physical quantity or a money/mass tally. Checked as substrings on the code,
+# after the more specific SOC/SOH/power-factor hints. Keeps an unmapped point graphing
+# as a number instead of silently becoming a text sensor.
+_NUMERIC_CODE_HINTS: tuple[tuple[str, SensorStateClass], ...] = (
+    ("_power", _MEASUREMENT),
+    ("power_", _MEASUREMENT),
+    ("_energy", _TOTAL_INCREASING),
+    ("energy_", _TOTAL_INCREASING),
+    ("_income", _TOTAL_INCREASING),
+    ("income_", _TOTAL_INCREASING),
+    ("co2_", _TOTAL_INCREASING),
+)
+
 
 def _classify_percent(code: str, point_id: str = "") -> _ClassPair:
     """Classify a ``%`` point (charge vs. health vs. generic).
@@ -179,6 +236,16 @@ def _classify_by_code(code: str) -> _ClassPair | None:
         # Dimensionless integer tallies (e.g. afci_fault_count) graph as a plain
         # numeric measurement instead of falling through to a text sensor.
         return (None, _MEASUREMENT)
+    # Named cloud_user fields whose unit the API sometimes omits (#384). State class
+    # only: see ``_NAMED_CODE_STATE_CLASSES`` for why no unit is invented.
+    named = _NAMED_CODE_STATE_CLASSES.get(lowered)
+    if named is not None:
+        return (None, named)
+    if any(hint in lowered for hint in _CATEGORICAL_CODE_HINTS):
+        return None
+    for hint, state_class in _NUMERIC_CODE_HINTS:
+        if hint in lowered:
+            return (None, state_class)
     return None
 
 

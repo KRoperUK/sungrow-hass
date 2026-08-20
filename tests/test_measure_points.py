@@ -395,3 +395,94 @@ def test_resolve_name_83123_total_feed_in_energy():
     assert "83123" in mp.POINT_CATALOG
     info = mp.POINT_CATALOG["83123"]
     assert info.name == "Total Feed-in Energy (PV)"
+
+
+# ---------------------------------------------------------------------------
+# Named cloud_user codes keep a state class when the API omits the unit (#384)
+# ---------------------------------------------------------------------------
+
+_NAMED_MEASUREMENT_CODES = ("current_power",)
+_NAMED_TOTAL_CODES = (
+    "today_energy",
+    "month_energy",
+    "total_energy",
+    "co2_reduce_total",
+    "today_income",
+    "total_income",
+)
+
+
+@pytest.mark.parametrize("code", _NAMED_MEASUREMENT_CODES + _NAMED_TOTAL_CODES)
+@pytest.mark.parametrize("unit", ["", None])
+def test_named_codes_keep_state_class_without_unit(code, unit):
+    """A named getPsDetail field never degrades to an unclassified text sensor.
+
+    Regression for #384: these codes have no ``POINT_CATALOG`` row, so with the unit
+    absent classification returned ``(None, None)``. Home Assistant then raised "the
+    entity no longer has a state class" and stopped recording long-term statistics.
+    """
+    device_class, state_class = mp.resolve_classification(unit, code, code)
+    assert state_class is not None, f"{code} lost its state class"
+    # No unit means the scale is unknowable, so no dimensional device class is claimed.
+    assert device_class is None
+
+
+@pytest.mark.parametrize("code", _NAMED_MEASUREMENT_CODES)
+def test_named_power_codes_are_measurement(code):
+    assert mp.resolve_classification("", code, code)[1] == SensorStateClass.MEASUREMENT
+
+
+@pytest.mark.parametrize("code", _NAMED_TOTAL_CODES)
+def test_named_total_codes_are_total_increasing(code):
+    assert mp.resolve_classification("", code, code)[1] == SensorStateClass.TOTAL_INCREASING
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected_device_class"),
+    [
+        ("W", SensorDeviceClass.POWER),
+        ("kW", SensorDeviceClass.POWER),
+    ],
+)
+def test_unit_stays_authoritative_for_named_codes(unit, expected_device_class):
+    """When the API does send a unit, it still wins and the device class is set."""
+    device_class, state_class = mp.resolve_classification(unit, "current_power", "current_power")
+    assert device_class == expected_device_class
+    assert state_class == SensorStateClass.MEASUREMENT
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["inverter_serial", "arm_software_version", "dsp_software_version"],
+)
+def test_text_codes_stay_unclassified(code):
+    """Identity/version strings must not be given a state class by the new hints."""
+    assert mp.resolve_classification("", code, code) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["energy_management_mode", "total_power_status", "battery_energy_state", "grid_power_flag"],
+)
+def test_categorical_codes_are_held_back_from_numeric_hints(code):
+    """A numeric-sounding token in a categorical code must not earn a state class.
+
+    The substring hints are applied to codes this module has never seen, so a
+    mode/status/flag/state code is held back as text rather than being given a state
+    class that would make HA reject its string state.
+    """
+    assert mp.resolve_classification("", code, code) == (None, None)
+
+
+def test_power_factor_still_wins_over_power_hint():
+    """``power_factor`` keeps its specific classification despite matching ``power_``."""
+    device_class, state_class = mp.resolve_classification("", "power_factor", "power_factor")
+    assert device_class == SensorDeviceClass.POWER_FACTOR
+    assert state_class == SensorStateClass.MEASUREMENT
+
+
+def test_unitless_power_code_graphs_as_numeric():
+    """An unmapped unitless ``*_power`` code becomes numeric rather than text."""
+    device_class, state_class = mp.resolve_classification("", "some_new_power", "some_new_power")
+    assert device_class is None
+    assert state_class == SensorStateClass.MEASUREMENT
