@@ -19,7 +19,9 @@ from custom_components.sungrow.modbus_registers import (
     daily_yield_diagnostic_dump,
     decode_registers,
     family_for_device_type_code,
+    meter_appears_present,
     needs_derived_daily_yield,
+    suppress_absent_meter_points,
 )
 
 # ---------------------------------------------------------------------------
@@ -924,6 +926,128 @@ async def test_modbus_client_diagnostic_dump_raises_on_read_error():
     ):
         await SungrowModbusClient("10.0.0.1").async_read_daily_yield_diagnostic()
     inner.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Absent grid meter must not publish plausible zeros (issue #387)
+# ---------------------------------------------------------------------------
+
+
+def _pt(value, unit=None):
+    return {"value": value, "unit": unit, "source": "modbus"}
+
+
+# The meter-relevant subset of the SH10RS payload attached to #387, where every block
+# read cleanly (skipped_blocks == [], last_error is None) yet every meter-fed register
+# answered 0 while the inverter's own registers were healthy.
+_REPORTER_PAYLOAD = {
+    "meter_active_power": _pt(0, "W"),
+    "meter_phase_a_voltage": _pt(0.0, "V"),
+    "meter_phase_b_voltage": _pt(0.0, "V"),
+    "meter_phase_c_voltage": _pt(0.0, "V"),
+    "meter_phase_a_current": _pt(0.0, "A"),
+    "load_power": _pt(0, "W"),
+    "export_power_raw": _pt(0, "W"),
+    "daily_imported_energy": _pt(0.0, "kWh"),
+    "total_imported_energy": _pt(0.0, "kWh"),
+    "daily_exported_energy": _pt(0.0, "kWh"),
+    "total_exported_energy": _pt(0.0, "kWh"),
+    # Healthy inverter-internal points that must survive untouched.
+    "total_active_power": _pt(411, "W"),
+    "battery_power": _pt(411, "W"),
+    "daily_pv_generation": _pt(31.3, "kWh"),
+    "battery_level": _pt(80.6, "%"),
+    "phase_a_voltage": _pt(239.6, "V"),
+}
+
+
+def test_absent_meter_suppresses_zero_grid_points():
+    """With no meter fitted, zero-valued meter-derived points are dropped, not published.
+
+    A permanent 0 kWh import/export is worse than no sensor: it silently tells the
+    Energy dashboard the house never drew from or fed the grid.
+    """
+    out, meter_present = suppress_absent_meter_points(dict(_REPORTER_PAYLOAD))
+
+    assert meter_present is False
+    for code in ("load_power", "daily_imported_energy", "total_exported_energy", "meter_active_power"):
+        assert code not in out
+
+
+def test_absent_meter_keeps_healthy_inverter_points():
+    """Suppression is scoped to meter-derived codes only."""
+    out, _ = suppress_absent_meter_points(dict(_REPORTER_PAYLOAD))
+
+    assert out["total_active_power"]["value"] == 411
+    assert out["battery_power"]["value"] == 411
+    assert out["daily_pv_generation"]["value"] == 31.3
+    assert out["battery_level"]["value"] == 80.6
+    assert out["phase_a_voltage"]["value"] == 239.6
+
+
+def test_live_meter_keeps_genuine_zero_readings():
+    """A fitted meter reading exactly zero is a real measurement and is kept.
+
+    Balanced flow, or the start of a day before any import, must still report 0.
+    """
+    payload = {
+        "meter_phase_a_voltage": _pt(240.1, "V"),
+        "daily_exported_energy": _pt(0.0, "kWh"),
+        "load_power": _pt(411, "W"),
+    }
+
+    out, meter_present = suppress_absent_meter_points(dict(payload))
+
+    assert meter_present is True
+    assert out == payload
+
+
+def test_missing_presence_registers_assume_meter_present():
+    """A family that never exposes meter voltage is not mistaken for having no meter."""
+    payload = {"daily_imported_energy": _pt(0.0, "kWh"), "total_imported_energy": _pt(16.3, "kWh")}
+
+    out, meter_present = suppress_absent_meter_points(dict(payload))
+
+    assert meter_present is True
+    assert out == payload
+
+
+def test_absent_meter_still_keeps_non_zero_counters():
+    """Only zeros are dropped, so working counters survive a missing presence register.
+
+    Conservative on purpose: hiding real data would be a worse failure than surfacing
+    a zero, so a firmware that counts import/export without exposing meter voltage
+    keeps its counters.
+    """
+    payload = {
+        "meter_phase_a_voltage": _pt(0.0, "V"),
+        "total_imported_energy": _pt(16.3, "kWh"),
+        "daily_imported_energy": _pt(0.0, "kWh"),
+    }
+
+    out, meter_present = suppress_absent_meter_points(dict(payload))
+
+    assert meter_present is False
+    assert out["total_imported_energy"]["value"] == 16.3
+    assert "daily_imported_energy" not in out
+
+
+def test_meter_presence_tolerates_unparseable_values():
+    """A non-numeric presence value is treated as "present" rather than crashing."""
+    assert meter_appears_present({"meter_phase_a_voltage": _pt("n/a", "V")}) is True
+
+
+async def test_read_realtime_records_meter_presence_diagnostic():
+    """``modbus_diagnostics["meter_present"]`` exposes the decision for triage."""
+    client = SungrowModbusClient("10.0.0.9", model="sh_rt")
+    with (
+        patch.object(client, "_async_ensure_family", AsyncMock(return_value=None)),
+        patch.object(client, "_read_input", AsyncMock(return_value=[0] * 120)),
+    ):
+        await client.async_read_realtime()
+
+    # An all-zero read looks exactly like a hybrid with no meter fitted.
+    assert client.modbus_diagnostics["meter_present"] is False
 
 
 # ---------------------------------------------------------------------------
