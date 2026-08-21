@@ -13,8 +13,15 @@ catalog path and produce the same English names/entity slugs the OAuth transport
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+# Codes already reported as unitless, so the warning below fires once per code per
+# process rather than on every poll.
+_WARNED_MISSING_UNIT: set[str] = set()
 
 # ``p83106_map_virgin`` -> point id 83106 (raw value in its base unit — preferred).
 _VIRGIN_RE = re.compile(r"^p(\d+)_map_virgin$")
@@ -74,7 +81,23 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
     for field, code in _NAMED_DICT_FIELDS.items():
         val = detail.get(field)
         if isinstance(val, dict) and val.get("value") not in (None, ""):
-            points[code] = {"id": code, "code": code, "value": val.get("value"), "unit": val.get("unit") or ""}
+            unit = val.get("unit") or ""
+            if not unit and code not in _WARNED_MISSING_UNIT:
+                # Without a unit the value's scale is unknowable (this field is observed
+                # arriving as both W and kW), so the sensor gets a state class but no
+                # device class or unit. Surface it once so the real payload can be
+                # captured and the base unit pinned down (#384).
+                _WARNED_MISSING_UNIT.add(code)
+                _LOGGER.warning(
+                    "iSolarCloud returned no unit for plant field %r (value=%r); the %r "
+                    "sensor will record statistics but without a unit or device class. "
+                    "Please report this payload at "
+                    "https://github.com/KRoperUK/sungrow-hass/issues/384",
+                    field,
+                    val.get("value"),
+                    code,
+                )
+            points[code] = {"id": code, "code": code, "value": val.get("value"), "unit": unit}
 
     for field, code in _NAMED_SCALAR_FIELDS.items():
         val = detail.get(field)

@@ -787,6 +787,84 @@ def decode_registers(
     return out
 
 
+# Codes whose value can only come from the external grid meter (CT clamp / DTSU666).
+# On a hybrid with no meter wired or commissioned, the firmware answers these
+# registers with 0 rather than the 0xFFFF "not available" sentinel, so they are
+# indistinguishable from a real reading of zero (#387). A permanent, plausible-looking
+# 0 kWh import/export is worse than no sensor: it silently tells the Energy dashboard
+# the house never drew from or fed the grid.
+METER_DEPENDENT_CODES: frozenset[str] = frozenset(
+    {
+        "meter_active_power",
+        "meter_phase_a_active_power",
+        "meter_phase_b_active_power",
+        "meter_phase_c_active_power",
+        "meter_phase_a_voltage",
+        "meter_phase_b_voltage",
+        "meter_phase_c_voltage",
+        "meter_phase_a_current",
+        "meter_phase_b_current",
+        "meter_phase_c_current",
+        "load_power",
+        "export_power_raw",
+        "daily_imported_energy",
+        "total_imported_energy",
+        "daily_exported_energy",
+        "total_exported_energy",
+    }
+)
+
+# A wired meter always reads a live grid voltage, even at zero power flow, so these are
+# the presence signal. Deliberately not the power/energy codes: those are legitimately
+# zero at balanced flow or at the start of a day.
+_METER_PRESENCE_CODES: tuple[str, ...] = (
+    "meter_phase_a_voltage",
+    "meter_phase_b_voltage",
+    "meter_phase_c_voltage",
+)
+
+
+def meter_appears_present(decoded: dict[str, dict[str, Any]]) -> bool:
+    """Return whether the decoded block shows a live external grid meter.
+
+    ``True`` when any meter phase reports a non-zero voltage. Also ``True`` when none
+    of the presence registers were decoded at all, so a family or firmware that simply
+    does not expose them is never mistaken for "no meter".
+    """
+    seen = [decoded[code] for code in _METER_PRESENCE_CODES if code in decoded]
+    if not seen:
+        return True
+    for point in seen:
+        try:
+            if float(point.get("value") or 0) != 0:
+                return True
+        except (TypeError, ValueError):
+            return True
+    return False
+
+
+def suppress_absent_meter_points(decoded: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Drop meter-derived points that are zero only because no meter is fitted (#387).
+
+    Returns ``(points, meter_present)``. Only *zero* values are dropped, so a firmware
+    that leaves the presence registers unimplemented while still counting import/export
+    keeps its working counters — the conservative choice, since hiding real data would
+    be a worse failure than surfacing a zero.
+    """
+    if meter_appears_present(decoded):
+        return decoded, True
+    out: dict[str, dict[str, Any]] = {}
+    for code, point in decoded.items():
+        if code in METER_DEPENDENT_CODES:
+            try:
+                if float(point.get("value") or 0) == 0:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        out[code] = point
+    return out, False
+
+
 def _combine(registers: list[int], offset: int, data_type: str) -> int:
     """Combine one/two registers into a signed/unsigned integer (32-bit low word first)."""
     if data_type in ("u32", "s32"):

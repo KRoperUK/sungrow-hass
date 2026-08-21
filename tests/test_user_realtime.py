@@ -107,6 +107,51 @@ def test_maps_total_income():
 
 
 # ---------------------------------------------------------------------------
+# Missing-unit handling for named plant fields (issue #384)
+# ---------------------------------------------------------------------------
+
+
+def test_named_field_without_unit_still_mapped():
+    """A named field with a value but no unit is still surfaced, with an empty unit."""
+    points = map_plant_detail_to_points({"curr_power": {"value": "372"}})
+    assert points["current_power"]["value"] == "372"
+    assert points["current_power"]["unit"] == ""
+
+
+def test_named_field_missing_unit_warns_once(caplog):
+    """The missing unit is logged once per code so the real payload can be captured.
+
+    Without a unit the scale is unknowable (this field is observed as both W and kW),
+    so the warning is the only signal that the sensor lost its device class/unit.
+    """
+    import logging
+
+    from custom_components.sungrow import user_realtime
+
+    user_realtime._WARNED_MISSING_UNIT.clear()
+    with caplog.at_level(logging.WARNING, logger=user_realtime.__name__):
+        map_plant_detail_to_points({"curr_power": {"value": "372"}})
+        map_plant_detail_to_points({"curr_power": {"value": "486"}})
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "curr_power" in warnings[0].getMessage()
+
+
+def test_named_field_with_unit_does_not_warn(caplog):
+    """The normal path (unit present) stays silent."""
+    import logging
+
+    from custom_components.sungrow import user_realtime
+
+    user_realtime._WARNED_MISSING_UNIT.clear()
+    with caplog.at_level(logging.WARNING, logger=user_realtime.__name__):
+        map_plant_detail_to_points({"curr_power": {"value": "0.49", "unit": "kW"}})
+
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+# ---------------------------------------------------------------------------
 # Per-device points embedded in the user-API device list (issue #389)
 # ---------------------------------------------------------------------------
 
