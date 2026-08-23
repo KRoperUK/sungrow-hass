@@ -275,6 +275,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             port=int(config_entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)),
             unit=int(config_entry.options.get(CONF_MODBUS_UNIT, DEFAULT_MODBUS_UNIT)),
             model=model,
+            model_code=str(model_code) if model_code else None,
         )
 
     def close_modbus(self) -> None:

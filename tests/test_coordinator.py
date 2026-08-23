@@ -950,6 +950,7 @@ async def test_build_modbus_client_only_for_modbus_only_entry(hass: HomeAssistan
     hybrid_client = SungrowPlantCoordinator._build_modbus_client(hybrid)
     assert hybrid_client is not None
     assert hybrid_client.model == "sh_rt"  # model string seeds the register map (#219)
+    assert hybrid_client._configured_model == "SH10RT-20"  # noqa: SLF001
 
     # Cloud entry with leftover hybrid host must NOT get a client.
     hybrid_leftover = _make_entry({CONF_MODBUS_HOST: "10.0.0.5"})
