@@ -853,6 +853,58 @@ async def test_family_auto_detection_falls_back_to_configured_model_for_unknown_
     assert inner.read_input_registers.await_count == 2
 
 
+async def test_sh25t_zero_mppt3_is_available_at_night():
+    """A known three-tracker SH25T keeps MPPT3 when its night-time reading is zero."""
+    cls, inner = _mock_client_cls([])
+
+    def side_effect(address, count, device_id):
+        result = MagicMock()
+        result.isError.return_value = False
+        result.registers = [0] * count
+        if address == 4999 and count == 1:
+            result.registers[0] = 3624  # SH25T
+        return result
+
+    inner.read_input_registers = AsyncMock(side_effect=side_effect)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        data = await SungrowModbusClient("10.0.0.1", model="SH25T").async_read_realtime()
+
+    assert data["mppt3_voltage"]["value"] == 0.0
+    assert data["mppt3_current"]["value"] == 0.0
+    assert "mppt4_voltage" not in data
+    assert "mppt4_current" not in data
+
+
+@pytest.mark.parametrize(
+    ("configured_model", "device_type_code"),
+    [
+        ("SH10RT", 3587),  # Known two-tracker model.
+        ("unknown-hybrid", 3624),  # Unknown model keeps conservative zero suppression.
+        ("SH25T", 9732),  # Stale configured family must not override detected SG-RS.
+    ],
+)
+async def test_zero_extra_mppts_stay_hidden_without_matching_model_capability(configured_model, device_type_code):
+    """Only a known model matching the detected family can make zero MPPTs available."""
+    cls, inner = _mock_client_cls([])
+
+    def side_effect(address, count, device_id):
+        result = MagicMock()
+        result.isError.return_value = False
+        result.registers = [0] * count
+        if address == 4999 and count == 1:
+            result.registers[0] = device_type_code
+        return result
+
+    inner.read_input_registers = AsyncMock(side_effect=side_effect)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        data = await SungrowModbusClient("10.0.0.1", model=configured_model).async_read_realtime()
+
+    assert "mppt3_voltage" not in data
+    assert "mppt3_current" not in data
+    assert "mppt4_voltage" not in data
+    assert "mppt4_current" not in data
+
+
 # ---------------------------------------------------------------------------
 # #223 diagnostic dump
 # ---------------------------------------------------------------------------
