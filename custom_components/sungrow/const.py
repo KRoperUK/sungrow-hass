@@ -87,6 +87,7 @@ GATEWAYS = {
     "International": "https://gateway.isolarcloud.com.hk",
     "China": "https://gateway.isolarcloud.com",
     "Australia": "https://augateway.isolarcloud.com",
+    "India": "https://gateway.isolarcloud.in",
 }
 
 # Web console URL per region, used as the device `configuration_url` so the
@@ -96,6 +97,7 @@ GATEWAY_CONSOLE_URLS = {
     "International": "https://isolarcloud.com.hk",
     "China": "https://isolarcloud.com",
     "Australia": "https://au.isolarcloud.com",
+    "India": "https://isolarcloud.in",
 }
 
 DEFAULT_HOST = GATEWAYS["Europe"]

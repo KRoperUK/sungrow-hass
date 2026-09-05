@@ -24,7 +24,7 @@ def test_gateways_all_https():
 
 def test_gateways_expected_regions():
     """Test expected gateway regions are present."""
-    expected_regions = {"Europe", "International", "China", "Australia"}
+    expected_regions = {"Europe", "International", "China", "Australia", "India"}
     assert set(GATEWAYS.keys()) == expected_regions
 
 
