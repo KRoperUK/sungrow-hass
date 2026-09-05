@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
@@ -23,6 +24,7 @@ from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
     REGISTER_MAPS,
+    ModbusPoint,
     block_partitions,
     daily_yield_diagnostic_dump,
     decode_registers,
@@ -30,6 +32,7 @@ from .modbus_registers import (
     suppress_absent_meter_points,
 )
 from .model_capabilities import ModelFamily, resolve_model_family
+from .model_specs import spec_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +41,25 @@ DEFAULT_UNIT = 1
 CONNECT_TIMEOUT = 5
 # One reconnect+retry after a dropped WiNet-S socket (common after options reload).
 _READ_ATTEMPTS = 2
+
+
+def _points_for_model(points: tuple[ModbusPoint, ...], model_code: str, family: str) -> tuple[ModbusPoint, ...]:
+    """Return MPPT points supported by a known model in the detected family."""
+    spec = spec_for(model_code)
+    if spec is None or resolve_model_family(model_code).value != family:
+        return points
+
+    selected: list[ModbusPoint] = []
+    for point in points:
+        prefix, separator, _ = point.code.partition("_")
+        tracker = prefix.removeprefix("mppt")
+        if not separator or not prefix.startswith("mppt") or not tracker.isdigit():
+            selected.append(point)
+            continue
+        if int(tracker) > spec.mppt_count:
+            continue
+        selected.append(replace(point, omit_zero=False) if point.omit_zero else point)
+    return tuple(selected)
 
 
 class SungrowModbusError(Exception):
@@ -54,12 +76,14 @@ class SungrowModbusClient:
         port: int = DEFAULT_PORT,
         unit: int = DEFAULT_UNIT,
         model: str = "sg_rs",
+        model_code: str | None = None,
     ) -> None:
         """Initialize the client for a WiNet-S host (one inverter)."""
         self.host = host
         self.port = port
         self.unit = unit
         self.model = model
+        self._configured_model = model_code or model
         self._client = self._new_tcp_client()
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
@@ -91,6 +115,7 @@ class SungrowModbusClient:
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")
+        points = _points_for_model(points, self._configured_model, self.model)
         out: dict[str, dict[str, Any]] = {}
         async with self._lock:
             for start, count in block_partitions(points):
@@ -145,7 +170,7 @@ class SungrowModbusClient:
         self._family_detected = True
         # Prefer a known device-type code; else resolve the configured model string
         # (e.g. SH10RT-20 → sh_rt) when it already names a register map (#219).
-        configured = self.model
+        configured = self._configured_model
         try:
             async with self._lock:
                 registers = await self._read_input(4999, 1)
