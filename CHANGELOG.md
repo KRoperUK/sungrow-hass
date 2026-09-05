@@ -34,6 +34,22 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.0.0...v6.1.0) (2026-09-05)
+
+
+### Features
+
+* add India (isolarcloud.in) gateway region ([#406](https://github.com/KRoperUK/sungrow-hass/issues/406)) ([3675f79](https://github.com/KRoperUK/sungrow-hass/commit/3675f79ef7181becc999af2844bc886518bf5d6d))
+* **cloud_user:** surface per-device points such as battery SOC ([#389](https://github.com/KRoperUK/sungrow-hass/issues/389)) ([#393](https://github.com/KRoperUK/sungrow-hass/issues/393)) ([e8a78ea](https://github.com/KRoperUK/sungrow-hass/commit/e8a78ea9b9ada8abef343170e7cb53c8150e266c))
+
+
+### Bug Fixes
+
+* **device:** stop inventing a via_device parent on local Modbus entries ([#383](https://github.com/KRoperUK/sungrow-hass/issues/383)) ([#392](https://github.com/KRoperUK/sungrow-hass/issues/392)) ([127ac6f](https://github.com/KRoperUK/sungrow-hass/commit/127ac6fc92b039cedb9b70b46cffc1aad51ae3ef))
+* **modbus:** don't publish zeros for an absent grid meter ([#387](https://github.com/KRoperUK/sungrow-hass/issues/387)) ([#394](https://github.com/KRoperUK/sungrow-hass/issues/394)) ([ca2b375](https://github.com/KRoperUK/sungrow-hass/commit/ca2b375d344f06a2a5d4f4a9c68a5a8c016e011b))
+* **modbus:** restore daily_yield/total_yield on SH hybrids ([#382](https://github.com/KRoperUK/sungrow-hass/issues/382)) ([#390](https://github.com/KRoperUK/sungrow-hass/issues/390)) ([87f4261](https://github.com/KRoperUK/sungrow-hass/commit/87f4261ab971d1f5842eb8a0a58850ee84732564))
+* **sensor:** keep a state class on named cloud_user points without a unit ([#384](https://github.com/KRoperUK/sungrow-hass/issues/384)) ([#391](https://github.com/KRoperUK/sungrow-hass/issues/391)) ([198121e](https://github.com/KRoperUK/sungrow-hass/commit/198121e900f25590294871f3774936254c7e86bc))
+
 ## [6.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.6.1...v6.0.0) (2026-07-22)
 
 
