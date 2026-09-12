@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
@@ -15,7 +16,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
-from . import DispatchControl, SungrowConfigEntry, build_device_info_for, select_dispatch_device
+from . import (
+    DispatchControl,
+    SungrowConfigEntry,
+    build_device_info_for,
+    select_dispatch_device,
+    select_rating_fallbacks,
+)
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
@@ -184,7 +191,39 @@ _POWER_PARAM_RATING_KIND: dict[str, Literal["ac", "battery"]] = {
 }
 
 
-def _resolve_ac_rated_power(target: dict[str, Any]) -> int:
+def _device_ac_rating(device: dict[str, Any]) -> int | None:
+    """Return a device's AC-side nameplate in watts, or ``None`` when unknown.
+
+    Datasheet catalog first — the authoritative per-model number where known, and more
+    precise than the model code (SG3.6RS parses to 3600 W but the datasheet lists
+    3680 W) — then the model-code regex for models outside the catalog.
+    """
+    spec = spec_for(str(device.get("device_model_code") or ""))
+    if spec is not None:
+        return spec.max_ac_output_power
+    return rated_power_w(device)
+
+
+def _device_battery_rating(device: dict[str, Any]) -> int | None:
+    """Return a device's battery-side power limit in watts, or ``None`` when unknown.
+
+    Battery-side sliders drive charge OR discharge, so the ceiling is
+    ``max(charge_power, discharge_power)`` from the datasheet. Rows flagged
+    ``unverified=True`` in the catalog (#349) are treated conservatively: their battery
+    values are TCzerny family estimates, not datasheet lookups, so this ignores them and
+    falls back to the AC-side rating. That keeps the slider ceiling at or below the
+    inverter's nameplate — never overshooting into an estimated-battery value that could
+    exceed real hardware. Models with no battery data fall back the same way.
+    """
+    spec = spec_for(str(device.get("device_model_code") or ""))
+    if spec is not None and not spec.unverified:
+        battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
+        if battery_limits:
+            return max(battery_limits)
+    return _device_ac_rating(device)
+
+
+def _resolve_ac_rated_power(target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()) -> int:
     """Return the device's AC-side rated output power in watts.
 
     Single source of truth for AC-side rating resolution, priority-ordered:
@@ -194,39 +233,38 @@ def _resolve_ac_rated_power(target: dict[str, Any]) -> int:
        fallback because e.g. SG3.6RS parses to 3600 W but the datasheet lists 3680 W.
     2. Model-code regex (:func:`rated_power_w`) — catches unknown models that
        still encode the kW rating in their model code.
-    3. :data:`DEFAULT_MAX_DISPATCH_POWER` — final conservative clamp.
+    3. Each ``fallbacks`` device in turn — see :func:`_resolve_battery_rated_power`.
+    4. :data:`DEFAULT_MAX_DISPATCH_POWER` — final conservative clamp.
     """
-    spec = spec_for(str(target.get("device_model_code") or ""))
-    if spec is not None:
-        return spec.max_ac_output_power
-    return rated_power_w(target) or DEFAULT_MAX_DISPATCH_POWER
+    for device in (target, *fallbacks):
+        rating = _device_ac_rating(device)
+        if rating is not None:
+            return rating
+    return DEFAULT_MAX_DISPATCH_POWER
 
 
-def _resolve_battery_rated_power(target: dict[str, Any]) -> int:
+def _resolve_battery_rated_power(target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()) -> int:
     """Return the device's battery-side rated power (max of charge/discharge) in watts.
 
-    Battery-side sliders drive charge OR discharge, so the ceiling is
-    ``max(charge_power, discharge_power)`` from the datasheet. Falls back to the
-    AC rating for models without battery entries in the catalog, and finally to
-    :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
+    Falls back to the AC rating for models without battery entries in the catalog, and
+    finally to :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
     :func:`_resolve_ac_rated_power`.
 
-    Rows flagged ``unverified=True`` in the catalog (#349) are treated
-    conservatively: their battery values are TCzerny family estimates, not
-    datasheet lookups, so this resolver ignores them and falls back to the
-    AC-side rating. That keeps the slider ceiling at or below the inverter's
-    nameplate — never overshooting into an estimated-battery value that could
-    exceed real hardware.
+    ``fallbacks`` are the plant's other inverters/energy-storage systems, tried in order
+    when the write target's own model code resolves no rating at all. iSolarCloud
+    sometimes labels a hybrid's ESS entry with the battery model code, which used to
+    clamp the slider to the default below what the hardware supports (#422).
     """
-    spec = spec_for(str(target.get("device_model_code") or ""))
-    if spec is not None and not spec.unverified:
-        battery_limits = [x for x in (spec.max_charge_power, spec.max_discharge_power) if x is not None]
-        if battery_limits:
-            return max(battery_limits)
-    return _resolve_ac_rated_power(target)
+    for device in (target, *fallbacks):
+        rating = _device_battery_rating(device)
+        if rating is not None:
+            return rating
+    return DEFAULT_MAX_DISPATCH_POWER
 
 
-def _resolve_param_max_power(param: str, target: dict[str, Any]) -> int | None:
+def _resolve_param_max_power(
+    param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()
+) -> int | None:
     """Return the slider ceiling for a watt-valued dispatch parameter, or ``None``.
 
     Consults :data:`_POWER_PARAM_RATING_KIND` to decide whether the parameter is
@@ -235,9 +273,9 @@ def _resolve_param_max_power(param: str, target: dict[str, Any]) -> int | None:
     """
     kind = _POWER_PARAM_RATING_KIND.get(param)
     if kind == "ac":
-        return _resolve_ac_rated_power(target)
+        return _resolve_ac_rated_power(target, fallbacks)
     if kind == "battery":
-        return _resolve_battery_rated_power(target)
+        return _resolve_battery_rated_power(target, fallbacks)
     return None
 
 
@@ -259,6 +297,11 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
         return []
     if not target.get("uuid"):
         return []
+    # A hybrid's ESS entry is sometimes labelled with the battery model code, which
+    # resolves no power rating at all; the plant's other inverters/ESS devices carry the
+    # real nameplate, so offer them as fallback rating sources (#422). The write target
+    # itself never changes — only the slider ceiling.
+    rating_fallbacks = select_rating_fallbacks(target, coordinator.devices)
     # Local ModbusControl only maps a subset of Appendix-10 params (#220).
     # Require a real collection so MagicMock control clients in tests are unaffected.
     raw_supported = getattr(control, "supported_parameters", None)
@@ -272,7 +315,7 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
             continue
         # Watt-valued params get their slider ceiling from the device's rated power
         # (:func:`_resolve_param_max_power` returns ``None`` for non-watt params).
-        max_power = _resolve_param_max_power(param, target)
+        max_power = _resolve_param_max_power(param, target, rating_fallbacks)
         if max_power is not None and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
@@ -369,6 +412,9 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # command select (Charge/Discharge start it, Stop stops it), so writing power
         # — even 0 — never arms or re-arms dispatch here (see #112).
         self._attr_native_value = value
+        # Nothing polls a dispatch parameter back (it is write-only), so without this the
+        # slider would snap back to the previous value until the next coordinator poll.
+        self.async_write_ha_state()
 
 
 # Default duration (minutes) for a forced Charge/Discharge before auto-revert (#157 / #255).
@@ -423,3 +469,6 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         """Store the new duration locally and publish it to the coordinator."""
         self._attr_native_value = value
         self.coordinator.forced_dispatch_duration_minutes = value
+        # This entity is rebuilt on every coordinator update, and nothing reads the
+        # duration back from the device, so push the new value now (#157).
+        self.async_write_ha_state()

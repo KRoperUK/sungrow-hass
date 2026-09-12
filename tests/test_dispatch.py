@@ -433,6 +433,7 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()  # collected, not added to a platform
 
     await power.async_set_native_value(2500)
 
@@ -460,6 +461,7 @@ async def test_number_power_does_not_arm_heartbeat(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
     power.hass = hass
+    power.async_write_ha_state = MagicMock()  # collected, not added to a platform
 
     await power.async_set_native_value(1500)
     assert data.heartbeats == {}  # non-zero power must not start a heartbeat
@@ -745,6 +747,82 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
 
 
+async def test_charge_power_max_uses_sibling_inverter_when_ess_has_a_battery_code(hass: HomeAssistant):
+    """A hybrid's ESS entry can carry the battery model code; the sibling inverter rates it (#422).
+
+    Regression test: iSolarCloud labelled the energy-storage device on an SH10RS plant
+    with a battery model code ("SBH100"), which resolves no power rating at all. The
+    slider therefore clamped to the conservative 5000 W default, and the user could not
+    command the 10 kW that the inverter and the iSolarCloud "Quick Discharge" screen both
+    support. The plant's other inverters/ESS devices carry the real nameplate.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 10600  # SH-RS battery-side datasheet limit
+    # Only the ceiling comes from the sibling — the write target is still the ESS device.
+    assert power.device_uuid == "ess-1"
+
+
+async def test_feed_in_limit_uses_sibling_inverter_when_ess_has_a_battery_code(hass: HomeAssistant):
+    """The AC-side slider resolves from the sibling inverter too (#422)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
+    assert export_limit._attr_native_max_value == 10600  # SH10RS AC nameplate
+
+
+async def test_charge_power_max_prefers_the_target_devices_own_rating(hass: HomeAssistant):
+    """A resolvable target rating is never overridden by a larger sibling rating (#422)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH3.0RS"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 6600  # the target's own SH3.0RS battery limit
+
+
+def test_select_rating_fallbacks_skips_the_target_and_non_rating_devices():
+    """Only other inverters/ESS devices (with a uuid) are offered as rating sources (#422)."""
+    from custom_components.sungrow import select_rating_fallbacks
+
+    target = {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"}
+    devices = [
+        target,
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+        {"uuid": "meter-1", "device_type": DeviceType.METER, "device_model_code": "DTSU666"},
+        {"uuid": "batt-1", "device_type": DeviceType.BATTERY, "device_model_code": "SBR128"},
+        {"uuid": None, "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+
+    assert [d["uuid"] for d in select_rating_fallbacks(target, devices)] == ["inv-1"]
+
+
 async def test_feed_in_limitation_prefers_datasheet_over_regex(hass: HomeAssistant):
     """AC-side resolution reads the datasheet before the model-code regex (#353).
 
@@ -801,6 +879,8 @@ async def test_param_write_encodings(hass: HomeAssistant):
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     by_param = {e.param: e for e in added}
+    for entity in added:  # collected, not added to a platform
+        entity.async_write_ha_state = MagicMock()
 
     # Power is sent verbatim in watts (not kW).
     await by_param["charge_discharge_power"].async_set_native_value(2500)
@@ -1052,6 +1132,33 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
+async def test_number_writes_push_state_immediately(hass: HomeAssistant):
+    """Both dispatch setters publish entity state at once — neither is polled back.
+
+    Dispatch parameters are write-only (``getDevPropertyPointValue`` is permission-gated)
+    and the forced-dispatch duration is a purely local value, so without an explicit
+    state write the UI keeps showing the previous value until the next coordinator poll —
+    notably for the duration number, which is rebuilt on every poll.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    by_param = {e.param: e for e in added}
+
+    power = by_param["charge_discharge_power"]
+    with patch.object(power, "async_write_ha_state") as power_state:
+        await power.async_set_native_value(2500)
+    power_state.assert_called_once_with()
+
+    duration = by_param["forced_dispatch_duration"]
+    with patch.object(duration, "async_write_ha_state") as duration_state:
+        await duration.async_set_native_value(30)
+    duration_state.assert_called_once_with()
+
+
 async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
     """The duration number stores its value on the coordinator, writing nothing to the API."""
     from custom_components.sungrow.number import SungrowForcedDispatchDurationNumber
@@ -1060,6 +1167,7 @@ async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
     entry.add_to_hass(hass)
     data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
     number = SungrowForcedDispatchDurationNumber(data.coordinators[0], {"uuid": "ess-1"})
+    number.async_write_ha_state = MagicMock()  # not added to a platform
 
     await number.async_set_native_value(30)
 
@@ -1112,6 +1220,7 @@ async def test_forced_dispatch_duration_survives_poll_rebuild(hass: HomeAssistan
     coordinator = data.coordinators[0]
 
     number = SungrowForcedDispatchDurationNumber(coordinator, {"uuid": "ess-1"})
+    number.async_write_ha_state = MagicMock()  # not added to a platform
     await number.async_set_native_value(120)
     assert coordinator.forced_dispatch_duration_minutes == 120
 
