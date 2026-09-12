@@ -189,6 +189,10 @@
     "dispatch_not_actuated": {
       "title": "Dispatch command was not applied",
       "description": "A forced charge/discharge command for **{plant}** was accepted by iSolarCloud, but the inverter stayed in Self-consumption instead of entering Forced mode, so the command is not taking effect. This can happen on some models/firmware or API plans. Try setting the Charge/Discharge Command to Stop and again to Charge/Discharge; if it persists, check the logs and open an issue."
+    },
+    "dispatch_rating_unknown": {
+      "title": "Charge/discharge power limit could not be determined",
+      "description": "The power limit for **{plant}** could not be determined from the model code **{model}**, so the slider is capped at {ceiling} W rather than the inverter's real capability. If the inverter is larger than that, this is why the slider stops early. Affected controls: {parameters}. Please open an issue with the model code so its rating can be added."
     }
   },
   "entity": {

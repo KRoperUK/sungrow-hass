@@ -189,6 +189,10 @@
     "dispatch_not_actuated": {
       "title": "El comando de despacho no se aplicó",
       "description": "iSolarCloud aceptó un comando de carga/descarga forzada para **{plant}**, pero el inversor permaneció en autoconsumo en lugar de entrar en modo forzado, por lo que el comando no surte efecto. Esto puede ocurrir en algunos modelos/firmware o planes de API. Cambie el comando de carga/descarga a Detener y de nuevo a Cargar/Descargar; si persiste, revise los registros y abra una incidencia."
+    },
+    "dispatch_rating_unknown": {
+      "title": "No se pudo determinar el límite de potencia de carga/descarga",
+      "description": "El límite de potencia de **{plant}** no se pudo determinar a partir del código de modelo **{model}**, por lo que el control se limita a {ceiling} W en lugar de la capacidad real del inversor. Si el inversor es mayor, esta es la razón por la que el control se detiene antes. Controles afectados: {parameters}. Abra una incidencia con el código de modelo para que se añada su potencia."
     }
   },
   "entity": {

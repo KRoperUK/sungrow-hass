@@ -11,6 +11,7 @@ from homeassistant.components.number import NumberDeviceClass, NumberEntity, Num
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud import PySolarCloudException
@@ -279,7 +280,62 @@ def _resolve_param_max_power(
     return None
 
 
-def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchControl | None) -> list[NumberEntity]:
+def _resolve_param_rating(param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()) -> int | None:
+    """Return the rating a watt-valued parameter resolves to, or ``None`` when none exists.
+
+    :func:`_resolve_param_max_power` cannot answer this: it returns
+    :data:`DEFAULT_MAX_DISPATCH_POWER` both when a device genuinely is that size (SG5.0RS is
+    legitimately 5000 W) and when nothing could be resolved at all. The Repair must fire only
+    for the second case, so the per-device helpers are consulted directly here.
+    """
+    kind = _POWER_PARAM_RATING_KIND.get(param)
+    if kind is None:
+        return None
+    for device in (target, *fallbacks):
+        rating = _device_ac_rating(device) if kind == "ac" else _device_battery_rating(device)
+        if rating is not None:
+            return rating
+    return None
+
+
+RATING_UNKNOWN_ISSUE = "dispatch_rating_unknown"
+
+
+def _async_manage_rating_repair(
+    hass: HomeAssistant, coordinator: SungrowPlantCoordinator, target: dict[str, Any], unresolved: Sequence[str]
+) -> None:
+    """Raise or clear the Repair for sliders capped by an unknown nameplate (#429).
+
+    Without it the only symptom is a slider that stops in the wrong place, which is exactly
+    how #422 was reported, and every such report costs a round-trip to discover that the fix
+    is a one-line addition to the model catalog.
+    """
+    issue_id = f"{RATING_UNKNOWN_ISSUE}_{coordinator.plant_id}"
+    if not unresolved:
+        # A rating resolved, so the ceiling is no longer a guess and the Repair is stale.
+        # This runs on every coordinator update, which is what makes adding the model to the
+        # catalog clear the issue on the next poll.
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RATING_UNKNOWN_ISSUE,
+        translation_placeholders={
+            "plant": coordinator.plant_name,
+            "model": str(target.get("device_model_code") or "unknown"),
+            "ceiling": str(DEFAULT_MAX_DISPATCH_POWER),
+            "parameters": ", ".join(sorted(unresolved)),
+        },
+    )
+
+
+def _build_numbers(
+    coordinator: SungrowPlantCoordinator, control: DispatchControl | None, hass: HomeAssistant
+) -> list[NumberEntity]:
     """Build the dispatch number entities for a coordinator's target device.
 
     Returns an empty list when no dispatch-capable device is present. Reads the
@@ -307,6 +363,10 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
     raw_supported = getattr(control, "supported_parameters", None)
     supported = raw_supported if isinstance(raw_supported, (set, frozenset)) else None
     entities: list[NumberEntity] = []
+    # Watt-valued params whose ceiling had to fall back to the conservative default because
+    # no nameplate resolved anywhere on the plant (#429). Collected so the Repair can be
+    # raised (or cleared) once, after the whole control set is known.
+    unresolved_ratings: list[str] = []
     for param, meta in DISPATCH_NUMBERS.items():
         # Hide battery-only controls on PV-only plants — see #148.
         if meta.get("battery_only") and not coordinator.has_battery:
@@ -315,10 +375,13 @@ def _build_numbers(coordinator: SungrowPlantCoordinator, control: DispatchContro
             continue
         # Watt-valued params get their slider ceiling from the device's rated power
         # (:func:`_resolve_param_max_power` returns ``None`` for non-watt params).
+        if param in _POWER_PARAM_RATING_KIND and _resolve_param_rating(param, target, rating_fallbacks) is None:
+            unresolved_ratings.append(param)
         max_power = _resolve_param_max_power(param, target, rating_fallbacks)
         if max_power is not None and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))
+    _async_manage_rating_repair(hass, coordinator, target, unresolved_ratings)
     # The forced-dispatch auto-revert timeout only makes sense alongside the battery
     # charge/discharge controls, so gate it on the same has_battery check (#157/#148).
     if coordinator.has_battery:
@@ -339,7 +402,7 @@ async def async_setup_entry(
         entry,
         "number",
         coordinators,
-        lambda coordinator: _build_numbers(coordinator, control),
+        lambda coordinator: _build_numbers(coordinator, control, hass),
         async_add_entities,
     )
     adder()
