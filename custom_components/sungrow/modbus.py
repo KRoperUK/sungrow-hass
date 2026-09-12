@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
@@ -23,6 +24,7 @@ from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
     REGISTER_MAPS,
+    ModbusPoint,
     block_partitions,
     daily_yield_diagnostic_dump,
     decode_registers,
@@ -30,6 +32,7 @@ from .modbus_registers import (
     suppress_absent_meter_points,
 )
 from .model_capabilities import ModelFamily, resolve_model_family
+from .model_specs import spec_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +41,38 @@ DEFAULT_UNIT = 1
 CONNECT_TIMEOUT = 5
 # One reconnect+retry after a dropped WiNet-S socket (common after options reload).
 _READ_ATTEMPTS = 2
+
+
+def _points_for_model(
+    points: tuple[ModbusPoint, ...], model_code: str, family: str
+) -> tuple[tuple[ModbusPoint, ...], tuple[str, ...]]:
+    """Return ``(points, dropped_codes)`` for a known model in the detected family.
+
+    A known model's datasheet says how many MPPT trackers the unit has, so points for
+    trackers it does not have are dropped (never read), while points for trackers it
+    *does* have keep zero readings — a tracker sitting at 0 (e.g. at night) must still
+    produce an entity (#398). Unknown models, or a configured model whose family
+    disagrees with the detected register map, are returned unchanged: keep the
+    conservative zero suppression rather than guess. ``dropped_codes`` is returned so
+    the caller can surface it in diagnostics.
+    """
+    spec = spec_for(model_code)
+    if spec is None or resolve_model_family(model_code).value != family:
+        return points, ()
+
+    selected: list[ModbusPoint] = []
+    dropped: list[str] = []
+    for point in points:
+        prefix, separator, _ = point.code.partition("_")
+        tracker = prefix.removeprefix("mppt")
+        if not separator or not prefix.startswith("mppt") or not tracker.isdigit():
+            selected.append(point)
+            continue
+        if int(tracker) > spec.mppt_count:
+            dropped.append(point.code)
+            continue
+        selected.append(replace(point, omit_zero=False) if point.omit_zero else point)
+    return tuple(selected), tuple(dropped)
 
 
 class SungrowModbusError(Exception):
@@ -54,16 +89,21 @@ class SungrowModbusClient:
         port: int = DEFAULT_PORT,
         unit: int = DEFAULT_UNIT,
         model: str = "sg_rs",
+        model_code: str | None = None,
     ) -> None:
         """Initialize the client for a WiNet-S host (one inverter)."""
         self.host = host
         self.port = port
         self.unit = unit
         self.model = model
+        self._configured_model = model_code or model
         self._client = self._new_tcp_client()
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
         self._family_detected = False
+        # Last set of model-gated MPPT points logged, so the support signal fires once
+        # per distinct set rather than on every poll.
+        self._logged_dropped_mppt_points: tuple[str, ...] = ()
         self.modbus_diagnostics: dict[str, Any] = {
             "device_family": None,
             "skipped_blocks": [],
@@ -91,6 +131,18 @@ class SungrowModbusClient:
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")
+        points, dropped = _points_for_model(points, self._configured_model, self.model)
+        # Surface the model gate for support triage ("where is mpptN?" is answerable from
+        # the diagnostics download) and log it once per distinct set.
+        self.modbus_diagnostics["dropped_mppt_points"] = list(dropped)
+        if dropped and dropped != self._logged_dropped_mppt_points:
+            self._logged_dropped_mppt_points = dropped
+            _LOGGER.debug(
+                "Model %s does not have all %s MPPT trackers; not reading %s",
+                self._configured_model,
+                self.model,
+                ", ".join(dropped),
+            )
         out: dict[str, dict[str, Any]] = {}
         async with self._lock:
             for start, count in block_partitions(points):
@@ -145,7 +197,7 @@ class SungrowModbusClient:
         self._family_detected = True
         # Prefer a known device-type code; else resolve the configured model string
         # (e.g. SH10RT-20 → sh_rt) when it already names a register map (#219).
-        configured = self.model
+        configured = self._configured_model
         try:
             async with self._lock:
                 registers = await self._read_input(4999, 1)
