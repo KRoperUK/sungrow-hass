@@ -65,6 +65,9 @@ from .device_helpers import (
 from .device_helpers import (
     select_dispatch_device as select_dispatch_device,
 )
+from .device_helpers import (
+    select_rating_fallbacks as select_rating_fallbacks,
+)
 from .heartbeat import (
     _stop_heartbeat,
 )

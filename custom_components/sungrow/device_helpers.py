@@ -43,6 +43,33 @@ def select_dispatch_device(devices: list[dict[str, Any]]) -> dict[str, Any] | No
     return inverters[0] if inverters else None
 
 
+# Devices that can describe a plant's power rating: only inverters and energy-storage
+# systems carry an inverter nameplate. Meters, communication modules and battery packs
+# have model codes that resolve no rating, so they would only add noise as candidates.
+_RATING_DEVICE_TYPES = (DeviceType.INVERTER, DeviceType.ENERGY_STORAGE_SYSTEM)
+
+
+def select_rating_fallbacks(target: dict[str, Any] | None, devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the other devices whose nameplate can bound a dispatch slider.
+
+    The dispatch number entities size their watt-valued sliders from the model code of
+    the device they write to. iSolarCloud can label a hybrid's energy-storage device
+    with the *battery* model code (e.g. ``SBH100`` rather than ``SH10RS``), which
+    resolves no rating at all, so the slider fell back to the conservative default and
+    clipped the range the hardware supports (#422). The plant's other inverters and
+    energy-storage systems carry the real nameplate, so they are offered as fallback
+    rating sources. The write target never changes — only the ceiling.
+    """
+    target_uuid = target.get("uuid") if target else None
+    return [
+        device
+        for device in devices
+        if device.get("uuid")
+        and device.get("uuid") != target_uuid
+        and any(_matches_device_type(device, rating_type) for rating_type in _RATING_DEVICE_TYPES)
+    ]
+
+
 def resolve_point_device(point_code: str, devices: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Return the single physical device a plant point belongs to, else None (=plant).
 

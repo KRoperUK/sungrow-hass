@@ -745,6 +745,82 @@ async def test_charge_power_max_falls_back_to_default(hass: HomeAssistant):
     assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
 
 
+async def test_charge_power_max_uses_sibling_inverter_when_ess_has_a_battery_code(hass: HomeAssistant):
+    """A hybrid's ESS entry can carry the battery model code; the sibling inverter rates it (#422).
+
+    Regression test: iSolarCloud labelled the energy-storage device on an SH10RS plant
+    with a battery model code ("SBH100"), which resolves no power rating at all. The
+    slider therefore clamped to the conservative 5000 W default, and the user could not
+    command the 10 kW that the inverter and the iSolarCloud "Quick Discharge" screen both
+    support. The plant's other inverters/ESS devices carry the real nameplate.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 10600  # SH-RS battery-side datasheet limit
+    # Only the ceiling comes from the sibling — the write target is still the ESS device.
+    assert power.device_uuid == "ess-1"
+
+
+async def test_feed_in_limit_uses_sibling_inverter_when_ess_has_a_battery_code(hass: HomeAssistant):
+    """The AC-side slider resolves from the sibling inverter too (#422)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
+    assert export_limit._attr_native_max_value == 10600  # SH10RS AC nameplate
+
+
+async def test_charge_power_max_prefers_the_target_devices_own_rating(hass: HomeAssistant):
+    """A resolvable target rating is never overridden by a larger sibling rating (#422)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH3.0RS"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 6600  # the target's own SH3.0RS battery limit
+
+
+def test_select_rating_fallbacks_skips_the_target_and_non_rating_devices():
+    """Only other inverters/ESS devices (with a uuid) are offered as rating sources (#422)."""
+    from custom_components.sungrow import select_rating_fallbacks
+
+    target = {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBH100"}
+    devices = [
+        target,
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+        {"uuid": "meter-1", "device_type": DeviceType.METER, "device_model_code": "DTSU666"},
+        {"uuid": "batt-1", "device_type": DeviceType.BATTERY, "device_model_code": "SBR128"},
+        {"uuid": None, "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+
+    assert [d["uuid"] for d in select_rating_fallbacks(target, devices)] == ["inv-1"]
+
+
 async def test_feed_in_limitation_prefers_datasheet_over_regex(hass: HomeAssistant):
     """AC-side resolution reads the datasheet before the model-code regex (#353).
 
