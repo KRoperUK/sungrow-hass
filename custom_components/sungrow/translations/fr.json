@@ -189,6 +189,10 @@
     "dispatch_not_actuated": {
       "title": "La commande de pilotage n'a pas été appliquée",
       "description": "Une commande de charge/décharge forcée pour **{plant}** a été acceptée par iSolarCloud, mais l'onduleur est resté en autoconsommation au lieu de passer en mode forcé, la commande n'a donc aucun effet. Cela peut arriver sur certains modèles/firmwares ou forfaits d'API. Réglez la commande de charge/décharge sur Arrêt puis de nouveau sur Charge/Décharge ; si le problème persiste, consultez les journaux et ouvrez un ticket."
+    },
+    "dispatch_rating_unknown": {
+      "title": "Limite de puissance de charge/décharge indéterminée",
+      "description": "La limite de puissance de **{plant}** n'a pas pu être déterminée à partir du code modèle **{model}**, le curseur est donc plafonné à {ceiling} W au lieu de la capacité réelle de l'onduleur. Si l'onduleur est plus grand, c'est la raison pour laquelle le curseur s'arrête trop tôt. Contrôles concernés : {parameters}. Merci d'ouvrir un ticket avec le code modèle pour que sa puissance soit ajoutée."
     }
   },
   "entity": {

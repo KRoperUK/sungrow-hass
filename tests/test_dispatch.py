@@ -20,7 +20,7 @@ from custom_components.sungrow import (
     select_dispatch_device,
 )
 from custom_components.sungrow.const import DOMAIN
-from custom_components.sungrow.number import DISPATCH_NUMBERS, SungrowDispatchNumber
+from custom_components.sungrow.number import DEFAULT_MAX_DISPATCH_POWER, DISPATCH_NUMBERS, SungrowDispatchNumber
 from custom_components.sungrow.number import async_setup_entry as number_setup_entry
 from custom_components.sungrow.select import DISPATCH_SELECTS
 from custom_components.sungrow.select import async_setup_entry as select_setup_entry
@@ -788,6 +788,74 @@ async def test_feed_in_limit_uses_sibling_inverter_when_ess_has_a_battery_code(h
 
     export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
     assert export_limit._attr_native_max_value == 10600  # SH10RS AC nameplate
+
+
+async def test_unresolvable_nameplate_raises_an_actionable_repair(hass: HomeAssistant):
+    """A slider capped only because no nameplate resolved must say so (#429).
+
+    #422 arrived as "my slider stops at 5 kW", which costs a round-trip to discover that the
+    integration simply could not rate the model. The Repair names the model code so the report
+    is actionable, and points at the catalog, where the actual fix is a data change.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBR256"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == DEFAULT_MAX_DISPATCH_POWER
+    issue = ir.async_get(hass).issues[(DOMAIN, "dispatch_rating_unknown_12345")]
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert issue.translation_key == "dispatch_rating_unknown"
+    assert issue.translation_placeholders == {
+        "plant": "Test Plant",
+        "model": "SBR256",
+        "ceiling": str(DEFAULT_MAX_DISPATCH_POWER),
+        "parameters": "charge_discharge_power, feed_in_limitation_value",
+    }
+
+
+async def test_resolved_nameplate_clears_the_repair(hass: HomeAssistant):
+    """A sibling inverter carrying the real nameplate means the ceiling is not a guess (#429).
+
+    This is the #422 case: the nameplate arrives from the plant's other device, so the sliders
+    are correct and the Repair must not be raised.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [
+        {"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBR256"},
+        {"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SH10RS"},
+    ]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert next(e for e in added if e.param == "charge_discharge_power")._attr_native_max_value == 10600
+    assert (DOMAIN, "dispatch_rating_unknown_12345") not in ir.async_get(hass).issues
+
+
+async def test_a_known_small_model_does_not_raise_the_repair(hass: HomeAssistant):
+    """A model that is genuinely 5000 W must not look like an unresolvable one (#429).
+
+    The default ceiling and a real rating coincide at 5000 W (SG5.0RS), so detecting the
+    fallback by comparing against :data:`DEFAULT_MAX_DISPATCH_POWER` would produce a false
+    Repair. Resolution is checked instead of the resulting value.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "inv-1", "device_type": DeviceType.INVERTER, "device_model_code": "SG5.0RS"}]
+    _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert next(e for e in added if e.param == "feed_in_limitation_value")._attr_native_max_value == 5000
+    assert (DOMAIN, "dispatch_rating_unknown_12345") not in ir.async_get(hass).issues
 
 
 async def test_charge_power_max_prefers_the_target_devices_own_rating(hass: HomeAssistant):

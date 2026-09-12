@@ -189,6 +189,10 @@
     "dispatch_not_actuated": {
       "title": "Dispatch-Befehl wurde nicht angewendet",
       "description": "Ein erzwungener Lade-/Entladebefehl für **{plant}** wurde von iSolarCloud akzeptiert, aber der Wechselrichter blieb im Eigenverbrauchsmodus, statt in den erzwungenen Modus zu wechseln, sodass der Befehl keine Wirkung hat. Dies kann bei manchen Modellen/Firmware oder API-Tarifen vorkommen. Setzen Sie den Lade-/Entladebefehl auf Stopp und erneut auf Laden/Entladen; bleibt das Problem bestehen, prüfen Sie die Protokolle und öffnen Sie ein Issue."
+    },
+    "dispatch_rating_unknown": {
+      "title": "Lade-/Entladeleistungsgrenze konnte nicht ermittelt werden",
+      "description": "Die Leistungsgrenze für **{plant}** konnte aus dem Modellcode **{model}** nicht ermittelt werden, daher ist der Regler auf {ceiling} W begrenzt statt auf die tatsächliche Leistung des Wechselrichters. Ist der Wechselrichter größer, endet der Regler deshalb zu früh. Betroffene Steuerungen: {parameters}. Bitte melden Sie den Modellcode, damit die Leistungsdaten ergänzt werden können."
     }
   },
   "entity": {

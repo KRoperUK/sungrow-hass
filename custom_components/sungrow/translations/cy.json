@@ -189,6 +189,10 @@
     "dispatch_not_actuated": {
       "title": "Ni chymhwyswyd y gorchymyn anfon",
       "description": "Derbyniodd iSolarCloud orchymyn gwefru/dadwefru gorfodol ar gyfer **{plant}**, ond arhosodd y gwrthdröydd mewn hunan-ddefnydd yn lle mynd i'r modd gorfodol, felly nid yw'r gorchymyn yn cael effaith. Gall hyn ddigwydd ar rai modelau/cadarnwedd neu gynlluniau API. Gosodwch y Gorchymyn Gwefru/Dadwefru i Stop ac eto i Wefru/Dadwefru; os yw'n parhau, gwiriwch y logiau ac agorwch fater."
+    },
+    "dispatch_rating_unknown": {
+      "title": "Nid oedd modd pennu terfyn pŵer gwefru/rhyddhau",
+      "description": "Nid oedd modd pennu terfyn pŵer **{plant}** o'r cod model **{model}**, felly mae'r llithrydd wedi'i gapio i {ceiling} W yn lle gallu gwirioneddol y gwrthdröydd. Os yw'r gwrthdröydd yn fwy na hynny, dyma pam mae'r llithrydd yn stopio'n gynnar. Rheolyddion yr effeithir arnynt: {parameters}. Agorwch fater gyda'r cod model fel y gellir ychwanegu ei radd."
     }
   },
   "entity": {
