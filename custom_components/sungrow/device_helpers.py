@@ -58,36 +58,28 @@ def resolve_point_device(point_code: str, devices: list[dict[str, Any]]) -> dict
     return matches[0] if len(matches) == 1 else None
 
 
-# Sentinel: omit ``via_plant_id`` to nest under ``plant_id`` (cloud default). Pass
-# ``via_plant_id=None`` explicitly for a local Modbus inverter with no cloud plant so
-# we do **not** invent a non-existent parent (HA 2025.12 warns / breaks).
-_VIA_PLANT_UNSET: object = object()
-
-
 def build_device_info(
     device: dict[str, Any],
-    plant_id: str,
     *,
     fallback_name: str | None = None,
-    via_plant_id: str | None | object = _VIA_PLANT_UNSET,
+    via_device_id: str | None = None,
     configuration_url: str | None = None,
 ) -> DeviceInfo:
-    """Build a device-registry entry for a physical device, nested under its plant.
+    """Build a device-registry entry for a physical device, nested under its parent.
 
     Enriches the HA device card with the model, serial number and manufacturer the
     cloud reports (``device_model_code`` / ``device_sn`` / ``factory_name`` from
-    ``getDeviceListByPsId``) instead of a bare name, and links it to the plant device
-    via ``via_device``. The uuid is stringified so the identifier matches
-    ``_known_device_ids`` (which keys on ``str(uuid)``) and the device isn't pruned.
+    ``getDeviceListByPsId``) instead of a bare name, and nests it under its parent
+    device. The uuid is stringified so the identifier matches ``_known_device_ids``
+    (which keys on ``str(uuid)``) and the device isn't pruned.
 
-    ``via_plant_id`` overrides the parent plant identifier (local Modbus nesting under a
-    matching cloud plant). Pass ``None`` to leave the device un-nested when no plant
-    parent exists yet — never point ``via_device`` at a missing identifier.
+    ``via_device_id`` is the parent's *registry device id* — the plant service device
+    for a cloud entry, or the matching cloud plant for a local Modbus inverter. Pass
+    ``None`` for a device with no parent; never point the link at a device that does
+    not exist. Identifiers are only unique per config entry since Home Assistant 2026.8,
+    which is why the old ``via_device=(domain, identifier)`` tuple is deprecated
+    (removed in HA 2027.8) and this helper no longer emits it.
     """
-    if via_plant_id is _VIA_PLANT_UNSET:
-        parent_id: str | None = plant_id
-    else:
-        parent_id = via_plant_id  # type: ignore[assignment]
     info = DeviceInfo(
         identifiers={(DOMAIN, str(device["uuid"]))},
         name=device.get("device_name") or device.get("device_model_name") or fallback_name,
@@ -95,12 +87,8 @@ def build_device_info(
         model=device.get("device_model_code") or device.get("device_model_name"),
         serial_number=device.get("device_sn"),
     )
-    if parent_id is not None:
-        # NOTE(#407): HA 2026.8 deprecated DeviceInfo["via_device"] in favour of
-        # via_device_id (the parent's registry device id), and HA 2026.9 dropped the
-        # key from the DeviceInfo TypedDict entirely — hence the ignore. Migrating to
-        # via_device_id is tracked in #407 and done in the follow-up PR.
-        info["via_device"] = (DOMAIN, parent_id)  # type: ignore[typeddict-unknown-key]
+    if via_device_id is not None:
+        info["via_device_id"] = via_device_id
     if configuration_url:
         info["configuration_url"] = configuration_url
     return info
@@ -117,37 +105,34 @@ class DevicePlacementContext(Protocol):
     plant_name: str
     # Set (to a possibly-empty string) only on a local Modbus entry; ``None`` on cloud.
     local_configuration_url: str | None
-    # The cloud plant that owns this serial, when one does; ``None`` otherwise.
-    via_plant_id: str | None
+    # Registry device id of the parent to nest under; ``None`` means no parent.
+    via_device_id: str | None
 
 
 def build_device_info_for(coordinator: DevicePlacementContext, device: dict[str, Any]) -> DeviceInfo:
-    """Build a physical device's registry entry with the right parent for its transport.
+    """Build a physical device's registry entry, nested under the right parent.
 
-    Cloud entries nest the device under the plant service device. A local Modbus entry
-    has no plant device of its own — ``coordinator.plant_id`` is the inverter *serial*,
-    which is deliberately never registered — so it must nest under a real cloud plant
-    when one owns the same serial (``via_plant_id``) and otherwise have no parent at all.
+    Cloud entries nest the device under the plant service device (the coordinator's
+    ``via_device_id``). A local Modbus entry has no plant device of its own — its
+    ``plant_id`` is the inverter *serial*, which is deliberately never registered — so
+    it nests under a real cloud plant when one owns the same serial, and otherwise has
+    no parent at all.
 
-    Every entity platform must go through this helper. Open-coding the local/cloud
-    branch is what caused #383: one of seven call sites omitted ``via_plant_id`` and so
-    pointed ``via_device`` at the unregistered serial, which Home Assistant warns about
-    and will stop accepting.
+    Every entity platform must go through this helper. Open-coding the branch is what
+    caused #383: one of seven call sites omitted the parent override and pointed the
+    link at the unregistered serial, which Home Assistant warns about and will stop
+    accepting.
     """
-    local_url = coordinator.local_configuration_url
-    if isinstance(local_url, str):
-        return build_device_info(
-            device,
-            coordinator.plant_id,
-            fallback_name=coordinator.plant_name,
-            via_plant_id=coordinator.via_plant_id,
-            configuration_url=local_url or None,
-        )
-    return build_device_info(device, coordinator.plant_id, fallback_name=coordinator.plant_name)
+    return build_device_info(
+        device,
+        fallback_name=coordinator.plant_name,
+        via_device_id=coordinator.via_device_id,
+        configuration_url=coordinator.local_configuration_url or None,
+    )
 
 
 def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) -> DeviceInfo:
-    """Build the plant "service" DeviceInfo that anchors the per-device ``via_device`` tree.
+    """Build the plant "service" DeviceInfo that anchors the per-device parent links.
 
     Registered explicitly at setup and used as the fallback for any plant sensor that does
     not re-home onto a physical device (#158), so the plant device always exists as the
@@ -162,11 +147,12 @@ def build_plant_device_info(plant_id: str, plant_name: str, console_url: str) ->
     )
 
 
-def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
-    """Return the cloud plant identifier that already owns this inverter serial, if any.
+def find_related_cloud_plant_device_id(hass: HomeAssistant, serial: str) -> str | None:
+    """Return the registry device id of the cloud plant that owns this inverter serial.
 
     Used so a separate Modbus-only entry can nest its local inverter under the cloud
-    plant device without merging sensor values.
+    plant device without merging sensor values. Returns ``None`` when no cloud entry
+    owns the serial (yet).
     """
     registry = dr.async_get(hass)
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -182,14 +168,10 @@ def find_related_cloud_plant_id(hass: HomeAssistant, serial: str) -> str | None:
         if inv.via_device_id:
             parent = registry.async_get(inv.via_device_id)
             if parent is not None:
-                for domain_key, ident in parent.identifiers:
-                    if domain_key == DOMAIN:
-                        return str(ident)
+                return parent.id
         for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
             if device.entry_type == dr.DeviceEntryType.SERVICE:
-                for domain_key, ident in device.identifiers:
-                    if domain_key == DOMAIN:
-                        return str(ident)
+                return device.id
     return None
 
 

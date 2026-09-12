@@ -401,7 +401,7 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         # Identifies the entity (like the dispatch numbers) though it writes no param.
         self.param = "forced_dispatch_duration"
         self._attr_unique_id = f"{coordinator.plant_id}_{self.device_uuid}_forced_dispatch_duration"
-        # Was open-coded without via_plant_id, which pointed via_device at the
+        # Goes through the shared helper so the parent link is never pointed at the
         # unregistered inverter serial on local Modbus entries (#383).
         self._attr_device_info = build_device_info_for(coordinator, device)
         self._attr_native_value = DEFAULT_FORCED_DISPATCH_DURATION

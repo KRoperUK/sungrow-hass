@@ -6,7 +6,7 @@ The integration models each iSolarCloud plant as a Home Assistant device, with t
 
 ## Device grouping
 
-The integration mirrors your real hardware in Home Assistant's device tree: **one iSolarCloud account maps to one config entry, which holds one *plant* device per plant, and each physical device (inverter, battery/ESS, meter, WiNet-S) is nested under its plant** via `via_device`.
+The integration mirrors your real hardware in Home Assistant's device tree: **one iSolarCloud account maps to one config entry, which holds one *plant* device per plant, and each physical device (inverter, battery/ESS, meter, WiNet-S) is nested under its plant** via `via_device_id`.
 
 ```mermaid
 flowchart TD
