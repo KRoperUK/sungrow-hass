@@ -39,8 +39,8 @@ this working — **do not remove it**, and keep `sungrow-isolarcloud` pinned in
 ## Commands
 
 ```bash
-# Environment (uv recommended; any Py3.13 venv works)
-uv venv --python 3.13 .venv
+# Environment (uv recommended; any Py3.14 venv works)
+uv venv --python 3.14 .venv
 uv pip install --python .venv -r requirements_test.txt
 
 # Lint, type-check, format, test (mirror CI)
@@ -57,7 +57,8 @@ Coverage threshold (`fail_under`) is set in `pyproject.toml`; keep it green.
 
 ## Conventions
 
-- **Python 3.13** (Home Assistant requires >=3.13), ruff (line length 120) for lint + format.
+- **Python 3.14** (Home Assistant requires >=3.14 since 2026.3; the test harness pins
+  `homeassistant==2026.9.1`), ruff (line length 120) for lint + format.
 - **Conventional Commits** for commit and PR titles (`fix:`, `feat:`, `chore:`,
   `docs:`) — this drives changelog and version bumps.
 - Every behaviour change needs tests. Tests mock `pysolarcloud` (`SungrowAuth`,

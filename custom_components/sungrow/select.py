@@ -351,7 +351,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             return None
         try:
             return float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _command_payload(self, option: str, value: str) -> dict[str, str]:
@@ -447,7 +447,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         """Configured auto-revert timeout in seconds (0 = disabled)."""
         try:
             minutes = float(getattr(self.coordinator, "forced_dispatch_duration_minutes", 0) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0.0
         return minutes * 60
 
@@ -549,7 +549,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                     # Compare against the same encoded constant we write, so a change
                     # to the library's mode table can't desync write from verification.
                     return float(raw) == float(_EMS_MODE_SELF_CONSUMPTION)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
                 text = str(raw).strip().lower()
                 if not text or text in {"none", "null"}:

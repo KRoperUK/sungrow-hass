@@ -220,7 +220,7 @@ async def _async_has_battery(plants_service: Plants, plant_id: str, devices: lis
         if capacity is not None:
             try:
                 return float(capacity) > 0
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 break
     # No usable capacity figure — fall back to device presence.
     return _has_battery_device(devices)

@@ -134,7 +134,7 @@ def resolve_enum_value(point_id: str, value: Any) -> str | None:
         return None
     try:
         code = int(float(value))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     return mapping.get(code)
 

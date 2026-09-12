@@ -294,7 +294,7 @@ class SungrowModbusPowerFlowBinarySensor(CoordinatorEntity[SungrowPlantCoordinat
             return None
         try:
             return int(float(val))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return None
 
     @property

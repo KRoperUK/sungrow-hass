@@ -27,7 +27,7 @@ def normalize_energy_point(point: dict[str, Any]) -> dict[str, Any]:
         return {**point, "unit": "kWh"}
     try:
         num = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {**point, "unit": "kWh"}
     return {**point, "value": round(num / 1000.0, 3), "unit": "kWh"}
 
@@ -47,7 +47,7 @@ def normalize_power_point(point: dict[str, Any]) -> dict[str, Any]:
         return {**point, "unit": "W"}
     try:
         num = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {**point, "unit": "W"}
     return {**point, "value": round(num * 1000.0, 3), "unit": "W"}
 

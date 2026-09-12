@@ -235,7 +235,7 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
     cloud.add_to_hass(hass)
     registry = dr.async_get(hass)
-    registry.async_get_or_create(
+    cloud_plant = registry.async_get_or_create(
         config_entry_id=cloud.entry_id,
         identifiers={(DOMAIN, "plant-99")},
         name="Plant",
@@ -248,7 +248,7 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
         name="Inverter",
         serial_number="SNLINK",
         manufacturer="Sungrow",
-        via_device=(DOMAIN, "plant-99"),
+        via_device_id=cloud_plant.id,
     )
     assert find_related_cloud_plant_id(hass, "SNLINK") == "plant-99"
 
@@ -276,9 +276,9 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
 
     # No synthetic local plant device is created when nesting under a cloud plant.
     registry = dr.async_get(hass)
-    assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
+    assert registry.async_get_device_by_identifier((DOMAIN, "SNLINK"), entry.entry_id) is None
     # Local inverter nests under the real cloud plant.
-    inv = registry.async_get_device(identifiers={(DOMAIN, "SNLINK_inv")})
+    inv = registry.async_get_device_by_identifier((DOMAIN, "SNLINK_inv"), entry.entry_id)
     assert inv is not None
     assert inv.via_device_id is not None
     parent = registry.async_get(inv.via_device_id)
@@ -293,7 +293,7 @@ async def test_setup_modbus_only_cleans_stale_local_plant_when_cloud_present(has
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
     cloud.add_to_hass(hass)
     registry = dr.async_get(hass)
-    registry.async_get_or_create(
+    cloud_plant = registry.async_get_or_create(
         config_entry_id=cloud.entry_id,
         identifiers={(DOMAIN, "plant-99")},
         name="Plant",
@@ -306,7 +306,7 @@ async def test_setup_modbus_only_cleans_stale_local_plant_when_cloud_present(has
         name="Inverter",
         serial_number="SNLINK",
         manufacturer="Sungrow",
-        via_device=(DOMAIN, "plant-99"),
+        via_device_id=cloud_plant.id,
     )
 
     entry = MockConfigEntry(
@@ -373,8 +373,8 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
 
     # No cloud plant yet: no synthetic plant, and inverter is un-nested (no bogus via_device).
     registry = dr.async_get(hass)
-    assert registry.async_get_device(identifiers={(DOMAIN, "SNLINK")}) is None
-    inv = registry.async_get_device(identifiers={(DOMAIN, "SNLINK_inv")})
+    assert registry.async_get_device_by_identifier((DOMAIN, "SNLINK"), entry.entry_id) is None
+    inv = registry.async_get_device_by_identifier((DOMAIN, "SNLINK_inv"), entry.entry_id)
     assert inv is not None
     assert inv.via_device_id is None
     assert entry.runtime_data.coordinators[0].via_plant_id is None
@@ -382,7 +382,7 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
     # Now the cloud entry/device appears before HA finishes startup.
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
     cloud.add_to_hass(hass)
-    registry.async_get_or_create(
+    cloud_plant = registry.async_get_or_create(
         config_entry_id=cloud.entry_id,
         identifiers={(DOMAIN, "plant-99")},
         name="Plant",
@@ -395,7 +395,7 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
         name="Inverter",
         serial_number="SNLINK",
         manufacturer="Sungrow",
-        via_device=(DOMAIN, "plant-99"),
+        via_device_id=cloud_plant.id,
     )
 
     with patch.object(hass.config_entries, "async_reload", new=AsyncMock(return_value=True)) as mock_reload:
@@ -1069,9 +1069,9 @@ async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup
 
     registry = dr.async_get(hass)
     # Plant anchor device exists (the sole plant sensor re-homed onto the inverter)...
-    assert registry.async_get_device(identifiers={(DOMAIN, "12345")}) is not None
+    assert registry.async_get_device_by_identifier((DOMAIN, "12345"), entry.entry_id) is not None
     # ...and the physical inverter device exists too.
-    assert registry.async_get_device(identifiers={(DOMAIN, str(inv_uuid))}) is not None
+    assert registry.async_get_device_by_identifier((DOMAIN, str(inv_uuid)), entry.entry_id) is not None
 
 
 async def test_setup_cloud_user_entry(hass: HomeAssistant):

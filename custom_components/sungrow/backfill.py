@@ -607,7 +607,7 @@ def _coerce_value(raw: Any, unit: str | None, kind: Literal["energy", "power"]) 
         return None
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
