@@ -25,10 +25,12 @@ from pysolarcloud import AuthError, PySolarCloudException
 from custom_components.sungrow.backfill import (
     BackfillEngine,
     BackfillManager,
+    HistoryWindow,
     SeriesTarget,
     Throttle,
     async_resolve_series,
     build_series_target,
+    chunk_time_window,
     import_statistics,
     select_backfill_points,
 )
@@ -380,6 +382,16 @@ def _engine_coordinator(*, option_days: int | None = 1, plant_id: str = "123"):
     )
 
 
+# Chunk boundaries snap to the hour, so pin "now" to an exact hour to keep the chunk count
+# for a window deterministic (a mid-hour ``now`` yields one extra, short trailing chunk).
+_FIXED_NOW = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
+
+
+def _frozen_now():
+    """Patch the engine's clock so hour-snapped chunk boundaries are deterministic."""
+    return patch("custom_components.sungrow.backfill.dt_util.utcnow", return_value=_FIXED_NOW)
+
+
 def _make_engine(hass: HomeAssistant, coordinator):
     """Build a BackfillEngine with a non-sleeping throttle and a marker-recording store."""
     throttle = Throttle(min_interval=0.0)
@@ -415,6 +427,7 @@ async def test_engine_happy_path_ascending_chunks(hass: HomeAssistant, caplog):
     engine, _throttle, store = _make_engine(hass, coordinator)
 
     with (
+        _frozen_now(),
         patch("custom_components.sungrow.backfill.import_statistics"),
         caplog.at_level(logging.INFO, logger="custom_components.sungrow.backfill"),
     ):
@@ -454,6 +467,7 @@ async def test_engine_empty_ranges_are_skipped(hass: HomeAssistant, caplog):
     engine, _throttle, _store = _make_engine(hass, coordinator)
 
     with (
+        _frozen_now(),
         patch("custom_components.sungrow.backfill.import_statistics") as mock_import,
         caplog.at_level(logging.DEBUG, logger="custom_components.sungrow.backfill"),
     ):
@@ -482,7 +496,10 @@ async def test_engine_rate_limit_backs_off_and_resumes_from_cursor(hass: HomeAss
     coordinator.plants_service.async_get_historical_data.side_effect = history
     engine, throttle, _store = _make_engine(hass, coordinator)
 
-    with patch("custom_components.sungrow.backfill.import_statistics"):
+    with (
+        _frozen_now(),
+        patch("custom_components.sungrow.backfill.import_statistics"),
+    ):
         summary = await engine.async_run()
 
     # 8 chunks + one retried first chunk = 9 calls; the run still completes.
@@ -551,6 +568,146 @@ async def test_engine_auth_error_stops_and_defers(hass: HomeAssistant):
     marker = store.async_set_marker.await_args.args[1]
     assert marker["completed"] is False
     assert marker["partial"] is True
+
+
+def test_chunk_boundaries_snap_to_the_hour():
+    """Chunk boundaries land on exact hours so no hour is split across two chunks.
+
+    A split hour used to be aggregated twice — once per chunk, from only that chunk's
+    samples — and the import overwrote by ``(statistic_id, hour)``, leaving the hour's
+    mean/min/max computed from a fraction of its samples.
+    """
+    window = HistoryWindow(
+        start=datetime(2026, 3, 15, 10, 23, tzinfo=UTC),
+        end=datetime(2026, 3, 15, 17, 41, tzinfo=UTC),
+    )
+
+    chunks = chunk_time_window(window, BACKFILL_CHUNK_WINDOW)
+
+    # Contiguous, ascending, bounded, and covering exactly [start, end).
+    assert chunks[0][0] == window.start
+    assert chunks[-1][1] == window.end
+    assert all(a[1] == b[0] for a, b in zip(chunks, chunks[1:], strict=False))
+    assert all(end - start <= BACKFILL_CHUNK_WINDOW for start, end in chunks)
+
+    # Every interior boundary is an exact hour: the window's edge chunks absorb the
+    # partial hour, so the only mid-hour cuts are the window's own start and end.
+    for _, boundary in chunks[:-1]:
+        assert (boundary.minute, boundary.second, boundary.microsecond) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_engine_rate_limit_backoff_is_bounded(hass: HomeAssistant):
+    """A persistently rate-limited account stops the run instead of retrying without bound (5.2, 8.1)."""
+    coordinator = _engine_coordinator(option_days=1)
+    coordinator.plants_service.async_get_historical_data.side_effect = PySolarCloudException({"result_code": "E999"})
+    engine, throttle, store = _make_engine(hass, coordinator)
+
+    backoff_sleeps: list[float] = []
+
+    async def _yielding_sleep(delay: float) -> None:
+        # A real (yielding) sleep so that a regression to the unbounded loop still lets the
+        # event loop run the ``wait_for`` timeout instead of spinning without yielding.
+        backoff_sleeps.append(delay)
+        await asyncio.sleep(0)
+
+    throttle._sleep = _yielding_sleep  # type: ignore[method-assign]
+
+    with _frozen_now(), patch("custom_components.sungrow.backfill.import_statistics"):
+        # Pre-fix the loop never advanced, so the timeout turns a regression into a failure
+        # rather than a hung test run.
+        summary = await asyncio.wait_for(engine.async_run(), timeout=10)
+
+    # The same chunk is retried BACKFILL_MAX_RETRIES times, then the run gives up instead of
+    # grinding through the remaining chunks: pre-fix this looped for ever.
+    assert coordinator.plants_service.async_get_historical_data.await_count == BACKFILL_MAX_RETRIES + 1
+    assert len(backoff_sleeps) == BACKFILL_MAX_RETRIES
+    # Every chunk is reported unimported, so the partial run raises the Repair (8.1).
+    assert summary.failed_chunks == 8
+    assert summary.imported_hours == 0
+    assert summary.completed is False
+    marker = store.async_set_marker.await_args.args[1]
+    assert marker["partial"] is True
+
+
+@pytest.mark.asyncio
+async def test_engine_energy_sum_continues_from_recorded_sum(hass: HomeAssistant):
+    """A re-run continues the recorded cumulative sum instead of restarting at zero.
+
+    Restarting at zero rewrote already-imported hours with smaller sums, so the Energy
+    dashboard's total went backwards between overlapping runs.
+    """
+    coordinator = _engine_coordinator(option_days=1)
+
+    async def history(plant_id, start, end, *, measure_points, interval):
+        return {plant_id: [_row(c, start, 100.0) for c in measure_points]}
+
+    coordinator.plants_service.async_get_historical_data.side_effect = history
+    engine, _throttle, _store = _make_engine(hass, coordinator)
+
+    def prior_statistics(_hass, start, end, statistic_ids, period, units, types):  # noqa: ANN001
+        return {sid: [{"start": start, "sum": 4242.0}] for sid in statistic_ids}
+
+    hass.config.components.add("recorder")  # seeding only applies with a running recorder
+    with (
+        _frozen_now(),
+        patch(
+            "homeassistant.components.recorder.statistics.statistics_during_period",
+            side_effect=prior_statistics,
+        ),
+        patch("custom_components.sungrow.backfill.import_statistics") as mock_import,
+    ):
+        await engine.async_run()
+
+    energy_calls = [call for call in mock_import.call_args_list if call.args[1].kind == "energy"]
+    assert energy_calls
+    first_hour = energy_calls[0].args[2][0]
+    # All samples read 100.0, so with the seed the hour's sum is exactly the recorded sum.
+    assert first_hour["sum"] == 4242.0
+
+
+@pytest.mark.asyncio
+async def test_engine_energy_sum_starts_at_zero_without_recorder(hass: HomeAssistant):
+    """With no running recorder the first run legitimately starts its cumulative sum at zero."""
+    coordinator = _engine_coordinator(option_days=1)
+
+    async def history(plant_id, start, end, *, measure_points, interval):
+        return {plant_id: [_row(c, start, 100.0) for c in measure_points]}
+
+    coordinator.plants_service.async_get_historical_data.side_effect = history
+    engine, _throttle, _store = _make_engine(hass, coordinator)
+
+    with _frozen_now(), patch("custom_components.sungrow.backfill.import_statistics") as mock_import:
+        await engine.async_run()
+
+    energy_calls = [call for call in mock_import.call_args_list if call.args[1].kind == "energy"]
+    assert energy_calls[0].args[2][0]["sum"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_engine_seed_read_is_best_effort(hass: HomeAssistant):
+    """A recorder failure, or a row without a numeric sum, seeds nothing rather than crashing."""
+    coordinator = _engine_coordinator(option_days=1)
+    engine, _throttle, _store = _make_engine(hass, coordinator)
+    hass.config.components.add("recorder")
+
+    targets = [build_series_target(plant_id="123", point_code="total_yield", kind="energy", entity_id=None, unit="kWh")]
+    window = HistoryWindow(start=_FIXED_NOW - timedelta(days=1), end=_FIXED_NOW)
+
+    with patch(
+        "homeassistant.components.recorder.statistics.statistics_during_period",
+        side_effect=RuntimeError("recorder not ready"),
+    ):
+        assert await engine._seed_running_sums(targets, window) == {}
+
+    def no_sum(_hass, start, _end, statistic_ids, _period, _units, _types):  # noqa: ANN001
+        return {sid: [{"start": start}] for sid in statistic_ids}
+
+    with patch(
+        "homeassistant.components.recorder.statistics.statistics_during_period",
+        side_effect=no_sum,
+    ):
+        assert await engine._seed_running_sums(targets, window) == {}
 
 
 # ---------------------------------------------------------------------------

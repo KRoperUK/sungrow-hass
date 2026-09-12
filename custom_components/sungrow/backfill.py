@@ -216,11 +216,24 @@ def resolve_window(
 # ---------------------------------------------------------------------------
 
 
+def _floor_to_hour(ts: datetime) -> datetime:
+    """Floor *ts* to the start of its UTC hour."""
+    return dt_util.as_utc(ts).replace(minute=0, second=0, microsecond=0)
+
+
 def chunk_time_window(window: HistoryWindow, chunk: timedelta) -> list[tuple[datetime, datetime]]:
     """Split ``[start, end)`` into consecutive, non-overlapping sub-ranges.
 
     Each sub-range spans at most *chunk*; the ranges are returned in ascending
     chronological order and together cover exactly ``[start, end)``.
+
+    Boundaries snap **down to the hour**, so no hour is ever split across two chunks. The
+    window ends at an arbitrary ``now`` and starts an arbitrary number of days earlier, so
+    fixed steps from ``window.start`` used to land mid-hour. Since hourly aggregation runs
+    per chunk and the import overwrites by ``(statistic_id, hour)``, a split hour kept only
+    the *later* chunk's samples — its mean/min/max were computed from part of the hour.
+    Snapping keeps every hour within a single chunk. The leading (and final, in-progress)
+    partial hours at the window edges are each still contained in exactly one chunk.
 
     Requirements: 4.2, 4.3, 4.4.
     """
@@ -230,7 +243,10 @@ def chunk_time_window(window: HistoryWindow, chunk: timedelta) -> list[tuple[dat
     chunks: list[tuple[datetime, datetime]] = []
     cursor = window.start
     while cursor < window.end:
-        nxt = min(cursor + chunk, window.end)
+        aligned = _floor_to_hour(cursor + chunk)
+        # ``chunk`` shorter than the offset to the next hour can't be hour-aligned;
+        # fall back to a plain step so the loop always advances.
+        nxt = min(aligned if aligned > cursor else cursor + chunk, window.end)
         chunks.append((cursor, nxt))
         cursor = nxt
     return chunks
@@ -264,11 +280,6 @@ def normalize_row_value(value: Any, unit: str | None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Pure core: hourly aggregation
 # ---------------------------------------------------------------------------
-
-
-def _floor_to_hour(ts: datetime) -> datetime:
-    """Floor *ts* to the start of its UTC hour."""
-    return dt_util.as_utc(ts).replace(minute=0, second=0, microsecond=0)
 
 
 def build_hourly_statistics(
@@ -623,9 +634,11 @@ class BackfillEngine:
 
     Failures are classified: auth errors stop the run and defer to the integration's reauth
     handling; rate-limit errors trigger a throttle backoff and resume from the same
-    (chunk, batch) via a progress cursor; transient errors retry the same call up to
-    ``BACKFILL_MAX_RETRIES`` before the chunk is marked failed and the run continues. Empty
-    ranges are skipped. On completion the run persists a marker and returns a ``RunSummary``.
+    (chunk, batch) via a progress cursor, and a persistently rate-limited account stops the
+    run after a bounded number of consecutive backoffs; transient errors retry the same call
+    up to ``BACKFILL_MAX_RETRIES`` before the chunk is marked failed and the run continues.
+    Empty ranges are skipped. On completion the run persists a marker and returns a
+    ``RunSummary``.
 
     Requirements: 1.3, 4.3, 4.4, 5.2, 5.3, 5.6, 6.4, 8.1, 8.3, 8.4, 8.6.
     """
@@ -668,7 +681,9 @@ class BackfillEngine:
         )
 
         # Per-series carry-over so cumulative energy sums compose across ascending chunks.
-        running_sums: dict[str, float] = {}
+        # Seeded from the recorder so a re-run *continues* the existing cumulative sum
+        # rather than restarting at zero, which used to make the dashboard total regress.
+        running_sums: dict[str, float] = await self._seed_running_sums(targets, window)
         prev_values: dict[str, float | None] = {}
         imported: set[tuple[str, datetime]] = set()
         skipped_empty_ranges = 0
@@ -681,6 +696,7 @@ class BackfillEngine:
 
         cursor = 0
         transient_retries = 0
+        rate_limit_retries = 0
         try:
             while cursor < len(work):
                 (start, end), batch = work[cursor]
@@ -708,11 +724,31 @@ class BackfillEngine:
                         await self._persist_marker(plant_id, window, now, failed_chunks, completed=False)
                         raise
                     if error_class == "rate_limit":
+                        # Bounded: a persistently rate-limited (quota-exhausted) account used
+                        # to spin here forever — retrying the same call after an ever-longer
+                        # backoff, for every remaining chunk — so the run never finished and
+                        # no Repair was ever raised. Give up on the whole run after a bounded
+                        # number of *consecutive* backoffs (any success resets the count) and
+                        # report the outstanding chunks as failed so the Repair surfaces.
+                        rate_limit_retries += 1
+                        if rate_limit_retries > BACKFILL_MAX_RETRIES:
+                            unimported = len(work) - cursor
+                            failed_chunks += unimported
+                            _LOGGER.warning(
+                                "Backfill run for plant %s still rate-limited after %d backoffs; "
+                                "stopping with %d chunk(s) unimported",
+                                plant_id,
+                                BACKFILL_MAX_RETRIES,
+                                unimported,
+                            )
+                            break
                         _LOGGER.debug(
-                            "Backfill rate-limited on chunk %s-%s (plant %s); backing off",
+                            "Backfill rate-limited on chunk %s-%s (plant %s); backing off (%d/%d)",
                             start.isoformat(),
                             end.isoformat(),
                             plant_id,
+                            rate_limit_retries,
+                            BACKFILL_MAX_RETRIES,
                         )
                         await self._throttle.backoff()
                         continue  # resume the SAME (chunk, batch) without advancing
@@ -746,6 +782,7 @@ class BackfillEngine:
                 # Success: clear escalation and process the returned rows.
                 self._throttle.reset_backoff()
                 transient_retries = 0
+                rate_limit_retries = 0
 
                 rows = raw.get(plant_id) or raw.get(str(plant_id)) or []
                 if not rows:
@@ -792,6 +829,54 @@ class BackfillEngine:
             summary.completed,
         )
         return summary
+
+    async def _seed_running_sums(self, targets: list[SeriesTarget], window: HistoryWindow) -> dict[str, float]:
+        """Recorder ``sum`` immediately before *window.start*, per energy series.
+
+        Energy rows carry a lifetime cumulative ``sum``. Recomputing it from zero on every
+        run meant a later run wrote *smaller* sums for hours an earlier run had already
+        imported, and since the import overwrites by ``(statistic_id, hour)`` the Energy
+        dashboard's total could go backwards. Continuing from the recorded sum keeps the
+        series monotonic across overlapping runs.
+
+        Best-effort: with no running recorder, or on any recorder error, the seed is empty
+        and the sums start from zero — correct for a first run.
+
+        Requirements: 6.1, 6.2, 7.3.
+        """
+        energy = [t for t in targets if t.kind == "energy"]
+        if not energy or "recorder" not in self._hass.config.components:
+            return {}
+
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        statistic_ids = {t.statistic_id for t in energy}
+        seed_start = window.start - timedelta(hours=1)
+        try:
+            rows_by_id = await self._hass.async_add_executor_job(
+                lambda: statistics_during_period(
+                    self._hass,
+                    seed_start,
+                    window.start,
+                    statistic_ids,
+                    "hour",
+                    None,
+                    {"sum"},
+                )
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort; never fail the run
+            _LOGGER.debug("Backfill could not read prior statistics to seed sums: %s", err)
+            return {}
+
+        seeds: dict[str, float] = {}
+        for target in energy:
+            rows = rows_by_id.get(target.statistic_id) or []
+            if not rows:
+                continue
+            total = rows[-1].get("sum")
+            if isinstance(total, (int, float)):
+                seeds[target.statistic_id] = float(total)
+        return seeds
 
     def _aggregate_batch(
         self,
