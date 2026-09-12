@@ -84,7 +84,7 @@ sequenceDiagram
 ```
 
 1. Go to **Settings → Devices & Services → Add Integration** and choose **Sungrow iSolarCloud**.
-2. Select your **Gateway region** (Europe, International, China, or Australia — it must match the
+2. Select your **Gateway region** (Europe, International, China, Australia, or India — it must match the
    region your devices are physically connected to).
 3. Enter your **App Key**, **App Secret**, and **App ID** exactly as issued — with **no
    surrounding quotes or spaces**.

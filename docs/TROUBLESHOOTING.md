@@ -381,6 +381,29 @@ not a missing-data symptom.
 
 ---
 
+## "Unable to import component: cannot import name 'UserAuth' from 'pysolarcloud'"
+
+This is not an integration bug — it means the **generic `pysolarcloud` package from PyPI
+is installed alongside** the `sungrow-isolarcloud` fork this integration depends on. Both
+ship a module named `pysolarcloud`, so the import resolves to the wrong one (the generic
+package has no `UserAuth`, which the `cloud_user` transport needs).
+
+It typically appears after a Home Assistant update rebuilds the Python environment and
+re-resolves dependencies — most often if you also run another Sungrow integration that
+declares the generic `pysolarcloud`.
+
+To fix:
+
+1. Remove the conflicting integration (or its requirement) so only
+   `sungrow-isolarcloud` provides `pysolarcloud`, then restart Home Assistant.
+2. Re-install/update this integration via HACS so its pinned
+   `sungrow-isolarcloud==…` (see `manifest.json`) is reinstalled, then restart.
+
+If it persists, open an issue with your installed packages — `pip list | grep -i
+solarcloud` from the Home Assistant environment shows which distributions are present.
+
+---
+
 ## Still stuck?
 
 Open a [bug report](https://github.com/KRoperUK/sungrow-hass/issues/new/choose)

@@ -81,7 +81,7 @@ Or manually:
 
 | Field | Description |
 |---|---|
-| **Gateway** | Your region: **Europe**, **International**, **China**, or **Australia** |
+| **Gateway** | Your region: **Europe**, **International**, **China**, **Australia**, or **India** |
 | **App Key** | AppKey from the [iSolarCloud Developer Platform](https://developer-api.isolarcloud.com/#/application) |
 | **App Secret** | AppSecret from the Developer Platform |
 | **App ID** | App ID — found in the Developer Platform URL: `…/editApplication?id=1234` |
@@ -189,7 +189,7 @@ automation:
 
 ## Supported devices & regions
 
-- **Regions / gateways:** Europe, International, China, and Australia. Pick the one matching the account you registered your developer application under.
+- **Regions / gateways:** Europe, International, China, Australia, and India. Pick the one matching the account you registered your developer application under.
 - **Devices:** grid-tied inverters, hybrid inverters, and energy storage systems (ESS / batteries) that appear in your iSolarCloud account. Sensors are created for whatever data points iSolarCloud returns for your plant.
 - **Dispatch / control:** number and select entities are created for inverter / ESS devices that support External EMS control. **Battery** controls (charge/discharge command & power, SOC limits, forced charging, battery-first mode) only appear when the plant actually has a battery/ESS — on a **PV-only** plant they are hidden, since dispatching charge/discharge on a battery-less inverter can force it into External-EMS mode and suppress generation. Non-battery controls (export limiting, active-power limiting) remain available on PV-only plants.
 
