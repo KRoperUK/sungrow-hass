@@ -1515,6 +1515,49 @@ async def test_user_update_populates_device_data_from_device_list(hass: HomeAssi
     assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
 
 
+async def test_user_update_keeps_last_known_device_data_when_refresh_fails(hass: HomeAssistant, caplog):
+    """A failed per-poll device refresh must not wipe out the per-device sensors (#439).
+
+    The device list is the only per-device realtime source on this transport, so bailing
+    out on failure left ``device_data`` empty and silently removed every per-device entity
+    (a battery pack, a meter) with the only trace at debug level. The last known readings
+    must survive instead, and the failure must be visible once.
+    """
+    import logging
+
+    from pysolarcloud import PySolarCloudException
+
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+
+    # The refresh now fails on every poll: the readings must stay put, and the first
+    # failure must be reported at warning level (then debug, to avoid log spam).
+    client.async_get_devices = AsyncMock(side_effect=PySolarCloudException("quota exhausted"))
+    with caplog.at_level(logging.WARNING):
+        await coordinator._async_update_data()
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        await coordinator._async_update_data()
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+
+    # A successful poll re-arms the warning for the next outage.
+    client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    await coordinator._async_update_data()
+    assert coordinator._device_refresh_warned is False
+
+
 async def test_user_update_skips_device_fetch_when_option_off(hass: HomeAssistant):
     """Nothing else consumes device_data on this transport, so the call isn't spent."""
     client = MagicMock()

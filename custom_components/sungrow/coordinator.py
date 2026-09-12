@@ -201,6 +201,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enable_device_sensors: bool = bool(config_entry.options.get(CONF_ENABLE_DEVICE_SENSORS, False))
         # uuid -> { code: point } for per-device realtime (populated when enabled).
         self.device_data: dict[str, dict[str, Any]] = {}
+        # One-shot latch for a failed per-device refresh (#439). Worth telling the user
+        # about once, since it silently costs them every per-device sensor — but not on
+        # every poll.
+        self._device_refresh_warned = False
         # Device types that returned "unsupported" on a previous poll. Skipped on
         # subsequent polls to avoid wasting API quota on endpoints that don't exist
         # for this account/region (#288).
@@ -410,7 +414,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Gated on ``enable_device_sensors`` because nothing else on this transport
         consumes ``device_data``, so the extra call is only spent when it produces
-        entities. Failures are non-fatal: the plant-level points still update.
+        entities. A failure is non-fatal: the plant-level points still update and the last
+        known per-device readings stay published, so a battery or meter does not vanish
+        from the UI because one poll failed (#439).
         """
         if not self.enable_device_sensors:
             return
@@ -421,8 +427,25 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with asyncio.timeout(self._poll_timeout):
                 devices = await self._user_auth.async_get_devices(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
-            _LOGGER.debug("Could not refresh user-account devices for plant %s: %s", self.plant_id, err)
-            return
+            # Do not bail out. On this transport the device list *is* the per-device
+            # realtime source, so returning here left ``device_data`` empty and silently
+            # dropped every per-device entity — the only trace being a debug line nobody
+            # reads (#439). Fall through and map the device list we already hold instead:
+            # stale-but-present beats an entity that never appears, and it is the same
+            # list the entity builders already trust for names and model codes.
+            if self._device_refresh_warned:
+                _LOGGER.debug("Could not refresh user-account devices for plant %s: %s", self.plant_id, err)
+            else:
+                self._device_refresh_warned = True
+                _LOGGER.warning(
+                    "Could not refresh the device list for plant %s (%s); per-device sensors keep their last "
+                    "known values until the next successful poll",
+                    self.plant_name,
+                    err,
+                )
+            devices = None
+        else:
+            self._device_refresh_warned = False
         if devices:
             # Update the coordinator's own list in place: the entity builders read
             # ``coordinator.devices`` on every poll, so a battery that appears later
