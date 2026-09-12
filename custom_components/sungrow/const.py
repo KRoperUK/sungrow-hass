@@ -28,6 +28,12 @@ CONF_MODBUS_UNIT = "modbus_unit"
 # Opt-in: expose the raw Modbus register window on the daily_yield sensor as
 # ``daily_yield_diagnostic`` (large attribute; off by default to protect the recorder).
 CONF_MODBUS_DEBUG_DAILY_YIELD = "modbus_debug_daily_yield"
+# Marks a local entry whose ``modbus_host`` came from WiNet-S zeroconf discovery and may
+# therefore be refreshed when the dongle is re-discovered. Cleared whenever the user sets
+# the host explicitly (local wizard / reconfigure), so discovery can never override a
+# deliberately chosen interface — e.g. the inverter's dedicated RJ45 Modbus TCP port
+# (#402). Absent/False on manually configured entries.
+CONF_DISCOVERY_MANAGED_HOST = "discovery_managed_host"
 DEFAULT_MODBUS_PORT = 502
 DEFAULT_MODBUS_UNIT = 1
 # Entry-data marker for a fully local, cloud-free entry created from zeroconf

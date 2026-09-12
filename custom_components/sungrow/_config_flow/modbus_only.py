@@ -31,6 +31,7 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig
 
 from ..const import (
+    CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
     CONF_MODEL,
@@ -57,6 +58,15 @@ _LOGGER = logging.getLogger(__name__)
 # underscore`` rule for the ``selector.local_discovery.options.*`` block.
 _DISCOVERY_MANUAL = "manual_ip"
 _DISCOVERY_RESCAN = "rescan"
+
+
+def _pinned_host_data(host: str) -> dict[str, Any]:
+    """Entry-data fields that pin the host to a user-chosen value.
+
+    Clearing ``CONF_DISCOVERY_MANAGED_HOST`` marks the host as deliberately chosen, so a
+    later WiNet-S discovery must not overwrite it with the dongle's address (#402).
+    """
+    return {CONF_MODBUS_HOST: host, CONF_DISCOVERY_MANAGED_HOST: False}
 
 
 class ModbusOnlyMixin(_SungrowFlowBase):
@@ -208,7 +218,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                     errors={"base": "serial_mismatch"},
                 )
             await self.async_set_unique_id(f"modbus_{serial}")
-            self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+            self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
             return self.async_create_entry(
                 title=f"Sungrow {model} (local)",
                 data={
@@ -250,7 +260,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
 
             if await async_test_modbus_host(host):
                 await self.async_set_unique_id(f"modbus_{serial}")
-                self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+                self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
                 return self.async_create_entry(
                     title=f"Sungrow {model} (local)",
                     data={
@@ -283,7 +293,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             return self.async_abort(reason="not_sungrow_device")
         model = str(user_input.get(CONF_MODEL) or "Inverter")
         await self.async_set_unique_id(f"modbus_{serial}")
-        self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+        self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
         options: dict[str, Any] = {
             CONF_SCAN_INTERVAL: int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_MODBUS_SCAN_INTERVAL)),
         }
@@ -310,10 +320,10 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         if user_input is not None:
             # Blank means "leave unchanged" so reconfigure can never accidentally clear
             # the host (which would take the entry offline).
-            host = (user_input.get(CONF_MODBUS_HOST) or "").strip() or entry.data.get(CONF_MODBUS_HOST)
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip() or str(entry.data.get(CONF_MODBUS_HOST) or "")
             return self.async_update_reload_and_abort(
                 entry,
-                data={**entry.data, CONF_MODBUS_HOST: host},
+                data={**entry.data, **_pinned_host_data(host)},
                 reason="reconfigure_successful",
             )
         return self.async_show_form(

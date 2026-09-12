@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow.const import (
+    CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_HOST,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
@@ -87,3 +88,42 @@ async def test_reconfigure_modbus_only_shows_host_form(hass: HomeAssistant):
     assert result["step_id"] == "reconfigure_modbus"
     keys = {str(m.schema) for m in result["data_schema"].schema}
     assert keys == {CONF_MODBUS_HOST}
+
+
+async def test_reconfigure_modbus_pins_host_and_clears_discovery_managed(hass: HomeAssistant):
+    """Setting the host via reconfigure marks it as user-chosen (#402).
+
+    Once the host is pinned, a later WiNet-S discovery must not overwrite it with the
+    dongle's address.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+            CONF_DISCOVERY_MANAGED_HOST: True,  # created by discovery
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    assert result["step_id"] == "reconfigure_modbus"
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_MODBUS_HOST: "10.0.0.50"}
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_MODBUS_HOST] == "10.0.0.50"
+    # Pinned: discovery will no longer follow the WiNet-S address for this entry.
+    assert entry.data[CONF_DISCOVERY_MANAGED_HOST] is False

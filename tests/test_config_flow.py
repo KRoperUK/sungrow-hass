@@ -23,6 +23,7 @@ from custom_components.sungrow.const import (
     CONF_APP_ID,
     CONF_APP_KEY,
     CONF_APP_SECRET,
+    CONF_DISCOVERY_MANAGED_HOST,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
@@ -1007,6 +1008,8 @@ async def test_zeroconf_discovery_creates_modbus_entry(hass: HomeAssistant):
         CONF_SERIAL: "A2340512345",
         CONF_MODEL: "SG3.6RS",
         CONF_MODBUS_HOST: "192.168.1.93",
+        # The host came from discovery, so a later re-discovery may follow the dongle.
+        CONF_DISCOVERY_MANAGED_HOST: True,
     }
     assert result2["options"] == {CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL}
     assert result2["result"].unique_id == "modbus_A2340512345"
@@ -1023,8 +1026,8 @@ async def test_zeroconf_aborts_non_sungrow_device(hass: HomeAssistant):
     assert result["reason"] == "not_sungrow_device"
 
 
-async def test_zeroconf_aborts_when_already_configured_and_updates_host(hass: HomeAssistant):
-    """A re-discovered WiNet-S aborts as already configured and refreshes its stored host."""
+async def test_zeroconf_aborts_when_already_configured_and_updates_discovered_host(hass: HomeAssistant):
+    """A re-discovered WiNet-S refreshes the host of a discovery-managed entry."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -1032,6 +1035,7 @@ async def test_zeroconf_aborts_when_already_configured_and_updates_host(hass: Ho
             CONF_SERIAL: "A2340512345",
             CONF_MODEL: "SG3.6RS",
             CONF_MODBUS_HOST: "192.168.1.50",  # old IP
+            CONF_DISCOVERY_MANAGED_HOST: True,
         },
         unique_id="modbus_A2340512345",
     )
@@ -1044,6 +1048,33 @@ async def test_zeroconf_aborts_when_already_configured_and_updates_host(hass: Ho
     assert result["reason"] == "already_configured"
     # The WiNet-S moved to a new DHCP lease; the stored host follows it.
     assert entry.data[CONF_MODBUS_HOST] == "192.168.1.99"
+
+
+async def test_zeroconf_aborts_when_already_configured_and_keeps_manual_host(hass: HomeAssistant):
+    """A manually chosen host is never overwritten by WiNet-S discovery (#402).
+
+    The inverter's dedicated RJ45 Modbus TCP port and the WiNet-S are the same serial,
+    so the discovery matches this entry — but the host was chosen deliberately and must
+    survive.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "A2340512345",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "192.168.1.50",  # dedicated RJ45 Modbus port
+        },
+        unique_id="modbus_A2340512345",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery(host="192.168.1.99")
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data[CONF_MODBUS_HOST] == "192.168.1.50"
 
 
 def _add_cloud_entry_with_inverter(
