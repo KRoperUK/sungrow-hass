@@ -391,7 +391,28 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         await super().async_added_to_hass()
         last = await self.async_get_last_number_data()
         if last is not None and last.native_value is not None:
-            self._attr_native_value = last.native_value
+            self._attr_native_value = self._clamp_to_bounds(last.native_value)
+
+    def _clamp_to_bounds(self, value: float) -> float:
+        """Clamp a restored value to the current slider bounds.
+
+        Those bounds are not constant: the datasheet catalog added battery-side limits
+        (#332) and the ceiling can now also be resolved from a sibling device (#422), so a
+        value restored from an earlier build can sit outside today's range. Home Assistant
+        validates *service calls* against min/max, not restored state, so without this the
+        UI would show an impossible setpoint — and any automation reading it would
+        inherit the value (#425).
+        """
+        clamped = min(max(value, self._attr_native_min_value), self._attr_native_max_value)
+        if clamped != value:
+            _LOGGER.debug(
+                "Clamping restored %s for %s from %s to %s; the bounds changed since it was set",
+                self.param,
+                self.device_uuid,
+                value,
+                clamped,
+            )
+        return clamped
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the dispatch parameter on the inverter."""
