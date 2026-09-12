@@ -433,6 +433,7 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()  # collected, not added to a platform
 
     await power.async_set_native_value(2500)
 
@@ -460,6 +461,7 @@ async def test_number_power_does_not_arm_heartbeat(hass: HomeAssistant):
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     power = next(e for e in added if e.param == "charge_discharge_power")
     power.hass = hass
+    power.async_write_ha_state = MagicMock()  # collected, not added to a platform
 
     await power.async_set_native_value(1500)
     assert data.heartbeats == {}  # non-zero power must not start a heartbeat
@@ -877,6 +879,8 @@ async def test_param_write_encodings(hass: HomeAssistant):
     added = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
     by_param = {e.param: e for e in added}
+    for entity in added:  # collected, not added to a platform
+        entity.async_write_ha_state = MagicMock()
 
     # Power is sent verbatim in watts (not kW).
     await by_param["charge_discharge_power"].async_set_native_value(2500)
@@ -1128,6 +1132,33 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
+async def test_number_writes_push_state_immediately(hass: HomeAssistant):
+    """Both dispatch setters publish entity state at once — neither is polled back.
+
+    Dispatch parameters are write-only (``getDevPropertyPointValue`` is permission-gated)
+    and the forced-dispatch duration is a purely local value, so without an explicit
+    state write the UI keeps showing the previous value until the next coordinator poll —
+    notably for the duration number, which is rebuilt on every poll.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    by_param = {e.param: e for e in added}
+
+    power = by_param["charge_discharge_power"]
+    with patch.object(power, "async_write_ha_state") as power_state:
+        await power.async_set_native_value(2500)
+    power_state.assert_called_once_with()
+
+    duration = by_param["forced_dispatch_duration"]
+    with patch.object(duration, "async_write_ha_state") as duration_state:
+        await duration.async_set_native_value(30)
+    duration_state.assert_called_once_with()
+
+
 async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
     """The duration number stores its value on the coordinator, writing nothing to the API."""
     from custom_components.sungrow.number import SungrowForcedDispatchDurationNumber
@@ -1136,6 +1167,7 @@ async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
     entry.add_to_hass(hass)
     data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
     number = SungrowForcedDispatchDurationNumber(data.coordinators[0], {"uuid": "ess-1"})
+    number.async_write_ha_state = MagicMock()  # not added to a platform
 
     await number.async_set_native_value(30)
 
@@ -1188,6 +1220,7 @@ async def test_forced_dispatch_duration_survives_poll_rebuild(hass: HomeAssistan
     coordinator = data.coordinators[0]
 
     number = SungrowForcedDispatchDurationNumber(coordinator, {"uuid": "ess-1"})
+    number.async_write_ha_state = MagicMock()  # not added to a platform
     await number.async_set_native_value(120)
     assert coordinator.forced_dispatch_duration_minutes == 120
 
