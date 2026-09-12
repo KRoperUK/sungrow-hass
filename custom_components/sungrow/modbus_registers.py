@@ -1017,7 +1017,31 @@ DAILY_YIELD_DIAG_SCALES: tuple[tuple[float, str], ...] = (
 )
 
 
-def daily_yield_diagnostic_dump(registers: list[int], block_start: int = DAILY_YIELD_DIAG_START) -> dict[str, Any]:
+def total_yield_point_for_family(family: str | None) -> ModbusPoint | None:
+    """Return a family's ``total_yield`` point, or ``None`` when it has none.
+
+    Used to annotate the lifetime-total diagnostic with the mapping actually in force, so
+    a report does not need the family and the map cross-referenced by hand (#435).
+    """
+    for point in REGISTER_MAPS.get(family or "", ()):
+        if point.code == "total_yield":
+            return point
+    return None
+
+
+# Candidate wire address of the 32-bit lifetime "Total power yields" (doc 5004-5005 = wire
+# 5003-5004 on SG-RS; 13002 on SH). #400 could not be settled from a report because the raw
+# value, the daily register beside it and the app's own figure are all needed — and only the
+# reporter can see the last one. Decoding the lifetime total under every candidate scale here
+# means one diagnostics download answers it (#435).
+TOTAL_YIELD_DIAG_ADDRESS = 5003
+
+
+def daily_yield_diagnostic_dump(
+    registers: list[int],
+    block_start: int = DAILY_YIELD_DIAG_START,
+    total_point: ModbusPoint | None = None,
+) -> dict[str, Any]:
     """Build a structured diagnostic for #223 from a raw register block.
 
     ``registers`` is the raw 16-bit values read starting at ``block_start``
@@ -1026,6 +1050,11 @@ def daily_yield_diagnostic_dump(registers: list[int], block_start: int = DAILY_Y
     accepted and only the addresses present are reported; this lets the function be
     called with whatever the client has already read so the dump is free on a
     full-block read.
+
+    ``total_point`` is the reading family's ``total_yield`` point when known, which adds a
+    ``total`` section decoding the 32-bit lifetime total under every candidate scale
+    alongside the mapping in force (#435). Omit it and the section falls back to the SG-RS
+    wire address with no mapping annotation.
 
     The returned dict is the value surfaced on the daily_yield sensor's
     ``daily_yield_diagnostic`` attribute, and is deliberately compact + JSON-safe so
@@ -1050,10 +1079,37 @@ def daily_yield_diagnostic_dump(registers: list[int], block_start: int = DAILY_Y
                     "value": round(raw_value * scale, 3),
                 }
             )
+    total: dict[str, Any] = {}
+    total_address = total_point.address if total_point is not None else TOTAL_YIELD_DIAG_ADDRESS
+    total_offset = total_address - block_start
+    if total_offset >= 0 and total_offset + 1 < len(registers):
+        low_word = int(registers[total_offset])
+        high_word = int(registers[total_offset + 1])
+        raw_total = low_word | (high_word << 16)  # 32-bit points are low word first
+        total = {
+            "address": total_address,
+            "raw_words": [low_word, high_word],
+            "raw": raw_total,
+            "candidates": [
+                {"scale": scale, "unit": unit, "value": round(raw_total * scale, 3)}
+                for scale, unit in DAILY_YIELD_DIAG_SCALES
+            ],
+        }
+        if total_point is not None:
+            total["current_mapping"] = {
+                "address": total_point.address,
+                "scale": total_point.scale,
+                "unit": total_point.unit,
+                "value": round(raw_total * total_point.scale, 3),
+            }
     return {
         "start": block_start,
         "raw": raw,
         "candidates": candidates,
+        # The lifetime total, decoded under every candidate scale. #400 asked whether SG-RS
+        # wire 5003 is x1 or x0.1 kWh; with the app's own figure alongside these two numbers
+        # the question answers itself (#435).
+        "total": total,
         # The register this diagnostic reads. Note: on SG-RS families the integration
         # derives ``daily_yield`` from ``total_yield − start-of-day baseline`` (wire 5002
         # never resets at midnight — see daily_yield.py), so the sensor value will not

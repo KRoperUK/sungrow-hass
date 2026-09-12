@@ -30,6 +30,7 @@ from .modbus_registers import (
     decode_registers,
     family_for_device_type_code,
     suppress_absent_meter_points,
+    total_yield_point_for_family,
 )
 from .model_capabilities import ModelFamily, resolve_model_family
 from .model_specs import spec_for
@@ -188,7 +189,13 @@ class SungrowModbusClient:
         """
         async with self._lock:
             registers = await self._read_input(DAILY_YIELD_DIAG_START, DAILY_YIELD_DIAG_COUNT)
-        return daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+        return daily_yield_diagnostic_dump(
+            registers,
+            DAILY_YIELD_DIAG_START,
+            # Annotate the lifetime total with the mapping this family actually uses, so a
+            # report answers the scale question (#400) without cross-referencing the map.
+            total_point=total_yield_point_for_family(self.model),
+        )
 
     async def _async_ensure_family(self) -> None:
         """Detect the inverter family once from register 5000 and update ``model``."""
