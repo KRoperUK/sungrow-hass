@@ -1,6 +1,6 @@
 """Unit tests for reconfigure flow adaptation per transport mode (#216)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
@@ -9,13 +9,18 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow.const import (
     CONF_DISCOVERY_MANAGED_HOST,
+    CONF_GATEWAY,
     CONF_MODBUS_HOST,
     CONF_MODEL,
+    CONF_PLANT_IDS,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    CONF_USER_ACCOUNT,
+    CONF_USER_PASSWORD,
     DOMAIN,
     TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
 
@@ -127,3 +132,82 @@ async def test_reconfigure_modbus_pins_host_and_clears_discovery_managed(hass: H
     assert entry.data[CONF_MODBUS_HOST] == "10.0.0.50"
     # Pinned: discovery will no longer follow the WiNet-S address for this entry.
     assert entry.data[CONF_DISCOVERY_MANAGED_HOST] is False
+
+
+# ---------------------------------------------------------------------------
+# cloud_user reconfigure: account credentials, not the OAuth form
+# ---------------------------------------------------------------------------
+
+
+def _cloud_user_entry(hass: HomeAssistant, *, account: str = "me@example.com", plant_ids=None):
+    """A cloud_user entry, optionally scoped to a plant selection."""
+    data = {
+        CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+        CONF_USER_ACCOUNT: account,
+        CONF_USER_PASSWORD: "pw",
+        CONF_GATEWAY: "Europe",
+    }
+    if plant_ids is not None:
+        data[CONF_PLANT_IDS] = plant_ids
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=f"user_{account.lower()}",
+        title=f"Sungrow ({account})",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_reconfigure_cloud_user_shows_account_form(hass: HomeAssistant):
+    """A cloud_user entry reconfigures its login, not OAuth app credentials.
+
+    Before this, only modbus_only was special-cased, so a user-account entry fell into
+    the OAuth form. Those entries have no redirect URI, so submitting it always failed
+    with ``invalid_redirect_uri`` — reconfigure could never be completed.
+    """
+    entry = _cloud_user_entry(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "cloud_user"
+    keys = {str(m.schema) for m in result["data_schema"].schema}
+    assert keys == {CONF_USER_ACCOUNT, CONF_USER_PASSWORD, CONF_GATEWAY}
+
+
+async def test_reconfigure_cloud_user_updates_entry_and_keeps_selection(hass: HomeAssistant):
+    """Completing the cloud_user reconfigure updates the entry in place."""
+    entry = _cloud_user_entry(hass, plant_ids=["111"])
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 111, "ps_name": "Home"}])
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+
+    with (
+        patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client),
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "rotated-pw",
+                CONF_GATEWAY: "Australia",
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_USER_PASSWORD] == "rotated-pw"
+    assert entry.data[CONF_GATEWAY] == "Australia"
+    # The plant selection survives a reconfigure.
+    assert entry.data[CONF_PLANT_IDS] == ["111"]

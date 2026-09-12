@@ -81,6 +81,17 @@ class PlantSelectionMixin(_SungrowFlowBase):
                 return await self._dispatch_plant_selection_finalise(merged)
 
         all_ids = [str(p["ps_id"]) for p in plant_list]
+        # Default to the entry's existing selection when re-authenticating/reconfiguring,
+        # so submitting the form unchanged keeps the current scope instead of silently
+        # re-including plants the user had excluded. Plants that have since disappeared
+        # from the account are dropped from the default rather than carried as dead ids.
+        default_ids = all_ids
+        reauth_entry = self._reauth_entry
+        if reauth_entry is not None:
+            current = {str(pid) for pid in (reauth_entry.data.get(CONF_PLANT_IDS) or [])}
+            kept = [pid for pid in all_ids if pid in current]
+            if kept:
+                default_ids = kept
         options = [
             SelectOptionDict(value=str(p["ps_id"]), label=str(p.get("ps_name") or f"Plant {p['ps_id']}"))
             for p in plant_list
@@ -89,7 +100,7 @@ class PlantSelectionMixin(_SungrowFlowBase):
             step_id="plant_selection",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_PLANT_IDS, default=all_ids): SelectSelector(
+                    vol.Required(CONF_PLANT_IDS, default=default_ids): SelectSelector(
                         SelectSelectorConfig(
                             options=options,
                             multiple=True,

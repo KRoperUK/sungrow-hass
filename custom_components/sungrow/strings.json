@@ -138,7 +138,7 @@
       "missing_app_id": "This entry is missing the App ID. Use Reconfigure to supply it.",
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
-      "wrong_account": "The authorized account does not match this integration's App ID. Use the original developer application."
+      "wrong_account": "The account you signed in with does not match this entry's configured account. Use the original account, or remove and re-add the integration."
     }
   },
   "options": {
