@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -257,3 +258,75 @@ async def test_scheduler_skips_selects_owned_by_other_entries(hass: HomeAssistan
 
     other_select.async_select_option.assert_not_awaited()
     scheduler.async_stop()
+
+
+async def test_scheduler_restores_enclosing_mode_when_inner_window_ends(hass: HomeAssistant):
+    """When a nested window ends, the enclosing window's mode must be re-applied.
+
+    Overlap policy is "latest start wins", so an inner window overrides the enclosing
+    one only for its own span. Once the inner window ends, the outer window's mode has
+    to be put back — otherwise the inverter keeps the inner mode until the outer window
+    also ends (potentially hours of the wrong actuation).
+    """
+    entry = _entry_with_windows(
+        hass,
+        [
+            {"start": "01:00", "end": "06:00", "mode": "force_charge"},
+            {"start": "03:00", "end": "04:00", "mode": "force_discharge"},
+        ],
+    )
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    outer = next(w for w in scheduler.windows if w.start == time(1, 0))
+    inner = next(w for w in scheduler.windows if w.start == time(3, 0))
+
+    fake_select = MagicMock()
+    fake_select.async_select_option = AsyncMock()
+    fake_select.hass = hass
+    fake_select.platform = None  # skip async_write_ha_state
+    fake_select.registry_entry = None
+    hass.data.setdefault(DOMAIN, {})["battery_mode_selects"] = {"select.plant_battery": fake_select}
+
+    with patch("homeassistant.util.dt.now") as fake_now:
+        # Inner window just ended; the enclosing 01:00-06:00 window is still active.
+        fake_now.return_value.time.return_value = time(4, 30)
+        await scheduler._on_boundary_impl(inner, entering=False)
+
+    fake_select.async_select_option.assert_awaited_with("Force charge")
+    assert scheduler._current_window is outer
+
+
+async def test_scheduler_stop_cancels_inflight_boundary_task(hass: HomeAssistant):
+    """``async_stop`` cancels a boundary task that is still running.
+
+    An entry reload tears the scheduler down while a mode change may be mid-write; the
+    task must not keep actuating against the torn-down entry.
+    """
+    import asyncio
+
+    entry = _entry_with_windows(hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}])
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+
+    started = asyncio.Event()
+
+    async def _slow_boundary(window, *, entering):
+        started.set()
+        await asyncio.sleep(3600)
+
+    with (
+        patch("custom_components.sungrow.schedule.async_track_time_change") as tracker,
+        patch.object(scheduler, "_on_boundary_impl", side_effect=_slow_boundary),
+    ):
+        tracker.return_value = MagicMock()
+        await scheduler.async_start()
+        # Fire one boundary callback synchronously (as async_track_time_change would).
+        scheduler._make_transition_callback(scheduler.windows[0], entering=True)(None)
+
+    await started.wait()
+    assert scheduler._tasks  # the task is tracked
+
+    task = next(iter(scheduler._tasks))
+    scheduler.async_stop()
+
+    assert not scheduler._tasks
+    with contextlib.suppress(asyncio.CancelledError):
+        await task

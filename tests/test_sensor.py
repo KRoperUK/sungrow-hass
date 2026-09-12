@@ -132,12 +132,15 @@ def test_battery_soc_empty_string_unit_gets_percent():
     [
         ("0.95", 95.0),  # SBH250-V11 plant returns a 0–1 fraction (#314)
         ("0.5", 50.0),
-        ("1.0", 100.0),  # exactly 1.0 stays in the fraction bracket -> full battery
+        ("0.01", 1.0),  # a 1 % fraction still rescales to 1 %
+        # Exactly 1.0 is ambiguous: a genuine 1 % on a 0–100 plant must not be blown
+        # up to 100 %, so the fraction bracket is exclusive at the top (#409).
+        ("1.0", 1.0),
         ("0", 0.0),  # empty battery, no scaling either way
     ],
 )
 def test_battery_soc_fraction_scaled_to_percent(raw, expected):
-    """SOC reported as a 0–1 fraction is rescaled to a real percentage (#314).
+    """SOC reported as a 0–1 fraction is rescaled to a real percentage (#314/#409).
 
     Sungrow's iSolarCloud returns ``battery_level_soc`` (83252) as a 0–1 fraction on
     some plants (SBH250-V11) instead of the usual 0–100. Because we already force the

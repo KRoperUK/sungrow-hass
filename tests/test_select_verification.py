@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
+from custom_components.sungrow.modbus_control import ModbusControlError
 from custom_components.sungrow.select import (
     BATTERY_MODE_FORCE_CHARGE,
     BATTERY_MODE_FORCE_DISCHARGE,
@@ -243,3 +244,45 @@ async def test_do_revert_handles_write_failure_gracefully(hass: HomeAssistant):
 
     # Still sets the state to safe mode.
     assert select._attr_current_option == BATTERY_MODE_SELF_CONSUMPTION
+
+
+async def test_do_revert_handles_modbus_error_gracefully(hass: HomeAssistant):
+    """A local Modbus write error during revert must not abort the safety cleanup.
+
+    On a ``modbus_only`` entry the control raises ``ModbusControlError`` (not
+    ``PySolarCloudException``). Catching only the cloud error let the exception escape
+    a fire-and-forget task, so the heartbeat was never stopped and the entity stayed in
+    the forced mode — the exact curtailment footgun the auto-revert exists to prevent.
+    """
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select.control.async_update_parameters = AsyncMock(side_effect=ModbusControlError("write denied"))
+
+    with (
+        patch("custom_components.sungrow.select.async_stop_heartbeat", new_callable=AsyncMock) as stop_mock,
+        patch.object(select, "async_write_ha_state"),
+    ):
+        await select._do_revert()
+
+    stop_mock.assert_awaited_once()
+    assert select._attr_current_option == BATTERY_MODE_SELF_CONSUMPTION
+
+
+async def test_verify_actuation_handles_modbus_error_on_retry(hass: HomeAssistant):
+    """A Modbus error on the retry write is caught so the verdict still runs.
+
+    Without the ``ModbusControlError`` catch the exception escaped the task and the
+    post-retry read/Repair decision was never reached.
+    """
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select.control.async_update_parameters = AsyncMock(side_effect=ModbusControlError("write denied"))
+    # Both read-backs say Self-consumption → the inverter never actuated.
+    select.control.async_read_parameters = AsyncMock(
+        return_value=[{"id": "10003", "code": "energy_management_mode", "value": 0}]
+    )
+
+    with patch.object(select, "_raise_not_actuated_issue") as raise_mock:
+        await select._verify_actuation()
+
+    raise_mock.assert_called_once()

@@ -1067,6 +1067,8 @@ async def test_forced_dispatch_duration_number_is_local(hass: HomeAssistant):
 
 async def test_forced_dispatch_duration_defaults_to_safe_bound(hass: HomeAssistant):
     """New installs default to a non-zero duration so forced commands auto-revert (#255)."""
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
     from custom_components.sungrow.number import (
         DEFAULT_FORCED_DISPATCH_DURATION,
         SungrowForcedDispatchDurationNumber,
@@ -1079,7 +1081,41 @@ async def test_forced_dispatch_duration_defaults_to_safe_bound(hass: HomeAssista
 
     assert DEFAULT_FORCED_DISPATCH_DURATION > 0
     assert number.native_value == DEFAULT_FORCED_DISPATCH_DURATION
+
+    # The default is published to the coordinator when the entity is *added*, not from
+    # __init__ — the adder re-constructs every entity on each poll (see the regression
+    # test below), so writing in __init__ would reset a user setting every poll.
+    number.hass = hass
+    number.async_get_last_state = AsyncMock(return_value=None)
+    with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
+        await number.async_added_to_hass()
+
     assert data.coordinators[0].forced_dispatch_duration_minutes == DEFAULT_FORCED_DISPATCH_DURATION
+
+
+async def test_forced_dispatch_duration_survives_poll_rebuild(hass: HomeAssistant):
+    """A user-set duration must survive the entity rebuild the adder does every poll.
+
+    ``create_entity_adder`` re-runs the platform's builder on each coordinator update,
+    constructing (and then discarding as a duplicate) every number. Constructing the
+    duration number must not write the default back onto the coordinator, or the value
+    silently snaps back to the default on the next poll.
+    """
+    from custom_components.sungrow.number import SungrowForcedDispatchDurationNumber
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    coordinator = data.coordinators[0]
+
+    number = SungrowForcedDispatchDurationNumber(coordinator, {"uuid": "ess-1"})
+    await number.async_set_native_value(120)
+    assert coordinator.forced_dispatch_duration_minutes == 120
+
+    # Simulate the next poll's rebuild of the number platform.
+    SungrowForcedDispatchDurationNumber(coordinator, {"uuid": "ess-1"})
+
+    assert coordinator.forced_dispatch_duration_minutes == 120
 
 
 async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
