@@ -15,6 +15,11 @@ points — for example the MPPT voltage/current range differs between string inv
 hybrids. A model the resolver doesn't recognise still works: it falls back to the generic,
 device-type behaviour, so nothing is lost — you just won't get the family-specific tuning.
 
+For the per-model detail behind these families — phases, MPPT/string counts, AC nameplate,
+battery charge/discharge limits, and which rows are still awaiting datasheet confirmation —
+see the [supported models matrix](SUPPORTED_MODELS.md), which is generated from the
+integration's own catalog.
+
 ## Families
 
 | Family | Example models | Type | Battery |
