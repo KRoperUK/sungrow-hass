@@ -223,11 +223,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.forced_dispatch_duration_minutes: float = 0
         # Local Modbus client is only built for Modbus-only entries (cloud-free). Cloud
         # entries never attach Modbus — hybrid merge was removed in favour of a separate
-        # local config entry with a soft device link (serial / via_device).
+        # local config entry with a soft device link (serial / via_device_id).
         self._modbus_client = self._build_modbus_client(config_entry)
         # Optional plant-device parent for device-registry nesting when a cloud plant
         # already owns this inverter serial (set by Modbus-only setup).
-        self.via_plant_id: str | None = None
+        self.via_device_id: str | None = None
         # WiNet-S web UI URL for local inverter DeviceInfo (Modbus-only).
         self.local_configuration_url: str | None = None
         # Raw-wire diagnostic for #223 (daily_yield register window). Populated on each

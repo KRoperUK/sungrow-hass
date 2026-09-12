@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pysolarcloud
@@ -227,10 +228,10 @@ async def test_setup_modbus_only_closes_client_when_first_refresh_fails(hass: Ho
 
 
 async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
-    """Local inverter via_plant_id points at the matching cloud plant (soft link)."""
+    """Local inverter via_device_id points at the matching cloud plant device (soft link)."""
     from homeassistant.helpers import device_registry as dr
 
-    from custom_components.sungrow import find_related_cloud_plant_id
+    from custom_components.sungrow import find_related_cloud_plant_device_id
 
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
     cloud.add_to_hass(hass)
@@ -250,7 +251,7 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
         manufacturer="Sungrow",
         via_device_id=cloud_plant.id,
     )
-    assert find_related_cloud_plant_id(hass, "SNLINK") == "plant-99"
+    assert find_related_cloud_plant_device_id(hass, "SNLINK") == cloud_plant.id
 
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -272,7 +273,7 @@ async def test_setup_modbus_only_nests_under_cloud_plant(hass: HomeAssistant):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert entry.runtime_data.coordinators[0].via_plant_id == "plant-99"
+    assert entry.runtime_data.coordinators[0].via_device_id == cloud_plant.id
 
     # No synthetic local plant device is created when nesting under a cloud plant.
     registry = dr.async_get(hass)
@@ -377,7 +378,7 @@ async def test_setup_modbus_only_reloads_when_cloud_plant_appears_after_startup(
     inv = registry.async_get_device_by_identifier((DOMAIN, "SNLINK_inv"), entry.entry_id)
     assert inv is not None
     assert inv.via_device_id is None
-    assert entry.runtime_data.coordinators[0].via_plant_id is None
+    assert entry.runtime_data.coordinators[0].via_device_id is None
 
     # Now the cloud entry/device appears before HA finishes startup.
     cloud = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="cloud_app")
@@ -1069,9 +1070,37 @@ async def test_plant_device_registered_as_anchor(hass: HomeAssistant, mock_setup
 
     registry = dr.async_get(hass)
     # Plant anchor device exists (the sole plant sensor re-homed onto the inverter)...
-    assert registry.async_get_device_by_identifier((DOMAIN, "12345"), entry.entry_id) is not None
-    # ...and the physical inverter device exists too.
-    assert registry.async_get_device_by_identifier((DOMAIN, str(inv_uuid)), entry.entry_id) is not None
+    plant = registry.async_get_device_by_identifier((DOMAIN, "12345"), entry.entry_id)
+    assert plant is not None
+    # ...and the physical inverter device exists too, nested under the plant via the
+    # parent's *registry device id* (via_device_id, not the deprecated identifier tuple).
+    inverter = registry.async_get_device_by_identifier((DOMAIN, str(inv_uuid)), entry.entry_id)
+    assert inverter is not None
+    assert inverter.via_device_id == plant.id
+
+
+async def test_cloud_setup_emits_no_via_device_deprecation(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service, caplog
+):
+    """Setup must not use the deprecated ``DeviceInfo["via_device"]`` (#407).
+
+    HA 2026.8 deprecated the identifier-tuple parent link (removed in HA 2027.8), and
+    HA 2026.9 dropped the key from the ``DeviceInfo`` TypedDict. Devices are nested with
+    ``via_device_id`` instead, so no deprecation warning may be logged.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    deprecations = [
+        record.getMessage()
+        for record in caplog.records
+        if "deprecated" in record.getMessage() and "via_device" in record.getMessage()
+    ]
+    assert not deprecations, deprecations
 
 
 async def test_setup_cloud_user_entry(hass: HomeAssistant):

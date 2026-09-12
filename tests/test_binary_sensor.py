@@ -189,7 +189,7 @@ async def test_modbus_connectivity_binary_sensor(hass: HomeAssistant):
     ]
     coordinator = _coordinator_with(devices)
     coordinator.plants_service = None  # Modbus-only
-    coordinator.via_plant_id = None
+    coordinator.via_device_id = None
     coordinator.local_configuration_url = "http://10.0.0.9"
     coordinator.modbus_diagnostics = {
         "device_family": "sg_rs",
@@ -242,7 +242,7 @@ def _modbus_hybrid_coordinator(power_flow_value: Any) -> Any:
     ]
     coordinator = _coordinator_with(devices)
     coordinator.plants_service = None
-    coordinator.via_plant_id = None
+    coordinator.via_device_id = None
     coordinator.local_configuration_url = "http://10.0.0.9"
     coordinator.modbus_diagnostics = {"device_family": "sh_rt", "skipped_blocks": [], "last_error": None}
     if power_flow_value is None:
