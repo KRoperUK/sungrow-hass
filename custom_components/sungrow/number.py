@@ -412,6 +412,9 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # command select (Charge/Discharge start it, Stop stops it), so writing power
         # — even 0 — never arms or re-arms dispatch here (see #112).
         self._attr_native_value = value
+        # Nothing polls a dispatch parameter back (it is write-only), so without this the
+        # slider would snap back to the previous value until the next coordinator poll.
+        self.async_write_ha_state()
 
 
 # Default duration (minutes) for a forced Charge/Discharge before auto-revert (#157 / #255).
@@ -466,3 +469,6 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         """Store the new duration locally and publish it to the coordinator."""
         self._attr_native_value = value
         self.coordinator.forced_dispatch_duration_minutes = value
+        # This entity is rebuilt on every coordinator update, and nothing reads the
+        # duration back from the device, so push the new value now (#157).
+        self.async_write_ha_state()
