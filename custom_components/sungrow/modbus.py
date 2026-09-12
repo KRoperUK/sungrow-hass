@@ -43,13 +43,25 @@ CONNECT_TIMEOUT = 5
 _READ_ATTEMPTS = 2
 
 
-def _points_for_model(points: tuple[ModbusPoint, ...], model_code: str, family: str) -> tuple[ModbusPoint, ...]:
-    """Return MPPT points supported by a known model in the detected family."""
+def _points_for_model(
+    points: tuple[ModbusPoint, ...], model_code: str, family: str
+) -> tuple[tuple[ModbusPoint, ...], tuple[str, ...]]:
+    """Return ``(points, dropped_codes)`` for a known model in the detected family.
+
+    A known model's datasheet says how many MPPT trackers the unit has, so points for
+    trackers it does not have are dropped (never read), while points for trackers it
+    *does* have keep zero readings — a tracker sitting at 0 (e.g. at night) must still
+    produce an entity (#398). Unknown models, or a configured model whose family
+    disagrees with the detected register map, are returned unchanged: keep the
+    conservative zero suppression rather than guess. ``dropped_codes`` is returned so
+    the caller can surface it in diagnostics.
+    """
     spec = spec_for(model_code)
     if spec is None or resolve_model_family(model_code).value != family:
-        return points
+        return points, ()
 
     selected: list[ModbusPoint] = []
+    dropped: list[str] = []
     for point in points:
         prefix, separator, _ = point.code.partition("_")
         tracker = prefix.removeprefix("mppt")
@@ -57,9 +69,10 @@ def _points_for_model(points: tuple[ModbusPoint, ...], model_code: str, family: 
             selected.append(point)
             continue
         if int(tracker) > spec.mppt_count:
+            dropped.append(point.code)
             continue
         selected.append(replace(point, omit_zero=False) if point.omit_zero else point)
-    return tuple(selected)
+    return tuple(selected), tuple(dropped)
 
 
 class SungrowModbusError(Exception):
@@ -88,6 +101,9 @@ class SungrowModbusClient:
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
         self._family_detected = False
+        # Last set of model-gated MPPT points logged, so the support signal fires once
+        # per distinct set rather than on every poll.
+        self._logged_dropped_mppt_points: tuple[str, ...] = ()
         self.modbus_diagnostics: dict[str, Any] = {
             "device_family": None,
             "skipped_blocks": [],
@@ -115,7 +131,18 @@ class SungrowModbusClient:
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")
-        points = _points_for_model(points, self._configured_model, self.model)
+        points, dropped = _points_for_model(points, self._configured_model, self.model)
+        # Surface the model gate for support triage ("where is mpptN?" is answerable from
+        # the diagnostics download) and log it once per distinct set.
+        self.modbus_diagnostics["dropped_mppt_points"] = list(dropped)
+        if dropped and dropped != self._logged_dropped_mppt_points:
+            self._logged_dropped_mppt_points = dropped
+            _LOGGER.debug(
+                "Model %s does not have all %s MPPT trackers; not reading %s",
+                self._configured_model,
+                self.model,
+                ", ".join(dropped),
+            )
         out: dict[str, dict[str, Any]] = {}
         async with self._lock:
             for start, count in block_partitions(points):

@@ -853,26 +853,70 @@ async def test_family_auto_detection_falls_back_to_configured_model_for_unknown_
     assert inner.read_input_registers.await_count == 2
 
 
-async def test_sh25t_zero_mppt3_is_available_at_night():
-    """A known three-tracker SH25T keeps MPPT3 when its night-time reading is zero."""
-    cls, inner = _mock_client_cls([])
+def _zero_register_side_effect(device_type_code: int):
+    """A read that returns zeros, with ``device_type_code`` at register 4999."""
 
     def side_effect(address, count, device_id):
         result = MagicMock()
         result.isError.return_value = False
         result.registers = [0] * count
         if address == 4999 and count == 1:
-            result.registers[0] = 3624  # SH25T
+            result.registers[0] = device_type_code
         return result
 
-    inner.read_input_registers = AsyncMock(side_effect=side_effect)
+    return side_effect
+
+
+async def test_sh25t_zero_mppt3_is_available_at_night():
+    """A known three-tracker SH25T keeps MPPT3 when its night-time reading is zero."""
+    cls, inner = _mock_client_cls([])
+    inner.read_input_registers = AsyncMock(side_effect=_zero_register_side_effect(3624))  # SH25T
+
     with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
-        data = await SungrowModbusClient("10.0.0.1", model="SH25T").async_read_realtime()
+        client = SungrowModbusClient("10.0.0.1", model="SH25T")
+        data = await client.async_read_realtime()
 
     assert data["mppt3_voltage"]["value"] == 0.0
     assert data["mppt3_current"]["value"] == 0.0
     assert "mppt4_voltage" not in data
     assert "mppt4_current" not in data
+    # Un-suppressing zeros is scoped to MPPT trackers: the other zero-suppressed points
+    # in the shared three-phase map (phase B/C voltage) stay hidden.
+    assert "phase_b_voltage" not in data
+    assert "phase_c_voltage" not in data
+    # The gate is reported for support triage.
+    assert client.modbus_diagnostics["dropped_mppt_points"] == ["mppt4_voltage", "mppt4_current"]
+
+
+async def test_three_tracker_string_model_keeps_zero_mppt3():
+    """The model gate works for the string families too, not only SH hybrids."""
+    cls, inner = _mock_client_cls([])
+    inner.read_input_registers = AsyncMock(side_effect=_zero_register_side_effect(9737))  # SG10RS
+
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        data = await SungrowModbusClient("10.0.0.1", model="SG10RS").async_read_realtime()
+
+    assert data["mppt3_voltage"]["value"] == 0.0
+    assert data["mppt3_current"]["value"] == 0.0
+    assert "phase_b_voltage" not in data
+    assert "phase_c_voltage" not in data
+
+
+async def test_two_tracker_model_reports_every_dropped_mppt_point():
+    """Every MPPT point the model lacks is listed in modbus_diagnostics, for triage."""
+    cls, inner = _mock_client_cls([])
+    inner.read_input_registers = AsyncMock(side_effect=_zero_register_side_effect(3587))  # SH10RT
+
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", model="SH10RT")
+        await client.async_read_realtime()
+
+    assert client.modbus_diagnostics["dropped_mppt_points"] == [
+        "mppt3_voltage",
+        "mppt3_current",
+        "mppt4_voltage",
+        "mppt4_current",
+    ]
 
 
 @pytest.mark.parametrize(

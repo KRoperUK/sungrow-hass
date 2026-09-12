@@ -141,6 +141,16 @@ read — you supply the missing pieces and it creates the entry.
   new address automatically when it is re-discovered. A host **you** set (manual wizard or
   Reconfigure) is never overwritten by discovery — update it with **Reconfigure**.
 
+### MPPT trackers
+
+For a model in the built-in catalog the integration reads only the MPPT trackers that
+model actually has. Each of those reports `0` when it is idle, so a tracker sitting at
+zero — for example when the integration is set up at night — still creates its voltage
+and current sensors instead of being left without an entity. Tracker points the model
+does not have are not read at all; when any are skipped they are listed under
+`dropped_mppt_points` in the config-entry diagnostics download. Models that are not in the
+catalog keep the previous conservative behaviour (zero readings are not published).
+
 ## Upgrading from hybrid (old “Modbus host on cloud”)
 
 Earlier builds allowed putting a WiNet-S IP on the **cloud** entry and merging Modbus
