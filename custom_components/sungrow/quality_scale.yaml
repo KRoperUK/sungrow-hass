@@ -7,8 +7,10 @@
 rules:
   # --- Bronze ---
   action-setup:
-    status: exempt
-    comment: The integration registers no actions/services.
+    status: done
+    comment: >-
+      Three services are registered in ``async_setup_entry`` (idempotently, once for
+      every transport): ``backfill``, ``set_battery_mode`` and ``refresh_tokens``.
   appropriate-polling:
     status: done
   brands:
@@ -25,8 +27,11 @@ rules:
   dependency-transparency:
     status: done
   docs-actions:
-    status: exempt
-    comment: No actions/services are registered.
+    status: done
+    comment: >-
+      ``services.yaml`` describes ``backfill``, ``set_battery_mode`` and
+      ``refresh_tokens`` (fields, targets and descriptions), and the README documents
+      the battery-mode service with automation examples.
   docs-conditions:
     status: exempt
     comment: The integration provides no conditions.
@@ -61,8 +66,11 @@ rules:
 
   # --- Silver ---
   action-exceptions:
-    status: exempt
-    comment: No actions/services are registered.
+    status: done
+    comment: >-
+      Service handlers raise ``HomeAssistantError`` for a failed dispatch/backfill or
+      token refresh, and ``ServiceValidationError`` when the target entity/entry is not
+      a loaded Sungrow one (see ``services.py``).
   config-entry-unloading:
     status: done
   docs-configuration-parameters:

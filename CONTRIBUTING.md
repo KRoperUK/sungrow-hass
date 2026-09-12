@@ -43,6 +43,17 @@ Run the same checks CI runs:
   `chore:`, `docs:` …). This drives automated changelog and version bumps. Use
   `feat!:` or a `BREAKING CHANGE:` footer for changes that bump the major version
   (e.g. anything that changes entity IDs).
+- **Sign your commits.** `main` requires signed commits, so an unsigned PR cannot be
+  merged. Set up a key once and enable signing:
+
+  ```bash
+  git config --global user.signingkey <your-key-id>
+  git config --global commit.gpgsign true
+  ```
+
+  Add the public key to your GitHub account (Settings → SSH and GPG keys) so the
+  commits show as *Verified*. If CI holds your first PR for approval, that is GitHub
+  gating workflows from a first-time contributor — a maintainer will approve the run.
 - Keep changes focused; add or update tests for any behaviour change.
 - All PRs target `main` and must pass CI (lint, tests, HACS + hassfest validation)
   and at least one review before merge.
