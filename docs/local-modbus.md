@@ -11,7 +11,7 @@ iSolarCloud) is down.
 
 **Cloud and local are separate config entries.** They never mash values onto the same
 sensors. If both exist for the same inverter serial, the local device is nested under
-the cloud plant in the device registry (`via_device`) — a soft “related to” link only.
+the cloud plant in the device registry (`via_device_id`) — a soft “related to” link only.
 
 !!! info "What's supported today"
     Local Modbus is **read-only** and maps:
@@ -82,7 +82,7 @@ flowchart LR
     LO -->|"poll"| WN["🔌 WiNet-S<br/>Modbus TCP :502"]
     API --> INV["Inverter"]
     WN --> INV
-    LO -.->|"via_device when serial matches"| CO
+    LO -.->|"via_device_id when serial matches"| CO
 ```
 
 **Which should I choose?**

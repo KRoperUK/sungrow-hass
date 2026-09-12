@@ -40,6 +40,8 @@ def _coordinator_with(plant_id, plant_name):
     # Auto-revert off by default (a MagicMock would otherwise read as a truthy duration
     # and arm the timer); the #157 revert tests set a real value.
     coordinator.forced_dispatch_duration_minutes = 0
+    # Registry device id of the parent (plant) device entities nest under.
+    coordinator.via_device_id = f"plant-device-{plant_id}"
     return coordinator
 
 
@@ -174,7 +176,7 @@ async def test_dispatch_device_identifier_is_string(hass: HomeAssistant, uuid_in
     for entity in [*added_numbers, *added_selects]:
         assert entity.device_uuid == uuid_str
         assert entity._attr_device_info["identifiers"] == {(DOMAIN, uuid_str)}
-        assert entity._attr_device_info["via_device"] == (DOMAIN, "12345")
+        assert entity._attr_device_info["via_device_id"] == "plant-device-12345"
 
 
 async def test_dispatch_device_survives_prune_with_int_uuid(hass: HomeAssistant):
@@ -338,20 +340,21 @@ def test_build_device_info_enriches_model_and_serial():
             "device_sn": "EXAMPLE-SN-0001",
             "factory_name": "SUNGROW",
         },
-        "1000002",
         fallback_name="Plant",
+        via_device_id="1000002-device",
     )
     assert info["identifiers"] == {(DOMAIN, "1000001")}
     assert info["name"] == "Example-Inverter"
     assert info["model"] == "SG3.6RS"
     assert info["serial_number"] == "EXAMPLE-SN-0001"
     assert info["manufacturer"] == "SUNGROW"
-    assert info["via_device"] == (DOMAIN, "1000002")
+    assert info["via_device_id"] == "1000002-device"
+    assert "via_device" not in info
 
 
 def test_build_device_info_falls_back_when_fields_absent():
     """Missing name falls back to the plant name; manufacturer defaults to Sungrow."""
-    info = build_device_info({"uuid": "x"}, "p", fallback_name="Plant Name")
+    info = build_device_info({"uuid": "x"}, fallback_name="Plant Name")
     assert info["name"] == "Plant Name"
     assert info["manufacturer"] == "Sungrow"
     assert info.get("model") is None
@@ -1670,12 +1673,12 @@ async def test_self_consumption_and_stop_share_safe_payload(hass: HomeAssistant)
 # ---------------------------------------------------------------------------
 
 
-def _local_coordinator(serial="A22A1574727", via_plant_id=None):
+def _local_coordinator(serial="A22A1574727", via_device_id=None):
     """A Modbus-only coordinator, where plant_id is the (unregistered) inverter serial."""
     coordinator = _coordinator_with(serial, "SH6.0RT (local)")
     coordinator.plants_service = None
     coordinator.local_configuration_url = "http://10.0.0.5"
-    coordinator.via_plant_id = via_plant_id
+    coordinator.via_device_id = via_device_id
     coordinator.dispatch_update_supported = True
     return coordinator
 
@@ -1724,7 +1727,7 @@ async def test_local_dispatch_entities_have_no_phantom_via_device(hass: HomeAssi
     assert added, "expected local dispatch entities to be built"
     for entity in added:
         info = entity._attr_device_info
-        assert "via_device" not in info, f"{type(entity).__name__} invented a via_device parent: {info}"
+        assert "via_device_id" not in info, f"{type(entity).__name__} invented a parent device: {info}"
         assert info["identifiers"] == {(DOMAIN, "A22A1574727_inv")}
 
 
@@ -1740,7 +1743,7 @@ async def test_local_forced_dispatch_duration_has_no_phantom_via_device(hass: Ho
     }
     entity = SungrowForcedDispatchDurationNumber(_local_coordinator(), device)
 
-    assert "via_device" not in entity._attr_device_info
+    assert "via_device_id" not in entity._attr_device_info
     assert entity._attr_device_info["configuration_url"] == "http://10.0.0.5"
 
 
@@ -1756,11 +1759,11 @@ async def test_local_dispatch_entities_nest_under_matching_cloud_plant(hass: Hom
             "device_sn": "A22A1574727",
         }
     ]
-    _local_entry_data(entry, devices, via_plant_id="plant-99")
+    _local_entry_data(entry, devices, via_device_id="cloud-plant-device")
 
     added: list = []
     await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     assert added
     for entity in added:
-        assert entity._attr_device_info["via_device"] == (DOMAIN, "plant-99")
+        assert entity._attr_device_info["via_device_id"] == "cloud-plant-device"

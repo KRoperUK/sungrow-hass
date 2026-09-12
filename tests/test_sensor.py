@@ -78,7 +78,7 @@ def _coord_with_devices(devices, data=None):
     coordinator.devices = devices
     coordinator.plant_name = "Plant"
     coordinator.plants_service = MagicMock()  # cloud-backed coordinator
-    coordinator.via_plant_id = None
+    coordinator.via_device_id = None
     return coordinator
 
 
@@ -412,7 +412,7 @@ class TestSungrowSensor:
         coordinator.data = data or {}
         coordinator.devices = []  # #158: SungrowSensor reads this to pick its device
         coordinator.plants_service = MagicMock()  # cloud-backed coordinator
-        coordinator.via_plant_id = None
+        coordinator.via_device_id = None
         return coordinator
 
     def test_sensor_name_from_code(self):
@@ -679,6 +679,8 @@ def _coordinator_with(plant_id, plant_name, data):
     coordinator.data = data
     coordinator.plant_detail = {}  # #178: _build_sensors reads this
     coordinator.devices = []
+    # Registry device id of the parent (plant) device entities nest under.
+    coordinator.via_device_id = f"plant-device-{plant_id}"
     return coordinator
 
 
@@ -763,7 +765,6 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
 
     coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
     coordinator.enable_device_sensors = True
-    coordinator.via_plant_id = None
     coordinator.local_configuration_url = None
     # The platform reads the live device list from the coordinator for naming.
     coordinator.devices = [
@@ -801,7 +802,7 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     # Name is derived from the coordinator's device metadata.
     assert sensor._attr_device_info["name"] == "AC011E"
     assert (DOMAIN, "chg-1") in sensor._attr_device_info["identifiers"]
-    assert sensor._attr_device_info["via_device"] == (DOMAIN, "12345")
+    assert sensor._attr_device_info["via_device_id"] == "plant-device-12345"
     # Device card is enriched with the cloud's model/serial/manufacturer (#149).
     assert sensor._attr_device_info["model"] == "AC011E-01"
     assert sensor._attr_device_info["serial_number"] == "S1234567"
@@ -1067,7 +1068,7 @@ def _modbus_only_coordinator(*, modbus_diagnostics: dict | None = None, last_upd
     coordinator.device_data = {}
     coordinator.enable_device_sensors = False
     coordinator.plants_service = None  # Modbus-only path
-    coordinator.via_plant_id = None
+    coordinator.via_device_id = None
     coordinator.local_configuration_url = "http://10.0.0.9"
     coordinator.last_update_success = last_update_success
     coordinator.modbus_diagnostics = (
@@ -1219,7 +1220,7 @@ async def test_cloud_user_battery_soc_becomes_a_sensor(hass: HomeAssistant):
 
     coordinator = _coordinator_with("12345", "Plant A", {"current_power": {"value": "372", "unit": "W"}})
     coordinator.enable_device_sensors = True
-    coordinator.via_plant_id = None
+    coordinator.via_device_id = None
     coordinator.local_configuration_url = None
     coordinator.plants_service = None
     coordinator.devices = [

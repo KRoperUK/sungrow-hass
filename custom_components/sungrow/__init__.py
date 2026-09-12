@@ -48,7 +48,7 @@ from .const import (
 from .coordinator import SungrowPlantCoordinator, describe_api_error, is_auth_error
 from .device_helpers import (
     _matches_device_type,
-    find_related_cloud_plant_id,
+    find_related_cloud_plant_device_id,
 )
 from .device_helpers import (
     build_device_info as build_device_info,
@@ -292,7 +292,7 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     platform builds entities from the same measure-point codes the cloud path uses.
 
     When a cloud entry already owns this serial, the local inverter is nested under
-    that cloud plant (``via_device``) without merging any sensor values.
+    that cloud plant (``via_device_id``) without merging any sensor values.
     """
     serial = str(entry.data.get(CONF_SERIAL) or entry.unique_id or "inverter")
     # unique_id is modbus_{serial}; strip prefix if present for a clean serial key
@@ -302,10 +302,9 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     local_name = f"{model} (local)"
     host = str(entry.options.get(CONF_MODBUS_HOST) or entry.data.get(CONF_MODBUS_HOST) or "")
     winet_url = f"http://{host}" if host else None
-    cloud_plant_id = find_related_cloud_plant_id(hass, serial)
-    # Only nest under a *real* cloud plant device. Falling back to ``serial`` invented a
-    # via_device parent that does not exist and trips HA 2025.12 warnings (live SG3.6RS).
-    via_plant_id = cloud_plant_id
+    # Only nest under a *real* cloud plant device. Falling back to ``serial`` would
+    # point the parent link at a device that does not exist (live SG3.6RS).
+    cloud_plant_device_id = find_related_cloud_plant_device_id(hass, serial)
 
     # One inverter device. Distinct identifiers so the plant and inverter don't collide.
     inverter = {
@@ -317,11 +316,12 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
         "factory_name": "SUNGROW",
     }
     coordinator = SungrowPlantCoordinator(hass, entry, None, serial, local_name, [inverter])
-    coordinator.via_plant_id = via_plant_id
-    # A *string* (even empty) marks this coordinator as local, which is what decides
-    # whether ``build_device_info_for`` may use ``plant_id`` as the via_device parent.
-    # Leaving it None on a hostless entry would look like a cloud entry and re-introduce
-    # the phantom via_device of #383, so normalise to "" instead of None.
+    # Parent link: the registry device id of the cloud plant that owns this serial, or
+    # None for a standalone local entry (never the unregistered serial itself — #383).
+    coordinator.via_device_id = cloud_plant_device_id
+    # A *string* (even empty) marks this coordinator as local, which drives the "Visit"
+    # configuration_url and the local-vs-cloud sensor placement. Leaving it None on a
+    # hostless entry would look like a cloud entry, so normalise to "" instead of None.
     coordinator.local_configuration_url = winet_url or ""
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -378,10 +378,10 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     # the cloud entry. Re-check once HA is running and reload so the inverter can nest
     # under the cloud plant device. If HA is already running (e.g. config flow addition),
     # schedule the check after a short delay so any in-progress cloud setups finish first.
-    if cloud_plant_id is None:
+    if cloud_plant_device_id is None:
 
         async def _async_recheck_nesting(_: Any) -> None:
-            if find_related_cloud_plant_id(hass, serial):
+            if find_related_cloud_plant_device_id(hass, serial):
                 _LOGGER.debug("Cloud plant found after startup for %s; reloading local entry", serial)
                 await hass.config_entries.async_reload(entry.entry_id)
 
@@ -478,10 +478,12 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
     device_registry = dr.async_get(hass)
     for coordinator in coordinators:
-        device_registry.async_get_or_create(
+        plant_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
         )
+        # Record the parent's registry id so entities nest under it via via_device_id.
+        coordinator.via_device_id = plant_device.id
 
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
     await _async_start_scheduler(hass, entry)
@@ -637,17 +639,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         devices=devices_by_plant,
     )
 
-    # Register the plant "service" device explicitly so it always exists as the
-    # via_device parent — even when every plant sensor re-homes onto a physical
-    # device (#158). Without this, a re-homed device references a non-existent
-    # via_device (HA warns and breaks it in 2025.12).
+    # Register the plant "service" device explicitly so it always exists as the parent
+    # — even when every plant sensor re-homes onto a physical device (#158). Without
+    # this, a re-homed device references a non-existent parent device.
     console_url = GATEWAY_CONSOLE_URLS.get(entry.data.get(CONF_GATEWAY, ""), DEFAULT_CONSOLE_URL)
     device_registry = dr.async_get(hass)
     for coordinator in coordinators:
-        device_registry.async_get_or_create(
+        plant_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             **build_plant_device_info(coordinator.plant_id, coordinator.plant_name, console_url),
         )
+        # Record the parent's registry id so entities nest under it via via_device_id.
+        coordinator.via_device_id = plant_device.id
 
     await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
 
