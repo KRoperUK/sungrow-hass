@@ -16,6 +16,7 @@ nav = [
   { "Local Modbus" = "local-modbus.md" },
   { "Sensors" = "SENSORS.md" },
   { "Model support" = "model-support.md" },
+  { "Supported models" = "SUPPORTED_MODELS.md" },
   { "Troubleshooting" = "TROUBLESHOOTING.md" },
   { "Upgrading" = "upgrading.md" },
 ]

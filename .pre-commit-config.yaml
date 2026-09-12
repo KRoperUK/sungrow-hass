@@ -39,6 +39,15 @@ repos:
         files: ^custom_components/sungrow/manifest\.json$
         pass_filenames: false
 
+      # The supported-models page is generated from MODEL_SPECS, so regenerate it whenever
+      # the catalog changes. tests/test_supported_models_doc.py fails CI if it is still stale.
+      - id: generate-supported-models
+        name: generate docs/SUPPORTED_MODELS.md
+        entry: .venv/bin/python scripts/generate_supported_models.py
+        language: system
+        files: ^(custom_components/sungrow/model_specs\.py|docs/SUPPORTED_MODELS\.md)$
+        pass_filenames: false
+
       # Strict mypy on the whole integration + tests. Runs once per commit
       # regardless of which files staged — mypy's cross-file inference means
       # a change in one module can surface an error in another.
