@@ -1132,6 +1132,42 @@ async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
+async def test_dispatch_number_clamps_a_restored_value_to_the_current_bounds(hass: HomeAssistant):
+    """A value restored from before the ceiling moved must not be published out of range (#425).
+
+    The slider bounds are not constant — the datasheet catalog added battery-side limits
+    (#332) and the ceiling can now come from a sibling device (#422) — so a value restored
+    from an earlier build can sit outside today's range. Home Assistant validates service
+    calls against min/max, not restored state, so it would be shown as-is.
+    """
+    from types import SimpleNamespace
+
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    # SBR256 resolves no rating anywhere, so the ceiling is the conservative default.
+    _setup_entry_data(
+        entry, [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SBR256"}]
+    )
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 5000
+
+    async def restore(value):
+        power.async_get_last_number_data = AsyncMock(return_value=SimpleNamespace(native_value=value))
+        with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
+            await power.async_added_to_hass()
+
+    await restore(10000.0)  # set when the ceiling was higher
+    assert power.native_value == 5000  # clamped, not published out of range
+
+    await restore(2500.0)  # still a legal setpoint: untouched
+    assert power.native_value == 2500
+
+
 async def test_number_writes_push_state_immediately(hass: HomeAssistant):
     """Both dispatch setters publish entity state at once — neither is polled back.
 
