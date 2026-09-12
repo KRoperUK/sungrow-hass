@@ -34,6 +34,33 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.0.0...v6.1.0) (2026-09-12)
+
+
+### Features
+
+* add India (isolarcloud.in) gateway region ([#406](https://github.com/KRoperUK/sungrow-hass/issues/406)) ([3675f79](https://github.com/KRoperUK/sungrow-hass/commit/3675f79ef7181becc999af2844bc886518bf5d6d))
+* **cloud_user:** surface per-device points such as battery SOC ([#389](https://github.com/KRoperUK/sungrow-hass/issues/389)) ([#393](https://github.com/KRoperUK/sungrow-hass/issues/393)) ([e8a78ea](https://github.com/KRoperUK/sungrow-hass/commit/e8a78ea9b9ada8abef343170e7cb53c8150e266c))
+
+
+### Bug Fixes
+
+* **backfill:** keep hourly statistics intact across overlapping runs ([#420](https://github.com/KRoperUK/sungrow-hass/issues/420)) ([06c21bd](https://github.com/KRoperUK/sungrow-hass/commit/06c21bdeab104b2a75307bcf2f80e64c37162aa4))
+* **config_flow:** repair cloud_user reconfigure and stop reauth losing settings ([#419](https://github.com/KRoperUK/sungrow-hass/issues/419)) ([5472cfd](https://github.com/KRoperUK/sungrow-hass/commit/5472cfdaae57dddebc6dd56f13dc41333310c20f))
+* **deps:** bump sungrow-isolarcloud to 0.15.1 for India authorization ([#418](https://github.com/KRoperUK/sungrow-hass/issues/418)) ([521f8b5](https://github.com/KRoperUK/sungrow-hass/commit/521f8b5ba85b0bd8ba73c0a98ed17efe065077d4))
+* **device:** nest devices with via_device_id instead of deprecated via_device ([#413](https://github.com/KRoperUK/sungrow-hass/issues/413)) ([aa50b4f](https://github.com/KRoperUK/sungrow-hass/commit/aa50b4f77400be03ebb5f32d0aa093ee33e433e3))
+* **device:** stop inventing a via_device parent on local Modbus entries ([#383](https://github.com/KRoperUK/sungrow-hass/issues/383)) ([#392](https://github.com/KRoperUK/sungrow-hass/issues/392)) ([127ac6f](https://github.com/KRoperUK/sungrow-hass/commit/127ac6fc92b039cedb9b70b46cffc1aad51ae3ef))
+* **dispatch:** harden forced-dispatch safety and battery SOC scaling ([#410](https://github.com/KRoperUK/sungrow-hass/issues/410)) ([3a68cd0](https://github.com/KRoperUK/sungrow-hass/commit/3a68cd04a1dd6e1160181bca8f798ec6a1ef8748))
+* **local-modbus:** never let WiNet-S discovery overwrite a chosen host ([#414](https://github.com/KRoperUK/sungrow-hass/issues/414)) ([cb07d06](https://github.com/KRoperUK/sungrow-hass/commit/cb07d06428109696c0cdf5c013998e1604e6e146))
+* **modbus:** don't publish zeros for an absent grid meter ([#387](https://github.com/KRoperUK/sungrow-hass/issues/387)) ([#394](https://github.com/KRoperUK/sungrow-hass/issues/394)) ([ca2b375](https://github.com/KRoperUK/sungrow-hass/commit/ca2b375d344f06a2a5d4f4a9c68a5a8c016e011b))
+* **modbus:** gate MPPT points by model ([#399](https://github.com/KRoperUK/sungrow-hass/issues/399)) ([6d110dd](https://github.com/KRoperUK/sungrow-hass/commit/6d110dd3104e9d7af6f020889461fef106d5ea8f))
+* **modbus:** restore daily_yield/total_yield on SH hybrids ([#382](https://github.com/KRoperUK/sungrow-hass/issues/382)) ([#390](https://github.com/KRoperUK/sungrow-hass/issues/390)) ([87f4261](https://github.com/KRoperUK/sungrow-hass/commit/87f4261ab971d1f5842eb8a0a58850ee84732564))
+* **modbus:** stop derived daily_yield reporting the lifetime total ([#416](https://github.com/KRoperUK/sungrow-hass/issues/416)) ([0ceb59d](https://github.com/KRoperUK/sungrow-hass/commit/0ceb59d8c30c76a14782721a3383fd4d21738a54))
+* **number:** publish state when a dispatch value is written ([#424](https://github.com/KRoperUK/sungrow-hass/issues/424)) ([5b0453f](https://github.com/KRoperUK/sungrow-hass/commit/5b0453f86134fad44fe0d1c3ed58085848871e00))
+* **number:** size dispatch sliders from the plant's inverter rating ([#422](https://github.com/KRoperUK/sungrow-hass/issues/422)) ([#423](https://github.com/KRoperUK/sungrow-hass/issues/423)) ([8a02a5d](https://github.com/KRoperUK/sungrow-hass/commit/8a02a5d421381b3f466132555bf9a89e765faa01))
+* **sensor:** keep a state class on named cloud_user points without a unit ([#384](https://github.com/KRoperUK/sungrow-hass/issues/384)) ([#391](https://github.com/KRoperUK/sungrow-hass/issues/391)) ([198121e](https://github.com/KRoperUK/sungrow-hass/commit/198121e900f25590294871f3774936254c7e86bc))
+* **setup:** register services on every transport and isolate per-plant probes ([#411](https://github.com/KRoperUK/sungrow-hass/issues/411)) ([530456f](https://github.com/KRoperUK/sungrow-hass/commit/530456f64c01b7761af995d2ed468f5754a376d4))
+
 ## [6.0.0](https://github.com/KRoperUK/sungrow-hass/compare/v5.6.1...v6.0.0) (2026-07-22)
 
 
