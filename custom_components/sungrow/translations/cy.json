@@ -137,7 +137,7 @@
       "missing_code": "Ni dderbyniwyd y cod awdurdodi. Rhowch gynnig arall arni.",
       "reauth_successful": "Roedd yr ail-ddilysiad yn llwyddiannus",
       "reconfigure_successful": "Roedd yr ailgyflunio'n llwyddiannus",
-      "wrong_account": "Nid yw'r cyfrif awdurdodedig yn cyfateb i App ID yr integreiddiad hwn. Defnyddiwch y cymhwysiad datblygwr gwreiddiol.",
+      "wrong_account": "Nid yw'r cyfrif y gwnaethoch fewngofnodi ag ef yn cyfateb i'r cyfrif a ffurfiwyd ar gyfer y cofnod hwn. Defnyddiwch y cyfrif gwreiddiol, neu dilëwch ac ychwanegwch yr integreiddiad eto.",
       "missing_app_id": "Mae'r cofnod hwn yn colli'r App ID. Defnyddiwch Ail-ffurfweddu i'w ddarparu."
     }
   },

@@ -137,7 +137,7 @@
       "missing_code": "Der Autorisierungscode wurde nicht empfangen. Bitte versuchen Sie es erneut.",
       "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
       "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
-      "wrong_account": "Das autorisierte Konto stimmt nicht mit der App ID dieser Integration überein. Verwenden Sie die ursprüngliche Entwickleranwendung.",
+      "wrong_account": "Das Konto, mit dem Sie sich angemeldet haben, stimmt nicht mit dem für diesen Eintrag konfigurierten Konto überein. Verwenden Sie das ursprüngliche Konto oder entfernen Sie die Integration und fügen Sie sie erneut hinzu.",
       "missing_app_id": "Diesem Eintrag fehlt die App-ID. Verwenden Sie Neu konfigurieren, um sie anzugeben."
     }
   },

@@ -111,9 +111,24 @@ class CloudUserMixin(PlantSelectionMixin, _SungrowFlowBase):
         directly for single-plant accounts that skip the picker entirely.
         """
         reauth_entry = self._reauth_entry
-        if reauth_entry is not None:
-            return self.async_update_reload_and_abort(reauth_entry, data=entry_data)
         email = str(entry_data.get(CONF_USER_ACCOUNT) or "")
+        if reauth_entry is not None:
+            # The account is this entry's identity (``unique_id`` is ``user_<email>``), so
+            # reauth/reconfigure must not silently rebind it to a different login — that
+            # would leave the unique_id and title describing the old account while the
+            # credentials served the new one. Mirrors the OAuth path's App ID guard.
+            await self.async_set_unique_id(f"user_{email.lower()}")
+            self._abort_if_unique_id_mismatch(reason="wrong_account")
+            reason = "reconfigure_successful" if self._is_reconfigure else "reauth_successful"
+            # Merge rather than replace. Passing ``data=entry_data`` overwrote the entry
+            # with only the credential fields, dropping the plant selection (#358), so
+            # any multi-plant account silently went back to serving *every* plant after
+            # a credential refresh.
+            return self.async_update_reload_and_abort(
+                reauth_entry,
+                data={**reauth_entry.data, **entry_data},
+                reason=reason,
+            )
         await self.async_set_unique_id(f"user_{email.lower()}")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=f"Sungrow ({email})", data=entry_data)

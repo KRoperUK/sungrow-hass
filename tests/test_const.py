@@ -34,6 +34,46 @@ def test_gateway_urls_are_unique():
     assert len(urls) == len(set(urls)), "Duplicate gateway URLs found"
 
 
+def test_every_gateway_builds_a_library_auth_url():
+    """Every region we offer must resolve in the library's ``auth_url`` (#404).
+
+    The integration advertises these gateways in the config flow, but the OAuth URL is
+    built by ``sungrow-isolarcloud``: a region the pinned library does not know makes
+    ``auth_url()`` raise. That is exactly how #404 shipped — India was added to
+    ``GATEWAYS`` (#406) while the library had no India member, so choosing it failed with
+    "Unknown iSolarCloud server host" instead of starting authorization. Guard the whole
+    mapping, not just the region that happened to break.
+    """
+    from unittest.mock import MagicMock
+
+    from pysolarcloud import Auth
+
+    for region, host in GATEWAYS.items():
+        auth = Auth(host=host, appkey="k", access_key="s", app_id="1", websession=MagicMock())
+        url = auth.auth_url("https://cb")
+        assert url.startswith("https://"), f"{region} produced a non-https auth URL: {url}"
+        assert "cloudId=" in url, f"{region} produced no cloudId: {url}"
+        assert "applicationId=1" in url, f"{region} dropped the app id: {url}"
+
+
+def test_india_gateway_uses_cloud_id_9():
+    """India must authorize against web3.isolarcloud.in with cloudId=9 (#404).
+
+    Sending the International ``cloudId=2`` to the India host makes its frontend redirect
+    the browser to ``web3.isolarcloud.com.hk`` (where an India App ID shows "No data"),
+    and omitting ``cloudId`` falls back to China — so the id is load-bearing, not cosmetic.
+    """
+    from unittest.mock import MagicMock
+
+    from pysolarcloud import Auth
+
+    url = Auth(host=GATEWAYS["India"], appkey="k", access_key="s", app_id="1", websession=MagicMock()).auth_url(
+        "https://cb"
+    )
+    assert url.startswith("https://web3.isolarcloud.in/#/authorized-app"), url
+    assert "cloudId=9" in url, url
+
+
 def test_config_key_names():
     """Test config keys haven't changed unexpectedly."""
     assert CONF_APP_KEY == "app_key"
