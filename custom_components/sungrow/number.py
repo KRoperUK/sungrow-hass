@@ -405,7 +405,11 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         # unregistered inverter serial on local Modbus entries (#383).
         self._attr_device_info = build_device_info_for(coordinator, device)
         self._attr_native_value = DEFAULT_FORCED_DISPATCH_DURATION
-        coordinator.forced_dispatch_duration_minutes = DEFAULT_FORCED_DISPATCH_DURATION
+        # NB: the coordinator is deliberately *not* seeded here. The entity adder
+        # rebuilds every number on each coordinator update, so a write in __init__
+        # would reset a user-configured duration back to the default on every poll.
+        # The authoritative value is published in async_added_to_hass /
+        # async_set_native_value below.
 
     async def async_added_to_hass(self) -> None:
         """Restore the configured duration and publish it to the coordinator."""

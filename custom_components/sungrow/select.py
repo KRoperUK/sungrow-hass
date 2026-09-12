@@ -492,7 +492,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 self.device_uuid,
                 self._command_payload(safe_option, self.options_map[safe_option]),
             )
-        except PySolarCloudException as err:
+        except (PySolarCloudException, ModbusControlError) as err:
             _LOGGER.warning("Auto-revert to %s failed for %s: %s", safe_option, self.device_uuid, err)
         entry = self.coordinator.config_entry
         if entry is not None:
@@ -546,7 +546,9 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 if raw is None:
                     return None
                 try:
-                    return float(raw) == 0
+                    # Compare against the same encoded constant we write, so a change
+                    # to the library's mode table can't desync write from verification.
+                    return float(raw) == float(_EMS_MODE_SELF_CONSUMPTION)
                 except (TypeError, ValueError):
                     pass
                 text = str(raw).strip().lower()
@@ -599,7 +601,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             await self.control.async_update_parameters(
                 self.device_uuid, self._command_payload(option, self.options_map[option])
             )
-        except PySolarCloudException as err:
+        except (PySolarCloudException, ModbusControlError) as err:
             _LOGGER.debug("Forced-mode retry write failed for %s: %s", self.device_uuid, err)
 
         still_self = await self._read_still_self_consumption()
