@@ -22,6 +22,7 @@ from custom_components.sungrow.modbus_registers import (
     meter_appears_present,
     needs_derived_daily_yield,
     suppress_absent_meter_points,
+    total_yield_point_for_family,
 )
 
 # ---------------------------------------------------------------------------
@@ -976,6 +977,44 @@ def test_daily_yield_diagnostic_dump_lists_every_candidate_address_and_scale():
     for address in DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES:
         for scale, _ in ((0.1, "kWh"), (0.01, "kWh"), (1.0, "Wh"), (10.0, "—")):
             assert (address, scale) in candidate_pairs
+
+
+def test_total_yield_diagnostic_decodes_the_lifetime_total_under_every_candidate_scale():
+    """One diagnostics download must answer the #400 scale question (#435).
+
+    #400 asked whether SG-RS wire 5003 is x1 or x0.1 kWh, and it could not be settled from
+    the report because the raw value, the daily register beside it and the app's own figure
+    are all needed -- only the reporter can see the last one. So the lifetime total is
+    decoded under every candidate scale here.
+    """
+    registers = [0] * DAILY_YIELD_DIAG_COUNT
+    registers[5003 - DAILY_YIELD_DIAG_START] = 16064  # low word
+    registers[5004 - DAILY_YIELD_DIAG_START] = 0  # high word
+
+    dump = daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START)
+
+    total = dump["total"]
+    assert total["address"] == 5003
+    assert total["raw_words"] == [16064, 0]
+    assert total["raw"] == 16064
+    by_scale = {c["scale"]: c["value"] for c in total["candidates"]}
+    assert by_scale[0.1] == 1606.4  # the reporter's expectation
+    assert by_scale[1.0] == 16064.0  # the mapping currently in force
+
+
+def test_total_yield_diagnostic_annotates_the_mapping_in_force():
+    """The dump echoes the family's own total_yield mapping, so no cross-checking is needed."""
+    registers = [0] * DAILY_YIELD_DIAG_COUNT
+    registers[5003 - DAILY_YIELD_DIAG_START] = 6305
+    registers[5004 - DAILY_YIELD_DIAG_START] = 0
+
+    point = total_yield_point_for_family("sg_rs")
+    assert point is not None
+    dump = daily_yield_diagnostic_dump(registers, DAILY_YIELD_DIAG_START, total_point=point)
+
+    assert dump["total"]["current_mapping"] == {"address": 5003, "scale": 1, "unit": "kWh", "value": 6305.0}
+    # A family with no total_yield point in range simply omits the section.
+    assert daily_yield_diagnostic_dump([], DAILY_YIELD_DIAG_START)["total"] == {}
 
 
 def test_daily_yield_diagnostic_dump_surfaces_current_mapping_match():
