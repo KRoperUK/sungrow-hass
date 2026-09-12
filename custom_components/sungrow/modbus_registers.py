@@ -838,7 +838,7 @@ def meter_appears_present(decoded: dict[str, dict[str, Any]]) -> bool:
         try:
             if float(point.get("value") or 0) != 0:
                 return True
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return True
     return False
 
@@ -859,7 +859,7 @@ def suppress_absent_meter_points(decoded: dict[str, dict[str, Any]]) -> tuple[di
             try:
                 if float(point.get("value") or 0) == 0:
                     continue
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
         out[code] = point
     return out, False

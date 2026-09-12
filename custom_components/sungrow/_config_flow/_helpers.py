@@ -250,7 +250,7 @@ async def async_read_modbus_identity(host: str) -> tuple[str | None, str | None]
         if type_code_raw is not None:
             try:
                 model = resolve_enum_value("device_type_code", int(type_code_raw))
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 model = None
         return model or None, serial or None
     finally:

@@ -64,5 +64,5 @@ mypy                       # strict; the CI test job runs this — ruff+pytest a
 python -m pytest tests/    # keep coverage above the pyproject fail_under
 ```
 
-Style: **Python 3.13** (HA requires >=3.13), ruff line length 120, mypy `strict = true`.
+Style: **Python 3.14** (HA requires >=3.14), ruff line length 120, mypy `strict = true`.
 See `docs/TROUBLESHOOTING.md` for user-facing auth/setup guidance.

@@ -45,7 +45,7 @@ async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -
         task.cancel()
     except asyncio.CancelledError:
         pass
-    except (PySolarCloudException, ClientError, ModbusControlError):
+    except PySolarCloudException, ClientError, ModbusControlError:
         # ``await task`` re-raises the loop's stored exception; the done_callback
         # (``_on_heartbeat_done``) is what raises the Repair, so at the stop path
         # we just log the failure so it never propagates back out of unload (#350).

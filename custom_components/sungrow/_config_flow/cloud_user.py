@@ -68,7 +68,7 @@ class CloudUserMixin(PlantSelectionMixin, _SungrowFlowBase):
                         plant_list = list(await client.async_get_plants() or [])
                 except _base.AuthError:
                     errors["base"] = "invalid_auth"
-                except (_base.PySolarCloudException, ClientError, TimeoutError):
+                except _base.PySolarCloudException, ClientError, TimeoutError:
                     errors["base"] = "cannot_connect"
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected error validating user-account login")

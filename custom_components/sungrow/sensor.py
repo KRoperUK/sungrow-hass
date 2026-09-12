@@ -399,7 +399,7 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
             return str(val)
         try:
             num = float(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             # The sensor is classified numeric (a device or state class is set) but
             # the value can't be coerced (e.g. "unknown"). Return None rather than a
             # raw string, which HA would reject as an invalid state and which would
@@ -521,7 +521,7 @@ class SungrowPlantDetailSensor(CoordinatorEntity[SungrowPlantCoordinator], Senso
             return None
         try:
             num = float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return str(raw)
         # Counts (alarm/fault) are whole numbers, not floats.
         return int(num) if self._desc.integer else num

@@ -1,6 +1,7 @@
 """Fixtures for Sungrow tests."""
 
 import os
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +20,21 @@ from custom_components.sungrow.const import (
 
 # Load environment variables from .env file (for live tests)
 load_dotenv()
+
+
+@pytest.fixture(autouse=True)
+async def _abort_open_config_flows(hass: HomeAssistant) -> AsyncIterator[None]:
+    """Abort any config flow a test leaves open so integration tasks are cleaned up.
+
+    An in-progress OAuth flow keeps a callback-wait background task alive; HA
+    cancels it from the flow's ``async_remove`` when the flow is removed. Tests that
+    don't complete or abort a flow would otherwise leave that task pending, which
+    HA 2026.9's stricter ``verify_cleanup`` fixture reports as a lingering task.
+    """
+    yield
+    for flow in hass.config_entries.flow.async_progress():
+        hass.config_entries.flow.async_abort(flow["flow_id"])
+    await hass.async_block_till_done()
 
 
 # ---------------------------------------------------------------------------

@@ -96,7 +96,11 @@ def build_device_info(
         serial_number=device.get("device_sn"),
     )
     if parent_id is not None:
-        info["via_device"] = (DOMAIN, parent_id)
+        # NOTE(#407): HA 2026.8 deprecated DeviceInfo["via_device"] in favour of
+        # via_device_id (the parent's registry device id), and HA 2026.9 dropped the
+        # key from the DeviceInfo TypedDict entirely — hence the ignore. Migrating to
+        # via_device_id is tracked in #407 and done in the follow-up PR.
+        info["via_device"] = (DOMAIN, parent_id)  # type: ignore[typeddict-unknown-key]
     if configuration_url:
         info["configuration_url"] = configuration_url
     return info

@@ -8,11 +8,11 @@ privately to the maintainer as described there — do not open a public issue.
 
 ## Development setup
 
-This project targets Python 3.13 and Home Assistant's custom-component test
+This project targets Python 3.14 and Home Assistant's custom-component test
 harness. Using [uv](https://docs.astral.sh/uv/) is the quickest path:
 
 ```bash
-uv venv --python 3.13 .venv
+uv venv --python 3.14 .venv
 uv pip install --python .venv -r requirements_test.txt
 ```
 
