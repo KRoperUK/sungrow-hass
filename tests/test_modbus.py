@@ -1017,6 +1017,68 @@ def test_total_yield_diagnostic_annotates_the_mapping_in_force():
     assert daily_yield_diagnostic_dump([], DAILY_YIELD_DIAG_START)["total"] == {}
 
 
+# Codes deliberately defined more than once inside a single family map. ``decode_registers``
+# keys its result by code and lets the last definition win, so a duplicate is only safe when
+# it is declared here with the register that must win — otherwise the sensor value depends on
+# map ordering, which is how a wrong scale reaches users (see #427).
+DELIBERATE_DUPLICATE_CODES: dict[str, int] = {
+    # Legacy low-block frequency (x0.1 Hz) backed by the preferred hybrid register (x0.01 Hz).
+    "grid_frequency": 5241,
+    # Same quantity, same scale, read from both the low block and the 13xxx block on hybrids.
+    "total_active_power": 13033,
+}
+
+
+def test_register_maps_have_no_undeclared_duplicate_codes():
+    """A code defined twice in one family must be declared and must resolve predictably (#427).
+
+    The per-device merge is a plain dict assignment, so two points sharing a code fight over
+    one entity and the loser's value is discarded silently. The cases in
+    :data:`DELIBERATE_DUPLICATE_CODES` are intentional; anything else is a map bug.
+    """
+    for family, points in REGISTER_MAPS.items():
+        by_code: dict[str, list[ModbusPoint]] = {}
+        for point in points:
+            by_code.setdefault(point.code, []).append(point)
+        for code, rows in by_code.items():
+            if len(rows) < 2:
+                continue
+            assert code in DELIBERATE_DUPLICATE_CODES, (
+                f"{family}: {code} is defined {len(rows)} times; if that is deliberate, declare "
+                f"which register wins in DELIBERATE_DUPLICATE_CODES"
+            )
+            # Last definition wins in decode_registers — assert that is the declared winner,
+            # so reordering the map cannot silently flip a value to a different scale.
+            assert rows[-1].address == DELIBERATE_DUPLICATE_CODES[code], (
+                f"{family}: {code} resolves to address {rows[-1].address}, "
+                f"not the declared winner {DELIBERATE_DUPLICATE_CODES[code]}"
+            )
+
+
+def test_grid_frequency_prefers_the_hybrid_register_and_falls_back():
+    """The SH maps define grid_frequency twice at different scales; the hybrid one must win.
+
+    5035 carries the legacy x0.1 Hz scale and 5241 the preferred x0.01 Hz scale. Getting this
+    backwards is a 10x error on a live sensor that would be easy to miss, so the precedence is
+    pinned here rather than left to map order (#427).
+    """
+    points = tuple(p for p in SH_RT_INPUT_POINTS if p.code == "grid_frequency")
+    assert {p.address for p in points} == {5035, 5241}
+    start = min(p.address for p in points)
+
+    registers = [0] * (max(p.address + p.register_count for p in points) - start)
+    registers[5035 - start] = 500  # legacy scale -> 50.0 Hz
+    registers[5241 - start] = 5001  # preferred scale -> 50.01 Hz
+
+    decoded = decode_registers(points, start, registers)
+    assert decoded["grid_frequency"]["value"] == 50.01  # 5241 wins over the earlier 5035
+
+    # A block that stops short of 5241 (or a firmware that omits it) must fall back to 5035
+    # rather than reporting nothing.
+    fallback = decode_registers(points, start, registers[: 5036 - start])
+    assert fallback["grid_frequency"]["value"] == 50.0
+
+
 def test_daily_yield_diagnostic_dump_surfaces_current_mapping_match():
     """When the current mapping matches the live value, the candidate list shows it (#223)."""
     registers = [0] * DAILY_YIELD_DIAG_COUNT

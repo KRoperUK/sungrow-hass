@@ -363,7 +363,10 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(5114, "mppt4_voltage", "u16", 0.1, "V", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5115, "mppt4_current", "u16", 0.1, "A", nan_value=NAN_U16, omit_zero=True),
     ModbusPoint(5213, "battery_power", "s32", 1, "W", nan_value=NAN_S32),
-    # Preferred grid-frequency register on hybrids (mkaiser/SHx scale 0.01 Hz).
+    # Preferred grid-frequency register on hybrids (mkaiser/SHx scale 0.01 Hz). It shares
+    # the ``grid_frequency`` code with the low-block 5035 above, and decode_registers lets
+    # the *last* definition win — so this one must stay after it, and the tests pin that
+    # order plus the fallback when this register isn't in the block (#427).
     ModbusPoint(5241, "grid_frequency", "u16", 0.01, "Hz"),
     ModbusPoint(5600, "meter_active_power", "s32", 1, "W", nan_value=NAN_S32),
     ModbusPoint(5602, "meter_phase_a_active_power", "s32", 1, "W", nan_value=NAN_S32),
