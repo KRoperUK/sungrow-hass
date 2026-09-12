@@ -454,7 +454,12 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
             _LOGGER.warning("Plant %s failed its initial user-account refresh, skipping: %s", plant_name, err)
             continue
 
-        coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        # Isolate an unexpected probe error to this plant (#115); the coordinator
+        # default (True) is the fail-open fallback.
+        try:
+            coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+        except Exception as err:  # noqa: BLE001 - per-plant isolation; coordinator default is fail-open
+            _LOGGER.warning("Plant %s dispatch-support probe failed, using fail-open default: %s", plant_name, err)
         # User API has no design_capacity_battery plant-detail field in this path; gate
         # battery-only controls on ESS/battery device presence (same fail-open default).
         coordinator.has_battery = _has_battery_device(devices) if devices else True
@@ -508,6 +513,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     if transport is None:
         _LOGGER.warning("Config entry %s missing CONF_TRANSPORT; defaulting to cloud_only", entry.title)
         transport = TRANSPORT_CLOUD_ONLY
+
+    # Register the integration's services once, for *every* transport (idempotent).
+    # ``sungrow.set_battery_mode`` is transport-agnostic — the battery-mode selects
+    # exist on cloud_only, cloud_user and modbus_only — so registering services only on
+    # the OAuth path left the service missing for the other two transports.
+    async_setup_services(hass)
 
     if transport == TRANSPORT_MODBUS_ONLY:
         return await _async_setup_modbus_only(hass, entry)
@@ -576,7 +587,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
         plant_id = str(plant_info["ps_id"])
-        plant_name = plant_info["ps_name"]
+        # A plant payload missing ps_name must not KeyError and abort the whole entry.
+        plant_name = plant_info.get("ps_name") or f"Plant {plant_id}"
 
         # Discover ALL devices first (not just inverter/ESS): dispatch filters down to
         # the dispatch-capable ones, while per-device sensors (issue #74) can use any
@@ -604,8 +616,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             _LOGGER.warning("Plant %s failed its initial data refresh, skipping for now: %s", plant_name, err)
             continue
 
-        coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
-        coordinator.has_battery = await _async_has_battery(plants_service, plant_id, devices)
+        # The capability probes are documented fail-open, but an *unexpected* error in
+        # one plant must not abort setup for the others (#115) — isolate this plant too.
+        # The coordinator's own defaults (True/True) are the fail-open fallback.
+        try:
+            coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
+            coordinator.has_battery = await _async_has_battery(plants_service, plant_id, devices)
+        except Exception as err:  # noqa: BLE001 - per-plant isolation; coordinator defaults are fail-open
+            _LOGGER.warning("Plant %s capability probe failed, using fail-open defaults: %s", plant_name, err)
         devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
 
@@ -654,8 +672,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
     manager = BackfillManager(hass, entry)
     entry.runtime_data.backfill = manager
 
-    # Register the on-demand sungrow.backfill service once (idempotent, Requirement 2.1).
-    async_setup_services(hass)
+    # NB: services are registered once at the top of async_setup_entry for all transports.
 
     async def _async_start_backfill() -> None:
         if not hass.is_running:
@@ -665,7 +682,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             def _on_started(_event: Any) -> None:
                 started.set()
 
-            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+            # listen_once auto-removes after firing; wrap the remover so unload/reload
+            # after HA has started doesn't raise "Unable to remove unknown listener"
+            # (same guard the Modbus path uses below).
+            remove = hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
+
+            @callback
+            def _cancel_start_listener() -> None:
+                with contextlib.suppress(ValueError, KeyError, TypeError):
+                    remove()
+
+            entry.async_on_unload(_cancel_start_listener)
             await started.wait()
         await manager.async_start_automatic()
 

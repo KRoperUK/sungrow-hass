@@ -195,14 +195,15 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
 
     # Defensive back-fill: ensure cloud entries carry app_id (#245).
-    # The unique_id for cloud entries IS the app_id (set during initial setup).
-    # If the data key was lost (corrupt storage, partial migration, older RC builds)
-    # we can recover it from unique_id. Kept here as a safety net even though
+    # Only the transports whose unique_id IS the app_id (set during initial setup) can
+    # recover it this way. cloud_user uses ``user_<email>`` and Modbus-only uses
+    # ``modbus_<serial>``, so back-filling from unique_id would persist a bogus app_id
+    # such as ``user_me@example.com``. Kept here as a safety net even though
     # async_setup_entry also back-fills, since migration runs before setup.
     if config_entry.version >= 3:
         data = dict(config_entry.data)
         transport = data.get(CONF_TRANSPORT)
-        if transport != TRANSPORT_MODBUS_ONLY and not data.get(CONF_APP_ID):
+        if transport in (None, TRANSPORT_CLOUD_ONLY, TRANSPORT_CLOUD_MODBUS) and not data.get(CONF_APP_ID):
             uid = config_entry.unique_id
             if uid and not uid.startswith("modbus_"):
                 data[CONF_APP_ID] = uid

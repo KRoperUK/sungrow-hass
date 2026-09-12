@@ -1131,6 +1131,10 @@ async def test_setup_cloud_user_entry(hass: HomeAssistant):
     assert data.coordinators[0].has_battery is False
     client.async_get_devices.assert_awaited()
     control.async_check_update_support.assert_awaited()
+    # Services are registered for the user-account transport too, not just OAuth.
+    from custom_components.sungrow.services import SERVICE_SET_BATTERY_MODE
+
+    assert hass.services.has_service(DOMAIN, SERVICE_SET_BATTERY_MODE)
 
 
 async def test_setup_cloud_user_filters_plants_by_selection(hass: HomeAssistant):
