@@ -28,13 +28,17 @@ from custom_components.sungrow.const import (
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
     CONF_MODEL,
+    CONF_PLANT_IDS,
     CONF_REDIRECT_URI,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    CONF_USER_ACCOUNT,
+    CONF_USER_PASSWORD,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     DOMAIN,
     TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
 
@@ -1422,3 +1426,134 @@ async def test_cloud_credentials_rejects_wrong_path(hass: HomeAssistant):
     assert result2["type"] == data_entry_flow.FlowResultType.FORM
     assert result2["step_id"] == "cloud_credentials"
     assert result2["errors"] == {CONF_REDIRECT_URI: "invalid_redirect_uri"}
+
+
+# ---------------------------------------------------------------------------
+# cloud_user reauth: account guard + plant-selection preservation
+# ---------------------------------------------------------------------------
+
+
+def _cloud_user_entry(hass: HomeAssistant, *, account: str = "me@example.com", plant_ids: list[str] | None = None):
+    """A cloud_user entry, optionally scoped to a plant selection."""
+    data = {
+        CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+        CONF_USER_ACCOUNT: account,
+        CONF_USER_PASSWORD: "pw",
+        CONF_GATEWAY: "Europe",
+    }
+    if plant_ids is not None:
+        data[CONF_PLANT_IDS] = plant_ids
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=f"user_{account.lower()}",
+        title=f"Sungrow ({account})",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _start_cloud_user_reauth(hass: HomeAssistant, entry):
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=entry.data,
+    )
+
+
+async def test_cloud_user_reauth_preserves_plant_selection(hass: HomeAssistant):
+    """Re-authenticating must not drop the entry's plant selection (#358).
+
+    The finaliser passed ``data=entry_data`` built from the credentials alone, which
+    replaced entry data wholesale — so a multi-plant account silently went back to
+    serving *every* plant after any credential refresh.
+    """
+    entry = _cloud_user_entry(hass, plant_ids=["111"])
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 111, "ps_name": "Home"}])
+
+    result = await _start_cloud_user_reauth(hass, entry)
+    assert result["step_id"] == "cloud_user"
+
+    with (
+        patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client),
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "new-pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "reauth_successful"
+    assert entry.data[CONF_PLANT_IDS] == ["111"]
+    assert entry.data[CONF_USER_PASSWORD] == "new-pw"
+
+
+async def test_cloud_user_reauth_picker_defaults_to_current_selection(hass: HomeAssistant):
+    """The picker pre-selects the plants already configured, not all of them.
+
+    Submitting reauth unchanged used to re-include every plant the account serves,
+    silently undoing an earlier exclusion.
+    """
+    entry = _cloud_user_entry(hass, plant_ids=["111", "333"])
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(
+        return_value=[
+            {"ps_id": 111, "ps_name": "Home"},
+            {"ps_id": 222, "ps_name": "Holiday"},
+            {"ps_id": 333, "ps_name": "Office"},
+        ]
+    )
+
+    result = await _start_cloud_user_reauth(hass, entry)
+    with patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "me@example.com",
+                CONF_USER_PASSWORD: "pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+
+    assert result2["step_id"] == "plant_selection"
+    marker = next(k for k in result2["data_schema"].schema if getattr(k, "schema", None) == CONF_PLANT_IDS)
+    # HA's selector wraps an explicit default in a factory, so resolve it either way.
+    default = marker.default
+    assert (default() if callable(default) else default) == ["111", "333"]  # not all three
+
+
+async def test_cloud_user_reauth_different_account_aborts(hass: HomeAssistant):
+    """Typing a different email must not silently rebind the entry to another account.
+
+    The account is the entry's identity (``unique_id`` = ``user_<email>``), so a rebind
+    would leave the unique_id and title describing the old account.
+    """
+    entry = _cloud_user_entry(hass, account="old@example.com")
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 1, "ps_name": "Home"}])
+
+    result = await _start_cloud_user_reauth(hass, entry)
+    with patch("custom_components.sungrow._config_flow._base.UserAuth", return_value=client):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USER_ACCOUNT: "new@example.com",
+                CONF_USER_PASSWORD: "pw",
+                CONF_GATEWAY: "Europe",
+            },
+        )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "wrong_account"
+    # The entry is untouched.
+    assert entry.data[CONF_USER_ACCOUNT] == "old@example.com"

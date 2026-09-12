@@ -77,6 +77,16 @@ class ReconfigureAndReauthMixin(_SungrowFlowBase):
         # updates the WiNet-S host (#159), not the cloud app key/secret/gateway.
         if transport == TRANSPORT_MODBUS_ONLY:
             return await self.async_step_reconfigure_modbus(user_input)  # type: ignore[attr-defined,no-any-return]
+        # A user-account entry has no OAuth app credentials either — it has an
+        # email/password login, collected by the same step as setup. Without this branch
+        # such an entry fell through to the OAuth form below, which can never succeed:
+        # these entries carry no redirect URI, so submitting always returned
+        # ``invalid_redirect_uri`` and reconfigure was impossible to complete.
+        if transport == TRANSPORT_CLOUD_USER:
+            self._reauth_entry = entry
+            self._is_reconfigure = True
+            self._transport = transport
+            return await self.async_step_cloud_user(user_input)  # type: ignore[attr-defined,no-any-return]
         self._reauth_entry = entry
         self._is_reconfigure = True
         self._transport = transport
