@@ -25,6 +25,7 @@ dashboard or a separate feature).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -103,6 +104,9 @@ class SungrowScheduler:
     windows: list[ScheduleWindow] = field(default_factory=list)
     _cancels: list[CALLBACK_TYPE] = field(default_factory=list, init=False, repr=False)
     _current_window: ScheduleWindow | None = field(default=None, init=False, repr=False)
+    # In-flight boundary tasks, so a reload/unload can cancel a mode change that is
+    # mid-write instead of letting it actuate against a torn-down entry.
+    _tasks: set[asyncio.Task[None]] = field(default_factory=set, init=False, repr=False)
 
     @classmethod
     def from_entry(cls, hass: HomeAssistant, entry: SungrowConfigEntry) -> SungrowScheduler:
@@ -207,10 +211,13 @@ class SungrowScheduler:
 
     @callback
     def async_stop(self) -> None:
-        """Cancel every armed transition callback. Idempotent."""
+        """Cancel every armed transition callback and in-flight task. Idempotent."""
         for cancel in self._cancels:
             cancel()
         self._cancels.clear()
+        for task in list(self._tasks):
+            task.cancel()
+        self._tasks.clear()
         self._current_window = None
 
     def _make_transition_callback(self, window: ScheduleWindow, *, entering: bool) -> Callable[[datetime], None]:
@@ -219,8 +226,11 @@ class SungrowScheduler:
         @callback
         def _on_boundary(_now: datetime) -> None:
             # ``async_track_time_change`` fires the callback synchronously; kick
-            # the mode change into a task so we can await the select entity.
-            self.hass.async_create_task(self._on_boundary_impl(window, entering=entering))
+            # the mode change into a task so we can await the select entity. Track
+            # it so async_stop can cancel a mode change that is still in flight.
+            task = self.hass.async_create_task(self._on_boundary_impl(window, entering=entering))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
         return _on_boundary
 
@@ -262,15 +272,21 @@ class SungrowScheduler:
             self._current_window = None
             await self._apply_mode(_MODE_AFTER_WINDOW)
         else:
-            _LOGGER.debug(
-                "Entry %s: window %s-%s ended but enclosing window %s-%s still active; leaving mode alone",
+            # The inner window overrode an enclosing one (latest start wins); when it
+            # ends we must put the enclosing window's mode back, or the inverter keeps
+            # the inner mode until the outer window also ends.
+            _LOGGER.info(
+                "Entry %s: window %s-%s ended; re-applying enclosing window %s-%s (%s)",
                 self.entry.title,
                 window.start.strftime("%H:%M"),
                 window.end.strftime("%H:%M"),
                 still_active.start.strftime("%H:%M"),
                 still_active.end.strftime("%H:%M"),
+                still_active.mode,
             )
             self._current_window = still_active
+            if still_active.mode != window.mode:
+                await self._apply_mode(still_active.mode)
 
     async def _apply_mode(self, mode_key: str) -> None:
         """Set the battery mode on every battery-mode select owned by this entry.

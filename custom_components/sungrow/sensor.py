@@ -412,8 +412,10 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # 0–1 fraction from iSolarCloud instead of a 0–100 percentage. Rescale to
         # percent so it displays correctly under the "%" unit. Skip 0 (empty battery is
         # 0 either way) and only trigger when the value fits the fraction shape
-        # (0 < num ≤ 1.0); anything larger is already a percentage.
-        if self._attr_device_class == SensorDeviceClass.BATTERY and 0 < num <= 1.0:
+        # (0 < num < 1.0). The upper bound is exclusive so a genuine 1 % reading on a
+        # 0–100 plant is not blown up to 100 % (#409); a fraction reading of exactly 1.0
+        # is indistinguishable from 1 % and is left as-is.
+        if self._attr_device_class == SensorDeviceClass.BATTERY and 0 < num < 1.0:
             return num * 100
         return num
 
