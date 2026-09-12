@@ -13,12 +13,14 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from ..const import (
+    CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_HOST,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
     DEFAULT_MODBUS_SCAN_INTERVAL,
+    DOMAIN,
     TRANSPORT_MODBUS_ONLY,
 )
 from ._base import _SungrowFlowBase
@@ -39,9 +41,20 @@ class ZeroconfMixin(_SungrowFlowBase):
         serial, model = _parse_winet_properties(discovery_info.properties)
         if not serial:
             return self.async_abort(reason="not_sungrow_device")
-        await self.async_set_unique_id(f"modbus_{serial}")
-        # Already set up? Update the host in case the WiNet-S's IP changed, then stop.
-        self._abort_if_unique_id_configured(updates={CONF_MODBUS_HOST: host})
+        unique_id = f"modbus_{serial}"
+        await self.async_set_unique_id(unique_id)
+        # Already configured? Abort — and only refresh the stored host when it came from
+        # discovery and the user never changed it (the dongle may have moved to a new
+        # DHCP lease). A host the user chose explicitly, e.g. the inverter's dedicated
+        # RJ45 Modbus TCP port, must never be overwritten by the WiNet-S address we
+        # happened to discover (#402).
+        existing = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, unique_id)
+        updates = (
+            {CONF_MODBUS_HOST: host}
+            if existing is not None and existing.data.get(CONF_DISCOVERY_MANAGED_HOST)
+            else None
+        )
+        self._abort_if_unique_id_configured(updates=updates)
         self._discovered_modbus_host = host
         self.init_info = {CONF_SERIAL: serial, CONF_MODEL: model or "Inverter"}
         self.context["title_placeholders"] = {"name": f"Sungrow {model or 'inverter'}"}
@@ -61,6 +74,9 @@ class ZeroconfMixin(_SungrowFlowBase):
                     CONF_SERIAL: self.init_info[CONF_SERIAL],
                     CONF_MODEL: model,
                     CONF_MODBUS_HOST: self._discovered_modbus_host,
+                    # The host came from discovery, so a later re-discovery may follow a
+                    # moved dongle — until the user sets the host explicitly (#402).
+                    CONF_DISCOVERY_MANAGED_HOST: True,
                 },
                 options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
             )

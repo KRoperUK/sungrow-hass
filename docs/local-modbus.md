@@ -135,7 +135,11 @@ read — you supply the missing pieces and it creates the entry.
 ### Reconfigure / IP change
 
 - **Options** on the local entry: poll interval and optional daily-yield register debug.
-- **Reconfigure** (or rediscovery): update the WiNet-S host if DHCP moved the dongle.
+- **Reconfigure**: change the host yourself, for example to use the inverter's dedicated
+  RJ45 Modbus TCP port instead of the WiNet-S.
+- **DHCP / IP change**: an entry created from WiNet-S discovery follows the dongle to a
+  new address automatically when it is re-discovered. A host **you** set (manual wizard or
+  Reconfigure) is never overwritten by discovery — update it with **Reconfigure**.
 
 ## Upgrading from hybrid (old “Modbus host on cloud”)
 
