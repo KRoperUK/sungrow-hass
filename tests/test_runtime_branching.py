@@ -74,6 +74,39 @@ async def test_setup_entry_modbus_only(hass: HomeAssistant):
     assert entry.state.name == "LOADED"
 
 
+async def test_setup_entry_modbus_only_registers_services(hass: HomeAssistant):
+    """A Modbus-only entry still registers the integration's services.
+
+    ``sungrow.set_battery_mode`` is transport-agnostic — the battery-mode selects exist
+    on every transport — so registering services only on the OAuth path left the service
+    missing when the sole entry was local Modbus (automations failed with "service not
+    found").
+    """
+    from custom_components.sungrow.services import SERVICE_BACKFILL, SERVICE_SET_BATTERY_MODE
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_read_realtime = AsyncMock(return_value={"grid_frequency": {"value": 49.9}})
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.services.has_service(DOMAIN, SERVICE_SET_BATTERY_MODE)
+    assert hass.services.has_service(DOMAIN, SERVICE_BACKFILL)
+
+
 # ---------------------------------------------------------------------------
 # missing transport → defaults to cloud_only + warning
 # ---------------------------------------------------------------------------

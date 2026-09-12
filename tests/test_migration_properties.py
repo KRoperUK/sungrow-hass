@@ -11,12 +11,14 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import async_migrate_entry
 from custom_components.sungrow.const import (
+    CONF_APP_ID,
     CONF_MODBUS_HOST,
     CONF_SCAN_INTERVAL,
     CONF_TRANSPORT,
     DOMAIN,
     TRANSPORT_CLOUD_MODBUS,
     TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
     TRANSPORT_MODBUS_ONLY,
 )
 
@@ -144,6 +146,54 @@ async def test_already_current_no_changes(hass):
     assert result is True
     assert entry.version == CURRENT_VERSION
     assert entry.data[CONF_TRANSPORT] == TRANSPORT_CLOUD_ONLY
+
+
+# ---------------------------------------------------------------------------
+# unique_id → app_id back-fill only applies to OAuth cloud entries (#245)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_app_id_backfill_skipped_for_cloud_user(hass):
+    """The unique_id→app_id back-fill must not run for cloud_user entries.
+
+    cloud_user unique_ids are ``user_<email>``, so the generic back-fill would persist a
+    bogus app_id such as ``user_me@example.com`` on the entry (and it would then re-enter
+    the OAuth-shaped reconfigure path).
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            "user_account": "me@example.com",
+            "user_password": "pw",
+        },
+        version=5,
+        unique_id="user_me@example.com",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert CONF_APP_ID not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_app_id_backfill_still_applies_to_cloud_only(hass):
+    """OAuth cloud entries still recover a lost app_id from their unique_id."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_TRANSPORT: TRANSPORT_CLOUD_ONLY, "app_key": "k"},
+        version=CURRENT_VERSION,
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert entry.data[CONF_APP_ID] == "test_app_id"
 
 
 # ---------------------------------------------------------------------------
