@@ -46,6 +46,59 @@ def test_meter_reset_reanchors():
     assert new.last_total == 10.0
 
 
+def test_zero_baseline_reanchors_instead_of_reporting_lifetime_total():
+    """A 0 baseline must not make daily report the whole lifetime yield (#400).
+
+    The SG5.0RS report showed ``daily_yield`` = 16064 (the lifetime register), which is
+    exactly ``total − 0``: a stored baseline of 0 makes the subtraction subtract nothing
+    and "today" becomes the plant's entire history.
+    """
+    state = DailyYieldBaseline(baseline=0.0, baseline_date=date(2026, 8, 2), last_total=0.0)
+    daily, new = step_daily_yield(16064.0, date(2026, 8, 2), state)
+    assert daily == 0.0
+    assert new.baseline == 16064.0
+    assert new.last_total == 16064.0
+
+
+def test_zero_last_total_at_rollover_reanchors():
+    """A day-boundary sample of 0 (firmware reboot) must not anchor the new day at 0."""
+    state = DailyYieldBaseline(baseline=6462.0, baseline_date=date(2026, 8, 1), last_total=0.0)
+    daily, new = step_daily_yield(16064.0, date(2026, 8, 2), state)
+    assert daily == 0.0
+    assert new.baseline == 16064.0
+    assert new.baseline_date == date(2026, 8, 2)
+
+
+def test_negative_baseline_reanchors():
+    """A negative stored baseline is unusable too and re-anchors at the current total."""
+    state = DailyYieldBaseline(baseline=-5.0, baseline_date=date(2026, 8, 2), last_total=-5.0)
+    daily, new = step_daily_yield(100.0, date(2026, 8, 2), state)
+    assert daily == 0.0
+    assert new.baseline == 100.0
+
+
+def test_genuine_zero_plant_recovers_without_absurd_day():
+    """A plant genuinely sitting at 0 lifetime recovers sanely, never reporting a lifetime total.
+
+    Trade-off, and the reason this is a documented one-off: the first non-zero sample
+    after a real 0 re-anchors (daily 0) rather than crediting the whole jump, because a
+    0 baseline is indistinguishable from a glitched one. Growth is measured from that
+    re-anchor on, so at most the first day's opening increment is lost — vastly better
+    than reporting the entire lifetime yield (#400).
+    """
+    state = DailyYieldBaseline()
+    daily, new = step_daily_yield(0.0, date(2026, 8, 2), state)
+    assert daily == 0.0
+    assert new.baseline == 0.0
+
+    daily2, new2 = step_daily_yield(5.0, date(2026, 8, 2), new)
+    assert daily2 == 0.0  # re-anchored, not 5.0 reported as "today"
+    assert new2.baseline == 5.0
+
+    daily3, _ = step_daily_yield(7.0, date(2026, 8, 2), new2)
+    assert daily3 == 2.0  # normal tracking resumes
+
+
 def test_store_roundtrip():
     """Baseline survives serialize → deserialize."""
     state = DailyYieldBaseline(baseline=1.5, baseline_date=date(2026, 7, 13), last_total=2.0)

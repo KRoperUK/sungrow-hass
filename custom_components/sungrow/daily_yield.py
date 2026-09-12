@@ -61,6 +61,21 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _usable_anchor(value: float | None, total: float) -> float:
+    """Return a usable start-of-day baseline, re-anchoring at ``total`` when unusable.
+
+    ``None`` means "no history yet". A non-positive value is equally unusable: a lifetime
+    counter reading 0 (a firmware reboot, or a block that glitched at the day boundary)
+    is never a plausible start-of-day anchor for a plant that is now reporting a
+    non-zero lifetime total. Subtracting either would make ``daily`` report the plant's
+    *entire* lifetime yield — the bug behind #400 — so both re-anchor to the current
+    total and daily restarts from 0 instead.
+    """
+    if value is None or value <= 0:
+        return total
+    return value
+
+
 def step_daily_yield(
     total_yield: float,
     local_date: date,
@@ -73,16 +88,19 @@ def step_daily_yield(
       of energy at local midnight when polls run through the night.
     * On the first sample ever (no history), baseline is set to the current total so
       daily starts at 0 until the next midnight (midday install / empty store).
+    * A missing or non-positive baseline (``None`` or 0) is re-anchored to the current
+      total, so a lifetime counter that read 0 at the day boundary can't make daily
+      report the whole lifetime yield (#400).
     * If total drops below the baseline (meter reset / firmware glitch), the baseline
       resets to the new total and daily is 0.
     """
     if state.baseline_date != local_date:
         # Prefer yesterday's last sample as start-of-today; else anchor at current total
         # (fresh install / empty store — daily stays 0 until more production today).
-        new_baseline = state.last_total if state.last_total is not None else total_yield
+        new_baseline = _usable_anchor(state.last_total, total_yield)
         new_date = local_date
     else:
-        new_baseline = state.baseline if state.baseline is not None else total_yield
+        new_baseline = _usable_anchor(state.baseline, total_yield)
         new_date = local_date
 
     if total_yield < new_baseline:
