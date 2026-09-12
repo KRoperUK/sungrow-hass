@@ -1054,10 +1054,16 @@ def daily_yield_diagnostic_dump(registers: list[int], block_start: int = DAILY_Y
         "start": block_start,
         "raw": raw,
         "candidates": candidates,
+        # The register this diagnostic reads. Note: on SG-RS families the integration
+        # derives ``daily_yield`` from ``total_yield − start-of-day baseline`` (wire 5002
+        # never resets at midnight — see daily_yield.py), so the sensor value will not
+        # equal ``raw * scale`` here. #400 was reported as this diagnostic disagreeing
+        # with the sensor; it is an annotation aid, not the daily_yield source.
         "current_mapping": {
             "address": 5002,
             "raw": int(registers[5002 - block_start]) if 5002 - block_start in range(len(registers)) else None,
             "scale": 0.1,
             "unit": "kWh",
         },
+        "daily_yield_source": "derived_total_minus_baseline",
     }

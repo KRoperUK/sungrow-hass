@@ -968,6 +968,9 @@ def test_daily_yield_diagnostic_dump_lists_every_candidate_address_and_scale():
     assert dump["raw"]["5003"] == 6330
     # The current mapping is echoed for one-glance comparison with the live entity.
     assert dump["current_mapping"] == {"address": 5002, "raw": 640, "scale": 0.1, "unit": "kWh"}
+    # ...and labelled as an annotation, because on SG-RS the sensor value is derived
+    # from total_yield − baseline and so deliberately won't equal raw * scale (#400).
+    assert dump["daily_yield_source"] == "derived_total_minus_baseline"
     # Every (address, scale) candidate the diagnostic tracks is present.
     candidate_pairs = {(c["address"], c["scale"]) for c in dump["candidates"]}
     for address in DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES:
