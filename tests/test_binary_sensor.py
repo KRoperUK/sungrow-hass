@@ -375,13 +375,16 @@ def test_decode_power_flow_status_returns_every_key():
 # ---------------------------------------------------------------------------
 
 
-def _plant_fault_coordinator(*, plant_detail=None, data=None, fault_list=None, plants_service=None, uses_user_api=True):
+def _plant_fault_coordinator(
+    *, plant_detail=None, data=None, fault_list=None, fault_summary=None, plants_service=None, uses_user_api=True
+):
     coordinator = MagicMock()
     coordinator.plant_id = "12345"
     coordinator.plant_name = "Test Plant"
     coordinator.plant_detail = plant_detail or {}
     coordinator.data = data or {}
     coordinator.fault_list = fault_list or []
+    coordinator.fault_summary = fault_summary or {}
     coordinator.plants_service = plants_service
     coordinator.uses_user_api = uses_user_api
     coordinator.devices = []
@@ -406,6 +409,25 @@ def test_plant_fault_sensor_on_off_unknown():
     # cloud_user surfaces the counts as realtime points instead of plant-detail fields.
     via_points = SungrowPlantFaultBinarySensor(_plant_fault_coordinator(data={"alarm_count": {"value": 3}}))
     assert via_points.is_on is True
+
+
+def test_plant_fault_sensor_uses_fault_count_api_shape():
+    """getDevFaultCountByPsId's authoritative fault/warn tallies drive the sensor (#457).
+
+    Live shape: {"fault": "0", "warn": "0", "fault_ratio": ..., "warn_ratio": ...}.
+    """
+    from custom_components.sungrow.binary_sensor import SungrowPlantFaultBinarySensor
+
+    clear = SungrowPlantFaultBinarySensor(
+        _plant_fault_coordinator(fault_summary={"fault": "0", "warn": "0", "fault_ratio": "0", "warn_ratio": "0"})
+    )
+    assert clear.is_on is False
+
+    faulted = SungrowPlantFaultBinarySensor(_plant_fault_coordinator(fault_summary={"fault": "2", "warn": "1"}))
+    assert faulted.is_on is True
+    attrs = faulted.extra_state_attributes
+    assert attrs["fault_count"] == 2
+    assert attrs["alarm_count"] == 1
 
 
 def test_plant_fault_sensor_attributes_expose_latest_fault():
