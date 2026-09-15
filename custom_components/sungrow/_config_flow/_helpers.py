@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 import voluptuous as vol
 
@@ -82,6 +84,45 @@ def _normalize_redirect_uri(raw: str | None) -> str | None:
     if path in ("", "/"):
         return f"{scheme}://{host}{OAUTH_CALLBACK_PATH}"
     return None
+
+
+# Matches an OAuth ``code`` parameter anywhere in pasted input — including a bare
+# ``code=...`` query string or fragment (``code=...``, ``?code=...``, ``#code=...``) that
+# carries no scheme, which is how users paste only part of the address bar.
+_CODE_PARAM_RE = re.compile(r"(?:^|[?&#])code=([^&#\s]*)")
+
+
+def _extract_authorization_code(raw: str | None) -> str | None:
+    """Pull the OAuth ``code`` out of whatever the user pasted, or ``None``.
+
+    The manual-entry fallback accepts a bare code, a full redirect URL (query *or*
+    fragment), or just the ``code=...`` query string / fragment copied straight out of
+    the address bar.
+
+    That last shape is what stranded users in #396: only inputs starting with the
+    literal ``http`` were parsed, so a pasted ``code=E5s9st`` was trusted verbatim and
+    sent to the token endpoint as the literal code ``"code=E5s9st"`` — which
+    iSolarCloud rejects as an invalid authorization code. The scheme test was also
+    case-sensitive, so an upper-case ``HTTP://`` URL was treated as a bare code.
+
+    Returns ``None`` when the input is empty, or is a URL/query that carries no usable
+    ``code`` parameter — callers surface a validation error rather than sending a
+    value that cannot work. A value with a known non-``code`` shape (e.g. a URL with a
+    different query) is refused rather than guessed at.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    match = _CODE_PARAM_RE.search(text)
+    if match is not None:
+        return unquote(match.group(1)) or None
+    # No ``code`` parameter: a URL or a stray ``code=`` fragment means the user pasted
+    # the wrong thing, so refuse it instead of sending the whole string as the code.
+    if "code=" in text or "://" in text:
+        return None
+    return text
 
 
 def _parse_winet_properties(props: dict[str, Any]) -> tuple[str | None, str | None]:

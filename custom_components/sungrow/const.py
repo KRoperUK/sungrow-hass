@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from pysolarcloud import Server
 from pysolarcloud.plants import DeviceType
 
 DOMAIN = "sungrow"
@@ -88,16 +89,20 @@ MAX_POINTS_PER_CALL = 50
 BACKFILL_MIN_CALL_INTERVAL = 1.0
 BACKFILL_MAX_RETRIES = 3
 
-GATEWAYS = {
-    "Europe": "https://gateway.isolarcloud.eu",
-    "International": "https://gateway.isolarcloud.com.hk",
-    "China": "https://gateway.isolarcloud.com",
-    "Australia": "https://augateway.isolarcloud.com",
-    "India": "https://gateway.isolarcloud.in",
-}
+# Region → iSolarCloud gateway host, in the order the config flow offers them. The
+# *values* come from the library's ``Server`` enum, the single source of truth for the
+# API hosts (#458) — so the integration can never advertise a region the OAuth URL
+# builder doesn't know, which is exactly how #404 shipped (India was added here while
+# the pinned library had no India member, so picking it raised "Unknown iSolarCloud
+# server host" instead of starting authorization).
+_GATEWAY_REGIONS = ("Europe", "International", "China", "Australia", "India")
+GATEWAYS: dict[str, str] = {name: Server[name].value for name in _GATEWAY_REGIONS}
 
 # Web console URL per region, used as the device `configuration_url` so the
-# "Visit device" link points at the right regional iSolarCloud portal.
+# "Visit device" link points at the right regional iSolarCloud portal. Deliberately not
+# ``Server.web_console_url``: that returns the ``web3.*`` app console, whereas these are
+# the user-facing portals a customer signs in to (``isolarcloud.eu``, not
+# ``web3.isolarcloud.eu``). Keep the two maps covering the same regions.
 GATEWAY_CONSOLE_URLS = {
     "Europe": "https://isolarcloud.eu",
     "International": "https://isolarcloud.com.hk",
