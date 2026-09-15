@@ -34,6 +34,28 @@ def test_gateway_urls_are_unique():
     assert len(urls) == len(set(urls)), "Duplicate gateway URLs found"
 
 
+def test_gateways_are_derived_from_the_library_server_enum():
+    """``GATEWAYS`` mirrors ``pysolarcloud.Server`` so the two can never drift (#458).
+
+    The host values belong to the library — it builds the OAuth URL from them — so
+    deriving them here means the integration cannot offer a region the library is unable
+    to authorize. That is the #404 failure mode: India was advertised locally before the
+    pinned library knew the region, and choosing it raised "Unknown iSolarCloud server
+    host" instead of starting the flow.
+    """
+    from pysolarcloud import Server
+
+    expected = {server.name: server.value for server in Server}
+    assert expected == GATEWAYS
+
+
+def test_console_urls_cover_every_region():
+    """Every selectable region has a console URL — none silently falls back (#458)."""
+    from custom_components.sungrow.const import GATEWAY_CONSOLE_URLS
+
+    assert set(GATEWAY_CONSOLE_URLS) == set(GATEWAYS)
+
+
 def test_every_gateway_builds_a_library_auth_url():
     """Every region we offer must resolve in the library's ``auth_url`` (#404).
 
