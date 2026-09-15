@@ -34,10 +34,31 @@ from ..const import (
 )
 from ._helpers import _parse_extra_measure_points
 
-# Fixed number of schedule slots exposed in the options-flow UI (#359). Two covers
-# the common tariff pattern (cheap overnight charge + optional peak discharge); users
-# who need more can add windows via YAML options edits or wait for a follow-up UI.
-_SCHEDULE_SLOTS = 2
+# Schedule slots exposed in the options-flow UI (#359/#433). The engine reads an
+# arbitrary list from ``CONF_SCHEDULE_WINDOWS`` and always has, so the only thing that
+# capped users at two windows was this form. Instead of a fixed pair, the form renders
+# one empty slot beyond what is already configured — so filling the last slot reveals
+# another — up to ``_SCHEDULE_MAX_SLOTS``. That keeps the familiar two-slot layout for
+# everyone who never needs more, with no menu to click through, and round-trips an
+# existing window list unchanged.
+#
+# Four is the ceiling because every slot needs its own translated start/end/mode labels
+# in six files; it comfortably covers the tariff shape in #433 (cheap / shoulder / peak,
+# plus spare). Raising it means adding the matching labels.
+_SCHEDULE_MIN_SLOTS = 2
+_SCHEDULE_MAX_SLOTS = 4
+
+
+def _schedule_slot_count(current_options: Mapping[str, Any]) -> int:
+    """Return how many schedule slots the form should render (#433).
+
+    One more than is configured (so there is always somewhere to add a window), never
+    fewer than the historical two, and capped so a runaway list can't produce an absurd
+    form.
+    """
+    configured = len(current_options.get(CONF_SCHEDULE_WINDOWS) or [])
+    return min(max(_SCHEDULE_MIN_SLOTS, configured + 1), _SCHEDULE_MAX_SLOTS)
+
 
 # Mode options offered per schedule slot, mirroring the keys accepted by
 # ``sungrow.set_battery_mode`` and :mod:`..schedule`.
@@ -74,18 +95,20 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = "invalid_extra_measure_points"
                 _LOGGER.warning("Invalid extra measure points input: %s", exc)
             else:
-                schedule_windows, schedule_errors = _collect_schedule_windows(user_input)
+                schedule_windows, schedule_errors = _collect_schedule_windows(
+                    user_input, _schedule_slot_count(self.config_entry.options)
+                )
                 errors.update(schedule_errors)
                 if not errors:
                     data = {**user_input, CONF_EXTRA_MEASURE_POINTS: extras}
                     data.pop(CONF_MODBUS_HOST, None)
                     data.pop(CONF_MODBUS_DEBUG_DAILY_YIELD, None)
                     # Strip the per-slot schedule fields — they're stored as a single
-                    # normalised list under ``CONF_SCHEDULE_WINDOWS`` (#359).
-                    for slot in range(1, _SCHEDULE_SLOTS + 1):
-                        data.pop(f"schedule_{slot}_start", None)
-                        data.pop(f"schedule_{slot}_end", None)
-                        data.pop(f"schedule_{slot}_mode", None)
+                    # normalised list under ``CONF_SCHEDULE_WINDOWS`` (#359). Popping by
+                    # prefix (rather than counting slots) means a key for a slot this
+                    # form rendered is always removed, however many it rendered.
+                    for key in [k for k in data if k.startswith("schedule_")]:
+                        data.pop(key, None)
                     data[CONF_SCHEDULE_WINDOWS] = schedule_windows
                     # cloud_modbus transport was retired in #348; the options flow no
                     # longer offers modbus_host on cloud entries. Local Modbus is set up
@@ -115,9 +138,9 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
         # ``modbus_host`` field — users who want local Modbus add a ``Modbus Only``
         # entry alongside their cloud one.
 
-        # Scheduled forced-charge / forced-discharge windows (#359). Two fixed slots
-        # cover the typical tariff shape; each slot is a triple of start / end /
-        # mode fields. Leaving both start and end blank disables that slot.
+        # Scheduled forced-charge / forced-discharge windows (#359). The form renders one
+        # slot per configured window plus a spare; each slot is a triple of start / end /
+        # mode fields. Leaving both start and end blank disables that slot (#433).
         schedule_fields = _build_schedule_slot_schema(self.config_entry.options)
         schema_fields.update(schedule_fields)
 
@@ -169,7 +192,8 @@ def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any,
     Each slot contributes three fields to the options form: a start-time picker,
     an end-time picker, and a mode dropdown. Defaults are pulled from the
     entry's currently-persisted ``CONF_SCHEDULE_WINDOWS`` (if any) so re-opening
-    the options form shows the values the user last submitted.
+    the options form shows the values the user last submitted. The number of slots
+    grows with the configured list (#433).
     """
     from homeassistant.helpers.selector import (
         SelectOptionDict,
@@ -180,7 +204,7 @@ def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any,
 
     current_windows = list(current_options.get(CONF_SCHEDULE_WINDOWS) or [])
     fields: dict[Any, Any] = {}
-    for slot in range(1, _SCHEDULE_SLOTS + 1):
+    for slot in range(1, _schedule_slot_count(current_options) + 1):
         row = current_windows[slot - 1] if slot - 1 < len(current_windows) else {}
         start_default = str(row.get("start") or "")
         end_default = str(row.get("end") or "")
@@ -218,9 +242,11 @@ def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any,
 
 def _collect_schedule_windows(
     user_input: dict[str, Any],
+    slots: int,
 ) -> tuple[list[dict[str, str]], dict[str, str]]:
     """Read the per-slot fields back into a normalised ``CONF_SCHEDULE_WINDOWS`` list.
 
+    ``slots`` must be the count the form rendered (see :func:`_schedule_slot_count`).
     Returns ``(windows, errors)``: a slot with both start and end blank is treated
     as "disabled" and simply omitted; a half-populated slot (only one of start /
     end set) is a user error surfaced as ``invalid_schedule_window`` so they can
@@ -229,7 +255,7 @@ def _collect_schedule_windows(
     """
     windows: list[dict[str, str]] = []
     errors: dict[str, str] = {}
-    for slot in range(1, _SCHEDULE_SLOTS + 1):
+    for slot in range(1, slots + 1):
         start = (user_input.get(f"schedule_{slot}_start") or "").strip()
         end = (user_input.get(f"schedule_{slot}_end") or "").strip()
         mode = (user_input.get(f"schedule_{slot}_mode") or "").strip()

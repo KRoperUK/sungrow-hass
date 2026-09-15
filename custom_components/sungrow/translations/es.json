@@ -156,7 +156,13 @@
           "schedule_1_mode": "Programación 1 — modo de batería",
           "schedule_2_start": "Programación 2 — inicio (HH:MM, hora local)",
           "schedule_2_end": "Programación 2 — fin (HH:MM, hora local)",
-          "schedule_2_mode": "Programación 2 — modo de batería"
+          "schedule_2_mode": "Programación 2 — modo de batería",
+          "schedule_3_start": "Programación 3 — inicio (HH:MM, hora local)",
+          "schedule_3_end": "Programación 3 — fin (HH:MM, hora local)",
+          "schedule_3_mode": "Programación 3 — modo de batería",
+          "schedule_4_start": "Programación 4 — inicio (HH:MM, hora local)",
+          "schedule_4_end": "Programación 4 — fin (HH:MM, hora local)",
+          "schedule_4_mode": "Programación 4 — modo de batería"
         }
       },
       "modbus_options": {
