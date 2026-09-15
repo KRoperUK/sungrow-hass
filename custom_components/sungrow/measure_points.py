@@ -316,11 +316,89 @@ PERCENT_FRACTION_POINT_IDS = frozenset(
 )
 
 
+# --- Cumulative lifetime energy (issue #431) ----------------------------------
+# Genuinely monotonic lifetime energy counters — battery charge/discharge totals,
+# grid import/export totals and plant lifetime yields — pinned to ENERGY /
+# TOTAL_INCREASING so Home Assistant's Energy dashboard accepts them. These already
+# classify by their "Wh"/"kWh" unit, but pinning them makes the intent explicit and
+# keeps the classification correct even on a firmware/transport that reports the value
+# with the unit omitted (where the id/code would otherwise fall through the unit map).
+# Keyed by the cloud numeric point ID *and* the local-Modbus code (on the Modbus path
+# ``point_id`` falls back to the code), so the same monotonic guarantee holds on both
+# transports.
+_CUMULATIVE_ENERGY_POINT_IDS = frozenset(
+    {
+        # Cloud — battery lifetime charge/discharge energy.
+        "58606",  # Total Battery Charging Energy (common-battery)
+        "58607",  # Total Battery Discharging Energy (common-battery)
+        "13034",  # Total Battery Charging Energy (ESS inverter)
+        "13035",  # Total Battery Discharging Energy (ESS inverter)
+        "13176",  # Total Battery Charging Energy from PV
+        "24622",  # ESS Total Charge (EMS device)
+        "24623",  # ESS Total Discharge (EMS device)
+        # Cloud — grid import/export lifetime energy.
+        "8030",  # Meter Forward Active Energy (lifetime import)
+        "8031",  # Meter Reverse Active Energy (lifetime export)
+        "13125",  # Total Feed-in Energy (ESS inverter)
+        "13148",  # Total Purchased Energy (ESS inverter)
+        "13175",  # Total Feed-in Energy (PV) — OAuth
+        "83123",  # Total Feed-in Energy (PV) — user-cloud getPsDetail (#281)
+        "83075",  # Feed-in Energy Total — open API
+        # Cloud — plant lifetime yield.
+        "13134",  # Total PV Yield
+        # Local Modbus — lifetime totals (code == point_id on the Modbus path).
+        "total_yield",
+        "total_pv_gen_battery_discharge",
+        "total_exported_energy_from_pv",
+        "total_battery_charge_from_pv",
+        "total_direct_energy_consumption",
+        "total_battery_discharge",
+        "total_battery_charge",
+        "total_imported_energy",
+        "total_exported_energy",
+    }
+)
+
+# --- Daily / resetting energy (issue #431 / #400 / #401) ----------------------
+# Local-Modbus *daily* energy registers are firmware-dependent and cannot be trusted
+# to be monotonic: on some SG-RS firmware the "daily" register climbs with lifetime
+# energy and never resets at midnight (#400), and the SH daily-imported register can
+# read a flat 0 (#401). Marking such a register TOTAL_INCREASING lets a lifetime value
+# masquerade as "today" and corrupts long-term statistics, so they are held back from
+# the energy/total_increasing treatment and classified as a plain numeric MEASUREMENT
+# (no device class — HA only accepts TOTAL/TOTAL_INCREASING for ENERGY), which keeps
+# them graphing without feeding the Energy dashboard or cumulative statistics.
+#
+# ``daily_yield`` is deliberately excluded from this list: the coordinator overwrites it
+# with the derived-daily value (daily_yield.py), which *does* reset at local midnight, so
+# it stays a genuine ENERGY / TOTAL_INCREASING sensor. Cloud daily points are also left
+# untouched — iSolarCloud computes them server-side and resets them reliably.
+_RESETTING_ENERGY_CODES = frozenset(
+    {
+        "daily_pv_gen_battery_discharge",
+        "daily_exported_energy_from_pv",
+        "daily_battery_charge_from_pv",
+        "daily_direct_energy_consumption",
+        "daily_battery_discharge",
+        "daily_battery_charge",
+        "daily_imported_energy",
+        "daily_exported_energy",
+    }
+)
+
+
 def _build_overrides() -> dict[str, _ClassPair]:
     """Precompute per-point overrides that must beat the unit-based classifier."""
     overrides: dict[str, _ClassPair] = {
         pid: (SensorDeviceClass.ENERGY_STORAGE, _MEASUREMENT) for pid in _STORED_ENERGY_POINT_IDS
     }
+    # Genuinely-monotonic lifetime energy counters -> ENERGY / TOTAL_INCREASING (#431).
+    for point_id in _CUMULATIVE_ENERGY_POINT_IDS:
+        overrides.setdefault(point_id, (SensorDeviceClass.ENERGY, _TOTAL_INCREASING))
+    # Firmware-dependent daily/resetting local energy registers -> numeric MEASUREMENT
+    # so a non-monotonic register can't corrupt Energy-dashboard statistics (#431/#400/#401).
+    for code in _RESETTING_ENERGY_CODES:
+        overrides[code] = (None, _MEASUREMENT)
     # Cumulative "Total ... Time" hour counters -> DURATION/TOTAL_INCREASING so they
     # accumulate; daily/reset/equivalent-hour timers stay DURATION/MEASUREMENT.
     for point_id, name, unit in RAW_POINTS:

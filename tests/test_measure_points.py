@@ -329,6 +329,107 @@ def test_cumulative_energy_stays_total_increasing(point_id):
     assert mp.resolve_classification("Wh", "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
 
 
+# ---------------------------------------------------------------------------
+# Cumulative vs. resetting energy classification for the Energy dashboard (#431)
+# ---------------------------------------------------------------------------
+
+# Lifetime energy counters that must be exposed as ENERGY / TOTAL_INCREASING so the
+# Energy dashboard accepts them — cloud numeric point IDs and local-Modbus code keys.
+_CUMULATIVE_CLOUD_IDS = (
+    "58606",  # battery total charge
+    "58607",  # battery total discharge
+    "13034",  # ESS battery total charge
+    "13035",  # ESS battery total discharge
+    "13176",  # total battery charge from PV
+    "24622",  # ESS total charge
+    "24623",  # ESS total discharge
+    "8030",  # meter forward active energy (import)
+    "8031",  # meter reverse active energy (export)
+    "13125",  # total feed-in
+    "13148",  # total purchased
+    "13175",  # total feed-in (PV)
+    "83123",  # total feed-in (PV) user-cloud
+    "83075",  # feed-in energy total (open API)
+    "13134",  # total PV yield
+)
+_CUMULATIVE_LOCAL_CODES = (
+    "total_yield",
+    "total_pv_gen_battery_discharge",
+    "total_exported_energy_from_pv",
+    "total_battery_charge_from_pv",
+    "total_direct_energy_consumption",
+    "total_battery_discharge",
+    "total_battery_charge",
+    "total_imported_energy",
+    "total_exported_energy",
+)
+# Firmware-dependent daily/resetting local-Modbus energy registers that must NOT be
+# total_increasing (SG-RS daily never resets #400; SH daily-imported reads 0 #401).
+_RESETTING_LOCAL_CODES = (
+    "daily_pv_gen_battery_discharge",
+    "daily_exported_energy_from_pv",
+    "daily_battery_charge_from_pv",
+    "daily_direct_energy_consumption",
+    "daily_battery_discharge",
+    "daily_battery_charge",
+    "daily_imported_energy",
+    "daily_exported_energy",
+)
+
+
+@pytest.mark.parametrize("point_id", _CUMULATIVE_CLOUD_IDS)
+@pytest.mark.parametrize("unit", ["Wh", "kWh", "", None])
+def test_cumulative_cloud_energy_is_total_increasing(point_id, unit):
+    """Cloud lifetime energy points classify ENERGY/TOTAL_INCREASING even with no unit.
+
+    The pinned override keeps them monotonic so a firmware that omits the unit can't
+    downgrade a lifetime meter to an unclassified/measurement sensor (#431).
+    """
+    assert mp.resolve_classification(unit, "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
+
+
+@pytest.mark.parametrize("code", _CUMULATIVE_LOCAL_CODES)
+def test_cumulative_local_energy_is_total_increasing(code):
+    """Local-Modbus lifetime totals classify ENERGY/TOTAL_INCREASING (kWh on the wire).
+
+    On the Modbus path ``point_id`` falls back to the code, so classification is keyed
+    by the code string (#431).
+    """
+    assert mp.resolve_classification("kWh", code, code) == (SensorDeviceClass.ENERGY, TI)
+
+
+@pytest.mark.parametrize("code", _RESETTING_LOCAL_CODES)
+def test_resetting_local_energy_is_not_total_increasing(code):
+    """Firmware-dependent local daily energy registers must be excluded from TOTAL_INCREASING.
+
+    The override beats the unit map (live unit is "kWh"), classifying them as a plain
+    numeric MEASUREMENT — no ENERGY device class — so a non-monotonic register can't feed
+    the Energy dashboard or corrupt long-term statistics (#431/#400/#401).
+    """
+    device_class, state_class = mp.resolve_classification("kWh", code, code)
+    assert state_class != TI
+    assert (device_class, state_class) == (None, M)
+
+
+def test_local_daily_yield_stays_total_increasing():
+    """``daily_yield`` is corrected by the derived-daily logic and resets at midnight,
+    so it remains a genuine ENERGY / TOTAL_INCREASING sensor (not excluded)."""
+    assert mp.resolve_classification("kWh", "daily_yield", "daily_yield") == (SensorDeviceClass.ENERGY, TI)
+
+
+@pytest.mark.parametrize("point_id", ["13122", "13147", "8062", "8063", "13028", "13029", "24620", "24621"])
+def test_cloud_daily_energy_left_as_total_increasing(point_id):
+    """Cloud daily energy points are reset server-side by iSolarCloud and are left
+    unchanged as ENERGY / TOTAL_INCREASING — the exclusion targets only the local
+    firmware-dependent registers (#431)."""
+    assert mp.resolve_classification("Wh", "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
+
+
+def test_cumulative_and_resetting_energy_sets_are_disjoint():
+    """A point can't be both a monotonic lifetime total and a resetting daily register."""
+    assert not (mp._CUMULATIVE_ENERGY_POINT_IDS & mp._RESETTING_ENERGY_CODES)
+
+
 @pytest.mark.parametrize(
     "point_id",
     [
