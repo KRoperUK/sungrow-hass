@@ -41,7 +41,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.network import get_url
 
-from ._config_flow._helpers import _normalize_redirect_uri, _parse_winet_properties
+from ._config_flow._helpers import _extract_authorization_code, _normalize_redirect_uri, _parse_winet_properties
 from ._config_flow.cloud_oauth import CloudOAuthMixin
 from ._config_flow.cloud_user import CloudUserMixin
 from ._config_flow.modbus_only import ModbusOnlyMixin
@@ -69,6 +69,7 @@ _LOGGER = logging.getLogger(__name__)
 __all__ = [
     "SungrowConfigFlow",
     "SungrowOptionsFlow",
+    "_extract_authorization_code",
     "_normalize_redirect_uri",
     "_parse_winet_properties",
 ]

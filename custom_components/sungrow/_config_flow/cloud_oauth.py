@@ -26,10 +26,17 @@ from homeassistant.config_entries import ConfigFlowResult
 from ..const import CONF_APP_ID, CONF_APP_KEY, CONF_APP_SECRET, CONF_GATEWAY, CONF_REDIRECT_URI, DOMAIN, GATEWAYS
 from . import _base
 from ._base import _SungrowFlowBase
-from ._helpers import CALLBACK_WAIT_TIMEOUT
+from ._helpers import CALLBACK_WAIT_TIMEOUT, _extract_authorization_code
 from .plant_selection import PlantSelectionMixin
 
 _LOGGER = logging.getLogger(__name__)
+
+# Token-exchange failures that mean *the authorization code itself* was rejected — used,
+# expired or malformed. The library reports any failed exchange as
+# ``authorization_failed`` and keeps iSolarCloud's own code inside ``error_description``,
+# while some deployments/older library versions surface ``invalid_grant`` directly, so
+# both spellings are accepted rather than matching ``invalid_grant`` alone (#396).
+_CODE_REJECTED_ERRORS = frozenset({"invalid_grant", "authorization_failed"})
 
 
 class CloudOAuthMixin(PlantSelectionMixin, _SungrowFlowBase):
@@ -230,32 +237,15 @@ class CloudOAuthMixin(PlantSelectionMixin, _SungrowFlowBase):
         errors = {}
 
         if user_input is not None and user_input.get("code"):
-            try:
-                code_input = user_input["code"].strip()
-                if code_input.startswith("http"):
-                    from urllib.parse import parse_qs, urlparse
-
-                    parsed = urlparse(code_input)
-                    query = parse_qs(parsed.query)
-                    if "code" in query:
-                        code = query["code"][0]
-                    else:
-                        query = parse_qs(parsed.fragment.split("?")[-1] if "?" in parsed.fragment else "")
-                        if "code" in query:
-                            code = query["code"][0]
-                        else:
-                            errors["base"] = "invalid_auth"
-                            raise ValueError("Could not find code in URL")
-                else:
-                    code = code_input
-
+            # Accept a bare code, a full redirect URL (query *or* fragment), or just the
+            # `code=...` fragment people copy out of the address bar (#396).
+            code = _extract_authorization_code(user_input["code"])
+            if code is None:
+                errors["base"] = "invalid_auth"
+            else:
                 self._code = code
                 self._drop_callback_future()
                 return self.async_show_progress_done(next_step_id="finish")
-
-            except Exception as e:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception in async_step_auth_manual: %s", e)
-                errors["base"] = "unknown"
 
         # Keep a callback waiter armed while the manual form is shown, so a redirect
         # that lands late (after the auto-wait timed out) still completes the flow
@@ -335,16 +325,29 @@ class CloudOAuthMixin(PlantSelectionMixin, _SungrowFlowBase):
             _LOGGER.warning("Client connection error in async_step_finish: %s", e)
             return self._finish_error_result("cannot_connect")
         except _base.PySolarCloudException as e:
-            # ``invalid_grant`` means iSolarCloud rejected the authorization code —
-            # typically because it's already been used (double-click, browser retry)
-            # or has expired. Guide the user back to the manual form with a clear
-            # message instead of surfacing a generic "unknown" error. The exposed
-            # ``.error`` attribute carries the machine-readable code from the API
-            # response envelope (``str(e)`` only returns the description text).
-            if getattr(e, "error", None) == "invalid_grant":
+            # The library raises ``authorization_failed`` for any failed token exchange,
+            # keeping iSolarCloud's own response in the description (it wraps a copy of
+            # the raw JSON in ``str(e)``). Matching only ``invalid_grant`` meant the
+            # code-rejected case fell through to the generic handler and the user saw a
+            # bare "Invalid authentication" instead of being sent back for a fresh code
+            # (#396). The exposed ``.error`` attribute carries the machine-readable code.
+            error_code = getattr(e, "error", None)
+            description = str(getattr(e, "error_description", "") or "")
+            # Check the redirect mismatch *first*: it also arrives as
+            # ``authorization_failed`` (with the API's "Redirect URI mismatch." text in
+            # the description), so the code-rejected branch below would otherwise
+            # swallow it and send the user chasing a code that was never the problem.
+            if "redirect uri" in description.lower():
+                # The code itself was fine: the redirect_uri we sent doesn't match the
+                # one registered for this App ID (or the region's portal). Point at the
+                # actionable fix rather than surfacing a generic auth failure.
+                _LOGGER.warning("iSolarCloud rejected the redirect URI during token exchange: %s", e)
+                return self._finish_error_result("invalid_redirect_uri")
+            if error_code in _CODE_REJECTED_ERRORS:
                 _LOGGER.warning(
-                    "iSolarCloud rejected the authorization code as invalid_grant; "
-                    "showing the manual code-entry step so the user can retry."
+                    "iSolarCloud rejected the authorization code (%s); showing the manual "
+                    "code-entry step so the user can retry.",
+                    error_code,
                 )
                 # Clear the used code so the next submission gets a fresh one.
                 self._code = None
