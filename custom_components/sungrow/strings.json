@@ -80,7 +80,7 @@
       },
       "auth_manual": {
         "title": "Enter Authorization Code",
-        "description": "The automatic redirect did not complete. Finish authorizing manually:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in (skip if you already did).\n2. You will be redirected (the page may show an error).\n3. Copy the **code** parameter from the URL address bar.\n4. Paste the code — or the full redirect URL — below.",
+        "description": "The automatic redirect did not complete. Finish authorizing manually:\n\n{auth_url}\n\n**Instructions:**\n1. Visit the link above and log in (skip if you already did).\n2. You will be redirected (the page may show an error).\n3. Copy the **code** parameter from the URL address bar.\n4. Paste the code, the full redirect URL, or just the `code=...` part — all are accepted.",
         "data": {
           "code": "Authorization Code or full redirect URL"
         }
