@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -39,6 +40,21 @@ PARALLEL_UPDATES = 1
 # Fallback upper bound (watts) for charge/discharge power, used when the device's
 # rated power can't be derived from its model code.
 DEFAULT_MAX_DISPATCH_POWER = 5000
+
+# ``native_step`` for the watt-valued POWER sliders (charge/discharge power, export
+# limit). Deliberately ``None`` rather than a fixed watt step (#450 part 2).
+#
+# Home Assistant's ``NumberEntity`` unit-converts ``min``/``max``/``value`` for a
+# POWER-class number when the user displays it in kW, but it returns ``native_step``
+# *verbatim* — ``_calculate_step`` short-circuits on any set step and never converts it.
+# So a watt-native ``native_step`` of 100 becomes a step of "100" on a 0–10.6 range in
+# kW, leaving the slider stuck at 0 (the field report on the SH10RS). Because the step is
+# never converted, no single fixed value is correct in both W and kW at once. Dropping it
+# lets HA auto-derive the step from the *converted* range (``DEFAULT_STEP`` refined against
+# the range), so the slider is adjustable in either unit. The trade-off is a finer default
+# step in the native-watt view (1 W instead of 100 W); a watt-precise dispatch value is
+# harmless (encode_parameter rounds to whole watts) and usability in both units wins.
+_POWER_SLIDER_STEP: float | None = None
 
 # Sungrow residential inverters encode their kW rating in the model code, e.g.
 # SG3.6RS -> 3.6 kW, SH10RT-V112 -> 10 kW, SG110CX -> 110 kW. Batteries, meters and
@@ -77,7 +93,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_unit_of_measurement": "W",
         "native_min_value": 0,
         "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
-        "native_step": 100,
+        "native_step": _POWER_SLIDER_STEP,
         "mode": NumberMode.SLIDER,
         # Battery actuation: meaningless (and harmful — see #148) without a battery.
         "battery_only": True,
@@ -131,7 +147,7 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_unit_of_measurement": "W",
         "native_min_value": 0,
         "native_max_value": DEFAULT_MAX_DISPATCH_POWER,
-        "native_step": 100,
+        "native_step": _POWER_SLIDER_STEP,
         "mode": NumberMode.SLIDER,
         "entity_category": EntityCategory.CONFIG,
     },
@@ -511,11 +527,19 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         # from the nameplate (#422/#423) to e.g. 10600 W, so a value HA already accepted
         # against native_max_value would otherwise be rejected by the library's stale
         # default (#450). Passing the resolved bounds keeps the two in lockstep.
+        #
+        # A bound that never resolved is open, not zero-width: coerce a missing (None)
+        # bound to ±inf rather than passing None, because encode_parameter reads None as
+        # "fall back to the spec default" — which would re-impose the very 5000 W clamp
+        # #450 removed. In this integration native_max_value always resolves (to at least
+        # DEFAULT_MAX_DISPATCH_POWER), so this is a defensive guard on the open case.
+        minimum = self._attr_native_min_value if self._attr_native_min_value is not None else -math.inf
+        maximum = self._attr_native_max_value if self._attr_native_max_value is not None else math.inf
         wire_value = Control.encode_parameter(
             self.param,
             value,
-            minimum=self._attr_native_min_value,
-            maximum=self._attr_native_max_value,
+            minimum=minimum,
+            maximum=maximum,
         )
         try:
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})

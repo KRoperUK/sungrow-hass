@@ -1,5 +1,6 @@
 """Tests for the Sungrow dispatch (number/select) platforms."""
 
+import math
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from pysolarcloud import PySolarCloudException
+from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -474,6 +476,118 @@ async def test_number_set_value_above_default_cap_writes_on_large_inverter(hass:
 
     entry_data.control.async_update_parameters.assert_awaited_once_with("ess-1", {"charge_discharge_power": "10000"})
     assert power.native_value == 10000
+
+
+async def test_number_set_value_passes_resolved_ceiling_to_encode(hass: HomeAssistant):
+    """The entity forwards its resolved bounds to encode_parameter (#450 part 1).
+
+    Guards the wiring, not just the outcome: the resolved nameplate ceiling (10600 W on
+    an SH10RS) and the resolved floor (0 W) must be handed to ``encode_parameter`` as its
+    ``maximum``/``minimum`` overrides, so the library validates against the same range the
+    slider does instead of its static 5000 W spec default.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RS"}]
+    entry_data = _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()
+    assert power._attr_native_max_value == 10600  # SH10RS battery-side datasheet limit
+
+    # Spy on the real encoder so we assert both the call arguments and that the encoded
+    # wire value still flows through unchanged.
+    with patch("custom_components.sungrow.number.Control") as mock_control:
+        mock_control.encode_parameter.side_effect = Control.encode_parameter
+        await power.async_set_native_value(10000)
+
+    mock_control.encode_parameter.assert_called_once_with("charge_discharge_power", 10000, minimum=0, maximum=10600)
+    entry_data.control.async_update_parameters.assert_awaited_once_with("ess-1", {"charge_discharge_power": "10000"})
+
+
+async def test_number_set_value_above_resolved_ceiling_is_rejected(hass: HomeAssistant):
+    """A value above the resolved nameplate ceiling is still rejected (#450 part 1).
+
+    The fix aligns the validation bound with the *resolved* rating — it does not remove
+    validation. A write past the resolved ceiling (11 kW on a 10.6 kW SH10RS) must raise
+    and never reach the API, so hardware is never asked to exceed its nameplate.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RS"}]
+    entry_data = _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()
+    assert power._attr_native_max_value == 10600
+
+    with pytest.raises(ValueError, match="out of range"):
+        await power.async_set_native_value(11000)
+
+    entry_data.control.async_update_parameters.assert_not_awaited()
+
+
+async def test_number_set_value_open_ceiling_is_not_clamped_to_spec_default(hass: HomeAssistant):
+    """An open (unresolved) entity ceiling passes maximum=inf, never the 5000 W default (#450).
+
+    ``native_max_value`` always resolves in this integration, but a ``None`` (open) bound
+    must be coerced to ``math.inf`` before it reaches ``encode_parameter`` — passing
+    ``None`` would make the library fall back to its 5000 W spec default and re-impose the
+    very clamp #450 removed. Proven both ways: encode_parameter is called with
+    ``maximum=math.inf`` and a 10 kW value is accepted (a spec-default clamp would raise).
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RS"}]
+    entry_data = _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()
+    # Simulate an entity whose ceiling never resolved (open bound).
+    power._attr_native_max_value = None
+
+    with patch("custom_components.sungrow.number.Control") as mock_control:
+        mock_control.encode_parameter.side_effect = Control.encode_parameter
+        await power.async_set_native_value(10000)
+
+    mock_control.encode_parameter.assert_called_once_with("charge_discharge_power", 10000, minimum=0, maximum=math.inf)
+    # Accepted, not clamped to the 5000 W spec default.
+    entry_data.control.async_update_parameters.assert_awaited_once_with("ess-1", {"charge_discharge_power": "10000"})
+
+
+async def test_power_slider_step_auto_derives_in_both_units(hass: HomeAssistant):
+    """native_step is unset on the watt POWER sliders and auto-derives a usable step (#450 part 2)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RS"}]
+    _setup_entry_data(entry, devices)
+
+    added: list = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    feed_in = next(e for e in added if e.param == "feed_in_limitation_value")
+
+    # The watt-valued POWER sliders carry no fixed step (so HA converts the range and
+    # derives the step, instead of returning an unconverted watt step in a kW view).
+    assert power.native_step is None
+    assert feed_in.native_step is None
+
+    # With no fixed step, HA derives a usable finite step from whichever unit's range it
+    # is shown in — a coarse but adjustable ~1 unit for both the native-watt range and
+    # the converted kW range (0–10.6), instead of the old stuck-at-0 step of 100.
+    assert power._calculate_step(0, 10600) == pytest.approx(1.0)  # native W range
+    assert power._calculate_step(0, 10.6) == pytest.approx(1.0)  # kW-converted range
+
+    # Percent-valued sliders are unaffected (no unit conversion), so they keep step 1.
+    soc = next(e for e in added if e.param == "soc_upper_limit")
+    assert soc.native_step == 1
 
 
 async def test_number_power_does_not_arm_heartbeat(hass: HomeAssistant):
