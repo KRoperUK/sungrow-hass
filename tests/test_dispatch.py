@@ -443,6 +443,37 @@ async def test_number_set_value_calls_control(hass: HomeAssistant):
     )
 
 
+async def test_number_set_value_above_default_cap_writes_on_large_inverter(hass: HomeAssistant):
+    """A >5 kW dispatch value is accepted on a >5 kW inverter (#450).
+
+    #423 lifted the slider ceiling to the resolved nameplate (10600 W on an
+    SH10RT-V112), but the library's ``encode_parameter`` still validated against its
+    static 5000 W spec default and rejected the write::
+
+        ValueError: charge_discharge_power value 10000.0 out of range [0W, 5000W]
+
+    The entity now passes its own resolved bounds to ``encode_parameter`` (needs
+    sungrow-isolarcloud>=0.15.2), so a value HA already accepted against
+    ``native_max_value`` is no longer re-rejected by the library.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
+    entry_data = _setup_entry_data(entry, devices)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    power.async_write_ha_state = MagicMock()  # collected, not added to a platform
+    assert power._attr_native_max_value == 10600  # SH-RS battery-side datasheet limit
+
+    # 10 kW is within the resolved ceiling but above the library's 5000 W spec default.
+    await power.async_set_native_value(10000)
+
+    entry_data.control.async_update_parameters.assert_awaited_once_with("ess-1", {"charge_discharge_power": "10000"})
+    assert power.native_value == 10000
+
+
 async def test_number_power_does_not_arm_heartbeat(hass: HomeAssistant):
     """Writing charge/discharge power never arms the EMS heartbeat (#112).
 
