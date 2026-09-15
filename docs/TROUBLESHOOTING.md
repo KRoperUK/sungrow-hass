@@ -122,6 +122,18 @@ when iSolarCloud rejects requests for a reason you can act on:
   root cause, **raise the polling interval** (Configure → Polling interval) and,
   if you have per-device sensors enabled, consider turning them off (each device
   type adds a call per poll). The Repair clears once the quota resets.
+- **"Approaching the iSolarCloud API call limit".** This is the *proactive* early
+  warning (raised **before** iSolarCloud starts rejecting anything). The integration
+  now tracks the request rate it generates itself, tagged by call type, over a
+  trailing hour; once that observed rate reaches ~80% of the ~2000 calls/hour budget
+  it raises this Repair and names the biggest contributor (for example the *realtime
+  plant poll* or, on the user-account transport, the *per-poll device-list fetch*).
+  It's advisory only — nothing is throttled or dropped — so you have headroom to act
+  before requests start failing (E999). Fix it the same way: **raise the polling
+  interval** and, if you don't need them, turn off per-device sensors. The Repair
+  clears automatically once the observed rate drops back under the threshold. The
+  exact observed per-call-type rate is included in the **diagnostics download**
+  (under each plant's `api_call_rate`) if you want to see which calls dominate.
 - **"Dispatch keepalive stopped".** While **Force charge**/**Force discharge** is
   active, the integration runs a background keepalive (the External-EMS heartbeat)
   that holds the inverter in forced mode. If that keepalive stops unexpectedly, the

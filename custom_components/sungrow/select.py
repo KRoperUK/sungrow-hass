@@ -26,6 +26,7 @@ from . import (
     build_device_info_for,
     select_dispatch_device,
 )
+from .api_rate import CALL_TYPE_CONTROL
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
@@ -392,6 +393,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         payload = self._command_payload(option, value)
         _LOGGER.debug("Setting %s to %s (%s) for %s", self.param, option, payload, self.device_uuid)
         try:
+            self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, payload)
         except (PySolarCloudException, ModbusControlError) as err:
             raise HomeAssistantError(

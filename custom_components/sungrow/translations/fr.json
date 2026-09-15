@@ -193,6 +193,10 @@
     "dispatch_rating_unknown": {
       "title": "Limite de puissance de charge/décharge indéterminée",
       "description": "La limite de puissance de **{plant}** n'a pas pu être déterminée à partir du code modèle **{model}**, le curseur est donc plafonné à {ceiling} W au lieu de la capacité réelle de l'onduleur. Si l'onduleur est plus grand, c'est la raison pour laquelle le curseur s'arrête trop tôt. Contrôles concernés : {parameters}. Merci d'ouvrir un ticket avec le code modèle pour que sa puissance soit ajoutée."
+    },
+    "api_rate_warning": {
+      "title": "Limite d'appels à l'API iSolarCloud bientôt atteinte",
+      "description": "Cette intégration effectue environ **{observed}** appels à l'API iSolarCloud par heure, ce qui approche le budget du forfait gratuit d'environ **{budget}** appels par heure. Le principal contributeur est : **{dominant}**. Si le rythme continue d'augmenter, iSolarCloud rejettera les requêtes (E999) et les données cesseront de se mettre à jour. Pour faire moins d'appels, augmentez l'intervalle d'interrogation dans les options de l'intégration et, si vous n'en avez pas besoin, désactivez les capteurs par appareil. Cet avertissement disparaît automatiquement lorsque le rythme diminue."
     }
   },
   "entity": {

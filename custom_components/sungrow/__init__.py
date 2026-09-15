@@ -22,6 +22,7 @@ from pysolarcloud import PySolarCloudException, UserAuth, UserControl
 from pysolarcloud.control import Control
 from pysolarcloud.plants import DeviceType, Plants
 
+from .api_rate import ApiCallRateTracker
 from .auth import SungrowAuth
 from .backfill import BackfillManager
 from .const import (
@@ -438,6 +439,10 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
 
     plant_list = _filter_plants_by_selection(list(plant_list or []), entry)
 
+    # One rate tracker per entry, shared across the entry's plant coordinators: the
+    # iSolarCloud budget is per account, so counting every plant's calls against one
+    # tracker gives a true picture of the account's spend (#434).
+    rate_tracker = ApiCallRateTracker(time_fn=hass.loop.time)
     coordinators: list[SungrowPlantCoordinator] = []
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
@@ -453,7 +458,9 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
             _LOGGER.warning("Could not fetch devices for plant %s (user account): %s", plant_name, err)
             devices = []
 
-        coordinator = SungrowPlantCoordinator(hass, entry, None, plant_id, plant_name, devices, user_auth=user_auth)
+        coordinator = SungrowPlantCoordinator(
+            hass, entry, None, plant_id, plant_name, devices, user_auth=user_auth, rate_tracker=rate_tracker
+        )
         try:
             await coordinator.async_config_entry_first_refresh()
         except ConfigEntryAuthFailed:
@@ -601,6 +608,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
 
     plant_list = _filter_plants_by_selection(list(plant_list or []), entry)
 
+    # One rate tracker per entry, shared across the entry's plant coordinators (the
+    # iSolarCloud budget is per account) so the observed rate reflects total spend (#434).
+    rate_tracker = ApiCallRateTracker(time_fn=hass.loop.time)
     coordinators: list[SungrowPlantCoordinator] = []
     devices_by_plant: dict[str, list[dict[str, Any]]] = {}
     for plant_info in plant_list:
@@ -619,7 +629,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
             _LOGGER.warning("Could not fetch devices for plant %s: %s", plant_name, err)
             devices = []
 
-        coordinator = SungrowPlantCoordinator(hass, entry, plants_service, plant_id, plant_name, devices)
+        coordinator = SungrowPlantCoordinator(
+            hass, entry, plants_service, plant_id, plant_name, devices, rate_tracker=rate_tracker
+        )
         try:
             # Raises ConfigEntryAuthFailed (reauth) / ConfigEntryNotReady (retry) as
             # classified by the coordinator.

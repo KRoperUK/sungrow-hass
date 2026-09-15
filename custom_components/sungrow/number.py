@@ -25,6 +25,7 @@ from . import (
     select_dispatch_device,
     select_rating_fallbacks,
 )
+from .api_rate import CALL_TYPE_CONTROL
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
@@ -542,6 +543,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
             maximum=maximum,
         )
         try:
+            self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
         except (PySolarCloudException, ModbusControlError) as err:
             raise HomeAssistantError(

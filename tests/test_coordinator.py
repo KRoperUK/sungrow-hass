@@ -12,6 +12,11 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pysolarcloud import AuthError, PySolarCloudException
 from pysolarcloud.plants import DeviceType
 
+from custom_components.sungrow.api_rate import (
+    CALL_TYPE_CONTROL,
+    CALL_TYPE_USER_DEVICE_FETCH,
+    ApiCallRateTracker,
+)
 from custom_components.sungrow.const import (
     BATTERY_DEVICE_POINTS,
     COMM_MODULE_POINTS,
@@ -1766,3 +1771,142 @@ async def test_charger_discovery_is_cached_realtime_refreshes(hass: HomeAssistan
     client.async_get_charging_piles.assert_awaited_once()
     assert client.async_get_charging_pile_realtime.await_count == 2
     assert coordinator.charger_data["7"]["charge_power"] == 1000
+
+
+# ---------------------------------------------------------------------------
+# API call-rate tracking + proactive warning (#434)
+# ---------------------------------------------------------------------------
+
+
+class _FakeClock:
+    """A manually-advanced clock so window-expiry can be exercised deterministically."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _rate_entry(entry_id: str = "entry-1"):
+    entry = _make_entry()
+    entry.entry_id = entry_id
+    return entry
+
+
+async def test_cloud_poll_counts_realtime_calls(hass: HomeAssistant):
+    """Every successful cloud poll records exactly one realtime call on the tracker (#434)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(hass, _rate_entry(), plants, "12345", "Test Plant")
+    assert coordinator.rate_tracker is not None
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    assert coordinator.rate_tracker.counts_by_type() == {"realtime": 2}
+
+
+async def test_modbus_coordinator_has_no_rate_tracker(hass: HomeAssistant):
+    """A Modbus-only coordinator makes no API calls, so it gets no tracker (#434)."""
+    coordinator = SungrowPlantCoordinator(hass, _rate_entry(), None, "serial-1", "Local Inverter", [])
+    assert coordinator.rate_tracker is None
+    # The public record hook is a safe no-op when there is no tracker.
+    coordinator.record_api_call(CALL_TYPE_CONTROL)
+
+
+async def test_burst_raises_rate_warning_repair_before_api_rejects(hass: HomeAssistant):
+    """A simulated burst raises the proactive Repair while the API is still succeeding (#434).
+
+    The realtime poll keeps returning data (no E999); the Repair fires purely because the
+    *observed* rate crossed the warning threshold — i.e. before iSolarCloud would reject.
+    """
+    clock = _FakeClock()
+    tracker = ApiCallRateTracker(budget_per_hour=10, warn_fraction=0.5, window_seconds=3600, time_fn=clock)
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    entry = _rate_entry("burst-entry")
+    coordinator = SungrowPlantCoordinator(hass, entry, plants, "12345", "Test Plant", rate_tracker=tracker)
+
+    registry = ir.async_get(hass)
+    issue_id = "api_rate_warning_burst-entry"
+
+    # Threshold is 0.5 * 10 = 5 calls/hour. Four polls stay under it.
+    for _ in range(4):
+        await coordinator._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+    # The fifth poll crosses the threshold — still well under the budget of 10, so the
+    # API has NOT rejected anything: the warning is genuinely proactive.
+    await coordinator._async_update_data()
+    issue = registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "api_rate_warning"
+    assert issue.translation_placeholders["dominant"] == "realtime plant poll"
+    assert issue.translation_placeholders["budget"] == "10"
+
+
+async def test_rate_warning_repair_clears_when_rate_drops(hass: HomeAssistant):
+    """Once the burst ages out of the window, the proactive Repair is cleared (#434)."""
+    clock = _FakeClock()
+    tracker = ApiCallRateTracker(budget_per_hour=10, warn_fraction=0.5, window_seconds=3600, time_fn=clock)
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(
+        hass, _rate_entry("clear-entry"), plants, "12345", "Test Plant", rate_tracker=tracker
+    )
+    registry = ir.async_get(hass)
+    issue_id = "api_rate_warning_clear-entry"
+
+    for _ in range(5):
+        await coordinator._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    # Jump past the window so the burst expires, then poll once more: the observed rate
+    # is now 1 call/hour, well below the threshold, and the Repair clears.
+    clock.advance(3601)
+    await coordinator._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_shared_tracker_counts_control_writes(hass: HomeAssistant):
+    """The public record hook lets dispatch writes count against the same budget (#434)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    coordinator = SungrowPlantCoordinator(hass, _rate_entry(), plants, "12345", "Test Plant")
+
+    await coordinator._async_update_data()
+    coordinator.record_api_call(CALL_TYPE_CONTROL)
+    coordinator.record_api_call(CALL_TYPE_CONTROL)
+
+    counts = coordinator.rate_tracker.counts_by_type()
+    assert counts == {"realtime": 1, CALL_TYPE_CONTROL: 2}
+
+
+async def test_cloud_user_poll_counts_the_per_poll_device_fetch(hass: HomeAssistant):
+    """On cloud_user the per-poll device-list fetch is counted as its own type (#434/#439)."""
+    user_auth = MagicMock()
+    user_auth.async_get_plant_detail = AsyncMock(return_value={})
+    user_auth.async_get_devices = AsyncMock(return_value=[])
+    # Faults/chargers run too when device sensors are on; stub them so they are awaitable.
+    user_auth.async_query_faults = AsyncMock(return_value=[])
+    user_auth.async_get_fault_count = AsyncMock(return_value={})
+    user_auth.async_get_charging_piles = AsyncMock(return_value=[])
+    coordinator = SungrowPlantCoordinator(
+        hass,
+        _rate_entry(),
+        None,
+        "12345",
+        "Test Plant",
+        user_auth=user_auth,
+    )
+    coordinator.enable_device_sensors = True
+
+    await coordinator._async_update_data()
+
+    counts = coordinator.rate_tracker.counts_by_type()
+    assert counts.get("realtime") == 1
+    assert counts.get(CALL_TYPE_USER_DEVICE_FETCH) == 1
