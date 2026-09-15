@@ -167,7 +167,7 @@ If your inverter / ESS supports parameter configuration, the integration also cr
 | Power Factor | `pf` | −1 to 1 | — |
 | Forced Dispatch Duration | *(local)* | 0–1440 min (default **60**; 0 = off) | ✅ |
 
-The power sliders (charge/discharge power, export limit power) are sized to the device's **rated power**, parsed from its model code (e.g. `SG3.6RS` → 3.6 kW), falling back to 5000 W when the rating can't be derived.
+The power sliders (charge/discharge power, export limit power) are sized to the device's **rated power**, parsed from its model code (e.g. `SG3.6RS` → 3.6 kW), falling back to 5000 W when the rating can't be derived. They carry no fixed step so they stay adjustable whether Home Assistant shows them in **W** (the native unit) or **kW** (if you switch the entity's display unit) — Home Assistant converts the range but not a fixed step, so pinning one would leave the kW view stuck (#450).
 
 The **reactive-power** controls work together: set **Reactive Power Mode** first, then the relevant value — **Power Factor** only takes effect in *Power Factor* mode, and **Reactive Power Ratio Q(t)** only in *Q(t)* mode. These are grid-quality controls and are available on PV-only plants too (they aren't battery-gated).
 
