@@ -543,6 +543,56 @@ async def test_device_data_not_fetched_when_disabled(hass: HomeAssistant):
     plants.async_get_device_realtime.assert_not_awaited()
 
 
+async def test_device_endpoint_unavailable_blacklists_the_type(hass: HomeAssistant):
+    """``DeviceEndpointUnavailable`` marks the type unsupported so later polls skip it (#288).
+
+    pysolarcloud 0.18 raises this when the account/region has no per-device endpoint at
+    all — a permanent capability gap, so asking again on every poll would only burn API
+    quota.
+    """
+    from pysolarcloud import DeviceEndpointUnavailable
+
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(side_effect=DeviceEndpointUnavailable({"result_code": "E996"}))
+    devices = [{"uuid": "chg-1", "device_type": 999}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+
+    assert coordinator.device_data == {}
+    assert 999 in coordinator._unsupported_device_types
+
+    # The second poll must not ask for the same type again.
+    plants.async_get_device_realtime.reset_mock()
+    await coordinator._async_update_data()
+    plants.async_get_device_realtime.assert_not_awaited()
+
+
+async def test_empty_device_result_is_retried_not_blacklisted(hass: HomeAssistant):
+    """An empty (but successful) result stays retryable — it means "no points yet" (#405).
+
+    Before pysolarcloud 0.18 an empty dict was indistinguishable from an unavailable
+    endpoint, so a single quiet poll blacklisted the device type for the whole session
+    and its sensors never appeared. Only a genuine capability gap may blacklist now.
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    devices = [{"uuid": "chg-1", "device_type": 999}]
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_ENABLE_DEVICE_SENSORS: True}), plants, "12345", "Test Plant", devices
+    )
+
+    await coordinator._async_update_data()
+    assert coordinator._unsupported_device_types == set()
+
+    await coordinator._async_update_data()
+    assert plants.async_get_device_realtime.await_count == 2
+
+
 async def test_operating_status_fetched_for_inverter_when_disabled(hass: HomeAssistant):
     """Even with device sensors off, an inverter's operating status is fetched (#182).
 

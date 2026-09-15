@@ -15,7 +15,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from pysolarcloud import AuthError, PySolarCloudException, UserAuth
+from pysolarcloud import AuthError, DeviceEndpointUnavailable, PySolarCloudException, UserAuth
 from pysolarcloud.plants import DeviceType, Plants
 
 from .api_rate import (
@@ -965,6 +965,12 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         contributes nothing rather than failing the whole update. Any user-configured
         extra measure points are requested here too, so newly identified charger/meter
         point IDs surface without a code change.
+
+        Since pysolarcloud 0.18 the endpoint's two "nothing" outcomes are distinct, and
+        this method treats them differently: ``DeviceEndpointUnavailable`` means the
+        account/region has no per-device endpoint at all, so the type is remembered and
+        skipped on later polls (#288), whereas an empty dict means the endpoint works but
+        this device type reports no points *yet* and is retried (#405).
         """
         assert self.plants_service is not None  # only reached on the cloud path
         merged: dict[str, dict[str, Any]] = {}
@@ -1069,12 +1075,22 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ps_key_list=ps_keys or None,
                         extra_measure_points=extra or None,
                     )
+            except DeviceEndpointUnavailable as err:
+                # The account/region has no per-device endpoint at all — a permanent
+                # capability gap, so remember it and stop asking on future polls (#288).
+                # This is the *only* outcome that blacklists the type: a bare empty
+                # result now means "available, but nothing reported yet" and must stay
+                # retryable, or one quiet poll would hide a device for the whole session
+                # (#405).
+                _LOGGER.debug("Per-device realtime unavailable for plant %s type %s: %s", self.plant_id, type_id, err)
+                self._unsupported_device_types.add(type_id)
+                continue
             except (PySolarCloudException, ClientError, TimeoutError) as err:
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
                 continue
             if not result:
-                # The endpoint is unavailable for this device type; skip on future polls.
-                self._unsupported_device_types.add(type_id)
+                # Available, but this device type reports no points right now. Don't
+                # blacklist it — the point set can populate later (#405).
                 continue
             for uuid, points in result.items():
                 merged.setdefault(str(uuid), {}).update(points)
