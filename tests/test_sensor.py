@@ -68,6 +68,64 @@ def test_infer_device_class_power_factor_no_unit():
 
 
 # ---------------------------------------------------------------------------
+# Energy-dashboard classification for cumulative vs. resetting points (#431)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "total_battery_charge",  # local battery lifetime charge
+        "total_battery_discharge",  # local battery lifetime discharge
+        "total_imported_energy",  # local grid lifetime import
+        "total_exported_energy",  # local grid lifetime export
+        "total_yield",  # local lifetime PV yield
+    ],
+)
+def test_cumulative_energy_sensor_is_energy_total_increasing_kwh(code):
+    """A local-Modbus lifetime energy point is an ENERGY / TOTAL_INCREASING kWh sensor.
+
+    This is the combination the Home Assistant Energy dashboard requires, so battery
+    charge/discharge and grid import/export chart correctly on local Modbus (#431).
+    """
+    point = {"code": code, "value": "1234.5", "unit": "kWh", "source": "modbus"}
+    coordinator = _coord_with_devices([], data={code: point})
+    coordinator.plants_service = None  # local Modbus entry
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.ENERGY
+    assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+    assert sensor._attr_native_unit_of_measurement == "kWh"
+    assert sensor.native_value == 1234.5
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "daily_imported_energy",  # #401: reads 0 on some SH firmware
+        "daily_exported_energy",
+        "daily_battery_charge",
+        "daily_battery_discharge",
+    ],
+)
+def test_resetting_local_energy_sensor_is_not_total_increasing(code):
+    """A firmware-dependent local daily register is a plain kWh measurement, not TOTAL_INCREASING.
+
+    It must not carry the ENERGY device class (which would let HA ingest a non-monotonic
+    register into the Energy dashboard and corrupt statistics), but still coerces to a
+    numeric value so it graphs (#431/#400/#401).
+    """
+    point = {"code": code, "value": "3.2", "unit": "kWh", "source": "modbus"}
+    coordinator = _coord_with_devices([], data={code: point})
+    coordinator.plants_service = None  # local Modbus entry
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_state_class != SensorStateClass.TOTAL_INCREASING
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    assert sensor._attr_device_class is None
+    assert sensor._attr_native_unit_of_measurement == "kWh"
+    assert sensor.native_value == 3.2
+
+
+# ---------------------------------------------------------------------------
 # Per-device re-homing (#158)
 # ---------------------------------------------------------------------------
 
