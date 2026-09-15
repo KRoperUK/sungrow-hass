@@ -229,9 +229,13 @@ HOLDING_CONTROL_MAPS["sh_rt"] = SH_RT_HOLDING_CONTROL_POINTS
 HOLDING_CONTROL_MAPS["sh_rs"] = SH_RS_HOLDING_CONTROL_POINTS
 
 # Sentinel values a register can return when the point is not supported by the
-# attached hardware/firmware.
+# attached hardware/firmware. Each is the "all ones / max positive" value **for its own
+# width**, so a point must use the sentinel matching its ``data_type``: if a 32-bit point
+# declares a 16-bit sentinel, the combined 32-bit value never equals it, and an
+# unsupported register surfaces as a huge number instead of being omitted (#401).
 NAN_U16 = 0xFFFF
 NAN_S16 = 0x7FFF
+NAN_U32 = 0xFFFFFFFF
 NAN_S32 = 0x7FFFFFFF
 
 
@@ -417,11 +421,11 @@ SH_RT_INPUT_POINTS: tuple[ModbusPoint, ...] = (
     ModbusPoint(13032, "phase_c_current", "s16", 0.1, "A", nan_value=NAN_S16),
     ModbusPoint(13033, "total_active_power", "s32", 1, "W"),
     ModbusPoint(13035, "daily_imported_energy", "u16", 0.1, "kWh", nan_value=NAN_U16),
-    ModbusPoint(13036, "total_imported_energy", "u32", 0.1, "kWh", nan_value=NAN_U16),
+    ModbusPoint(13036, "total_imported_energy", "u32", 0.1, "kWh", nan_value=NAN_U32),
     ModbusPoint(13039, "daily_battery_charge", "u16", 0.1, "kWh"),
     ModbusPoint(13040, "total_battery_charge", "u32", 0.1, "kWh"),
     ModbusPoint(13044, "daily_exported_energy", "u16", 0.1, "kWh", nan_value=NAN_U16),
-    ModbusPoint(13045, "total_exported_energy", "u32", 0.1, "kWh", nan_value=NAN_U16),
+    ModbusPoint(13045, "total_exported_energy", "u32", 0.1, "kWh", nan_value=NAN_U32),
     # Firmware version strings (15 registers each, doc registers 13250 / 13265 /
     # 13280). Per mkaiser these are supported on SH*T hybrids and MG hybrid
     # models but not on the SH single-phase RS family; the decoder returns

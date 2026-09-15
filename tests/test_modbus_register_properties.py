@@ -31,6 +31,11 @@ Each point is decoded on its own single-point block (``block_start =
 point.address``) so a family's deliberate duplicate codes (grid_frequency
 5035/5241, total_active_power 13033 — see #427) can't mask one another here;
 that precedence is pinned separately in ``test_modbus.py``.
+
+Two cheap, easy-to-get-wrong invariants are guarded rather than property-tested:
+every family contributes numeric points, and every NAN sentinel matches its
+point's register width — the latter being the bug behind #401, which the
+properties above cannot see.
 """
 
 from __future__ import annotations
@@ -53,6 +58,17 @@ from custom_components.sungrow.modbus_registers import (
 _NUMERIC_TYPES: frozenset[str] = frozenset({"u16", "s16", "u32", "s32"})
 _TYPE_BITS: dict[str, int] = {"u16": 16, "s16": 16, "u32": 32, "s32": 32}
 _SIGNED_TYPES: frozenset[str] = frozenset({"s16", "s32"})
+
+# The canonical "not available" sentinel per numeric type — all-ones for unsigned,
+# max-positive for signed. A point must carry the sentinel for its own width: the
+# decode path compares the *combined* value, so a 32-bit point holding a 16-bit
+# sentinel is never omitted (the two can't be equal).
+_CANONICAL_NAN: dict[str, int] = {
+    "u16": 0xFFFF,
+    "s16": 0x7FFF,
+    "u32": 0xFFFFFFFF,
+    "s32": 0x7FFFFFFF,
+}
 
 
 def _raw_range(data_type: str) -> tuple[int, int]:
@@ -225,3 +241,32 @@ def test_every_family_contributes_numeric_points() -> None:
     covered = {family for family, _ in _NUMERIC_POINTS}
     assert covered == set(REGISTER_MAPS), f"families missing numeric coverage: {set(REGISTER_MAPS) - covered}"
     assert _SCALED_POINTS, "no unit-bearing points found for the scale-sanity property"
+
+
+# ---------------------------------------------------------------------------
+# Guard: every NAN sentinel matches its point's register width (#401).
+# ---------------------------------------------------------------------------
+_POINTS_WITH_NAN: list[tuple[str, ModbusPoint]] = [
+    (family, point) for family, point in _NUMERIC_POINTS if point.nan_value is not None
+]
+_NAN_IDS: list[str] = [f"{family}:{point.code}@{point.address}:{point.data_type}" for family, point in _POINTS_WITH_NAN]
+
+
+@pytest.mark.parametrize(("family", "point"), _POINTS_WITH_NAN, ids=_NAN_IDS)
+def test_nan_sentinel_matches_the_register_width(family: str, point: ModbusPoint) -> None:
+    """A point's NAN sentinel must be the sentinel for its *own* register width.
+
+    The decode path compares the combined value against ``nan_value``, so a width
+    mismatch is silently wrong in both directions: an unsupported 32-bit register
+    (``0xFFFFFFFF``) is never omitted and surfaces as an absurd reading, while a real
+    reading that happens to equal the 16-bit sentinel (``65535``) is dropped as if the
+    hardware did not support the point.
+
+    This is the bug behind #401: ``total_imported_energy`` and ``total_exported_energy``
+    are declared ``u32`` but carried the ``u16`` sentinel. Round-trip cannot see it
+    (both sides use the same ``nan_value``), which is why it needed its own invariant.
+    """
+    assert point.nan_value == _CANONICAL_NAN[point.data_type], (
+        f"{family}:{point.code} is {point.data_type} but its NAN sentinel is "
+        f"{point.nan_value:#x}, not {_CANONICAL_NAN[point.data_type]:#x}"
+    )
