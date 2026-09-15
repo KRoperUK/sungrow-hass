@@ -482,7 +482,19 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         _LOGGER.debug("Setting %s to %s for %s", self.param, value, self.device_uuid)
         # Encode the displayed value into the raw value the API expects (watts,
         # tenths-of-a-percent, etc.) using pysolarcloud's authoritative specs.
-        wire_value = Control.encode_parameter(self.param, value)
+        #
+        # Validate against this entity's own bounds, not the library's spec defaults.
+        # The library spec carries a conservative, model-agnostic ceiling (5000 W for
+        # charge_discharge_power); on a >5 kW inverter the slider ceiling is resolved
+        # from the nameplate (#422/#423) to e.g. 10600 W, so a value HA already accepted
+        # against native_max_value would otherwise be rejected by the library's stale
+        # default (#450). Passing the resolved bounds keeps the two in lockstep.
+        wire_value = Control.encode_parameter(
+            self.param,
+            value,
+            minimum=self._attr_native_min_value,
+            maximum=self._attr_native_max_value,
+        )
         try:
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
         except (PySolarCloudException, ModbusControlError) as err:
