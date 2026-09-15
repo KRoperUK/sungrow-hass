@@ -1,0 +1,110 @@
+blueprint:
+  name: "Sungrow: Cheap-tariff battery charging"
+  description: >
+    Force-charge the home battery during a cheap electricity window, then return
+    to self-consumption when the window ends.
+
+
+    The charge power is written first and dispatch is armed via the
+    `sungrow.set_battery_mode` service — the command that owns the EMS heartbeat.
+    Writing charge power alone never arms dispatch (see issue #112), so the order
+    matters. The window length is also passed as the auto-revert duration, so the
+    battery returns to self-consumption even if the stop trigger is missed (for
+    example a Home Assistant restart mid-window).
+  domain: automation
+  author: sungrow-hass
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    dispatch_device:
+      name: Sungrow dispatch device
+      description: >
+        The Sungrow inverter / energy-storage device to control. Its
+        Charge/Discharge Power number and Battery Mode are driven by this
+        automation.
+      selector:
+        device:
+          integration: sungrow
+    start_time:
+      name: Cheap window start
+      description: Local time the cheap tariff begins and charging should start.
+      default: "00:30:00"
+      selector:
+        time: {}
+    end_time:
+      name: Cheap window end
+      description: >
+        Local time the cheap tariff ends and the battery returns to
+        self-consumption.
+      default: "05:30:00"
+      selector:
+        time: {}
+    charge_power:
+      name: Charge power
+      description: >
+        Charge power in watts. Values above the inverter's rating are clamped by
+        the integration.
+      default: 3000
+      selector:
+        number:
+          min: 0
+          max: 15000
+          step: 100
+          unit_of_measurement: W
+          mode: box
+
+mode: single
+
+variables:
+  dispatch_device: !input dispatch_device
+  charge_power: !input charge_power
+  start_time: !input start_time
+  end_time: !input end_time
+  # The Charge/Discharge Power number for the selected device. Its entity_id
+  # always ends in `_charge_discharge_power` (derived from the fixed English
+  # entity name), so it can be resolved from the device without a second input.
+  power_entity: >-
+    {{ device_entities(dispatch_device) | select('search', '_charge_discharge_power$') | list | first | default('') }}
+  # Window length in minutes, wrapping past midnight. Used as the auto-revert
+  # timeout so a missed stop trigger cannot leave the battery force-charging.
+  window_minutes: >-
+    {% set s = today_at(start_time) %}{% set e = today_at(end_time) %}{% if e <= s %}{% set e = e + timedelta(days=1) %}{% endif %}{{ ((e - s).total_seconds() / 60) | int }}
+
+triggers:
+  - trigger: time
+    at: !input start_time
+    id: start
+  - trigger: time
+    at: !input end_time
+    id: stop
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: start
+        sequence:
+          # Set the target power first; this alone does not arm dispatch (#112).
+          - if:
+              - condition: template
+                value_template: "{{ power_entity != '' }}"
+            then:
+              - action: number.set_value
+                target:
+                  entity_id: "{{ power_entity }}"
+                data:
+                  value: "{{ charge_power }}"
+          # Arm Force charge — this is what starts the EMS heartbeat.
+          - action: sungrow.set_battery_mode
+            data:
+              mode: force_charge
+              duration_minutes: "{{ window_minutes }}"
+              device_id: "{{ dispatch_device }}"
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - action: sungrow.set_battery_mode
+            data:
+              mode: self_consumption
+              device_id: "{{ dispatch_device }}"

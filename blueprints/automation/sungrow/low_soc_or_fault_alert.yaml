@@ -1,0 +1,75 @@
+blueprint:
+  name: "Sungrow: Low battery SOC or fault alert"
+  description: >
+    Send a notification when the battery state of charge drops below a
+    threshold, or when the inverter reports a fault.
+
+
+    You supply the notification action (for example a mobile-app notification),
+    so it works with any notifier. Your action can use the `{{ message }}`
+    variable this blueprint builds, which describes what happened.
+  domain: automation
+  author: sungrow-hass
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    soc_sensor:
+      name: Battery SOC sensor
+      description: The battery State of Charge sensor to watch.
+      selector:
+        entity:
+          integration: sungrow
+          domain: sensor
+          device_class: battery
+    soc_threshold:
+      name: Low SOC threshold
+      description: Notify when the battery drops below this state of charge.
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    fault_sensor:
+      name: Inverter fault sensor
+      description: >
+        The device Fault (problem) binary sensor. Notify when it turns on.
+      selector:
+        entity:
+          integration: sungrow
+          domain: binary_sensor
+          device_class: problem
+    notification_action:
+      name: Notification action
+      description: >
+        The action to run to send the alert (for example
+        notify.mobile_app_<your_phone>). It can reference the `{{ message }}`
+        variable.
+      selector:
+        action: {}
+
+mode: queued
+max: 5
+
+variables:
+  soc_sensor: !input soc_sensor
+  soc_threshold: !input soc_threshold
+  fault_sensor: !input fault_sensor
+  message: >-
+    {% if trigger.id == 'fault' %}Sungrow inverter reported a fault ({{ state_attr(fault_sensor, 'fault_status') | default('unknown') }}).{% else %}Home battery is low: {{ states(soc_sensor) }}% (below {{ soc_threshold }}%).{% endif %}
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input soc_sensor
+    below: !input soc_threshold
+    id: low_soc
+  - trigger: state
+    entity_id: !input fault_sensor
+    to: "on"
+    id: fault
+
+actions:
+  - choose: []
+    default: !input notification_action
