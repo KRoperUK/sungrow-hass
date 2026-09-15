@@ -34,6 +34,23 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.2.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.1.0...v6.2.0) (2026-09-15)
+
+
+### Features
+
+* **blueprints:** ship dispatch automation blueprints ([#452](https://github.com/KRoperUK/sungrow-hass/issues/452)) ([dfa451c](https://github.com/KRoperUK/sungrow-hass/commit/dfa451c6525c2565c8529fd1114ea210938ab9a2)), closes [#432](https://github.com/KRoperUK/sungrow-hass/issues/432)
+* **diagnostics:** decode the lifetime total_yield under every candidate scale ([#435](https://github.com/KRoperUK/sungrow-hass/issues/435)) ([#443](https://github.com/KRoperUK/sungrow-hass/issues/443)) ([f2fc9ac](https://github.com/KRoperUK/sungrow-hass/commit/f2fc9ac9413a00d326e41c24fa57d8d661d12677))
+* **repairs:** report a dispatch slider capped by an unknown nameplate ([#429](https://github.com/KRoperUK/sungrow-hass/issues/429)) ([#446](https://github.com/KRoperUK/sungrow-hass/issues/446)) ([c12a8d2](https://github.com/KRoperUK/sungrow-hass/commit/c12a8d2c7267e67b1443e4e7c2a41798608ca67a))
+
+
+### Bug Fixes
+
+* **ci:** tolerate an already-deleted tag ref in release cleanup ([#449](https://github.com/KRoperUK/sungrow-hass/issues/449)) ([e1089cf](https://github.com/KRoperUK/sungrow-hass/commit/e1089cf4f66be7513e1dfcc6c9bcd0cbcd52e46a)), closes [#444](https://github.com/KRoperUK/sungrow-hass/issues/444)
+* **cloud_user:** keep per-device sensors alive when the refresh fails ([#439](https://github.com/KRoperUK/sungrow-hass/issues/439)) ([#440](https://github.com/KRoperUK/sungrow-hass/issues/440)) ([4b10a87](https://github.com/KRoperUK/sungrow-hass/commit/4b10a8781970d549c20f389d8b1dcc31c5550fb6))
+* **number:** allow dispatch writes up to the resolved inverter rating ([#451](https://github.com/KRoperUK/sungrow-hass/issues/451)) ([78ca1c0](https://github.com/KRoperUK/sungrow-hass/commit/78ca1c059fb0ce7da0bf1a3600e7775e4682d2fa))
+* **number:** clamp a restored value to the current slider bounds ([#425](https://github.com/KRoperUK/sungrow-hass/issues/425)) ([#441](https://github.com/KRoperUK/sungrow-hass/issues/441)) ([194a8f8](https://github.com/KRoperUK/sungrow-hass/commit/194a8f812b6d248e2bb69e7d0e75fda6e1b395e4))
+
 ## [6.1.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.0.0...v6.1.0) (2026-09-12)
 
 
