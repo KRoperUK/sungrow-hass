@@ -80,10 +80,14 @@ def _coerce_count(raw: Any) -> int | None:
 
 
 def _plant_problem_counts(coordinator: SungrowPlantCoordinator) -> tuple[int | None, int | None]:
-    """Return ``(fault_count, alarm_count)`` from the most reliable source available.
+    """Return ``(fault_count, alarm_count)`` from the most authoritative source available.
 
-    cloud_only fills these on the plant-detail payload; cloud_user surfaces them as
-    realtime measure points. A count that is not reported comes back as ``None``.
+    Preference order, confirmed against a live account:
+    1. ``getDevFaultCountByPsId`` (cloud_user) — ``fault`` / ``warn`` are the app's own
+       plant fault/alarm tallies.
+    2. plant-detail ``fault_count`` / ``alarm_count`` (cloud_only).
+    3. realtime measure points of the same code.
+    A count that is not reported anywhere comes back as ``None``.
     """
 
     def _pick(key: str) -> int | None:
@@ -94,7 +98,16 @@ def _plant_problem_counts(coordinator: SungrowPlantCoordinator) -> tuple[int | N
                 raw = point.get("value")
         return _coerce_count(raw)
 
-    return _pick("fault_count"), _pick("alarm_count")
+    summary = getattr(coordinator, "fault_summary", None)
+    summary = summary if isinstance(summary, dict) else {}
+    # getDevFaultCountByPsId: {"fault": "0", "warn": "0", "fault_ratio": ..., "warn_ratio": ...}
+    fault = _coerce_count(summary.get("fault"))
+    alarm = _coerce_count(summary.get("warn"))
+    if fault is None:
+        fault = _pick("fault_count")
+    if alarm is None:
+        alarm = _pick("alarm_count")
+    return fault, alarm
 
 
 # Common (app-internal, region-varying) fault-detail keys → the attribute we surface them
