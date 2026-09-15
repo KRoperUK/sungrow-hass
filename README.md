@@ -187,6 +187,20 @@ automation:
 
 > Selecting **Charge**/**Discharge** (or setting charge/discharge power) automatically starts the EMS heartbeat; selecting **Stop** ends it.
 
+### Blueprints
+
+Rather than writing the automations above by hand, you can import ready-made blueprints. Each takes your Sungrow **device** (or the relevant sensor) as an input selector — no entity IDs to look up — and arms dispatch through `sungrow.set_battery_mode` so the EMS heartbeat is started correctly.
+
+- [Cheap-tariff battery charging](blueprints/automation/sungrow/cheap_tariff_charge.yaml) — force-charge during a cheap window, then return to self-consumption.
+- [Pre-peak battery top-up](blueprints/automation/sungrow/pre_peak_top_up.yaml) — charge to a target SOC before a peak window, stopping early once the target is reached.
+- [Low battery SOC or fault alert](blueprints/automation/sungrow/low_soc_or_fault_alert.yaml) — notify on low SOC or an inverter fault, using a notification action you supply.
+
+To import one, copy its raw URL into **Settings → Automations & scenes → Blueprints → Import blueprint**, for example:
+
+```
+https://raw.githubusercontent.com/KRoperUK/sungrow-hass/main/blueprints/automation/sungrow/cheap_tariff_charge.yaml
+```
+
 ## Supported devices & regions
 
 - **Regions / gateways:** Europe, International, China, Australia, and India. Pick the one matching the account you registered your developer application under.

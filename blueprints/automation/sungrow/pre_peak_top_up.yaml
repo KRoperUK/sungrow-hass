@@ -1,0 +1,141 @@
+blueprint:
+  name: "Sungrow: Pre-peak battery top-up"
+  description: >
+    Top the battery up to a target state of charge before a peak-price window,
+    then return to self-consumption. Useful when the battery may not be full
+    from solar and you want a guaranteed reserve before expensive hours.
+
+
+    Charge power is written first, then Force charge is armed via
+    `sungrow.set_battery_mode` (which owns the EMS heartbeat — writing power
+    alone never arms dispatch, see issue #112). Charging stops early as soon as
+    the target SOC is reached, and always stops at the peak start time. The
+    time until peak is passed as the auto-revert duration as a safety net.
+  domain: automation
+  author: sungrow-hass
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    dispatch_device:
+      name: Sungrow dispatch device
+      description: >
+        The Sungrow inverter / energy-storage device to control. Its
+        Charge/Discharge Power number and Battery Mode are driven by this
+        automation.
+      selector:
+        device:
+          integration: sungrow
+    soc_sensor:
+      name: Battery SOC sensor
+      description: >
+        The battery State of Charge sensor for the same device, used to stop
+        charging once the target is reached.
+      selector:
+        entity:
+          integration: sungrow
+          domain: sensor
+          device_class: battery
+    target_soc:
+      name: Target SOC
+      description: Stop charging once the battery reaches this state of charge.
+      default: 90
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    top_up_start:
+      name: Top-up start
+      description: Local time to begin topping up the battery.
+      default: "15:00:00"
+      selector:
+        time: {}
+    peak_start:
+      name: Peak window start
+      description: >
+        Local time the peak window begins. Charging always stops and reverts to
+        self-consumption at this time.
+      default: "17:00:00"
+      selector:
+        time: {}
+    charge_power:
+      name: Charge power
+      description: >
+        Charge power in watts. Values above the inverter's rating are clamped by
+        the integration.
+      default: 5000
+      selector:
+        number:
+          min: 0
+          max: 15000
+          step: 100
+          unit_of_measurement: W
+          mode: box
+
+mode: single
+
+variables:
+  dispatch_device: !input dispatch_device
+  soc_sensor: !input soc_sensor
+  target_soc: !input target_soc
+  charge_power: !input charge_power
+  top_up_start: !input top_up_start
+  peak_start: !input peak_start
+  power_entity: >-
+    {{ device_entities(dispatch_device) | select('search', '_charge_discharge_power$') | list | first | default('') }}
+  # Minutes from top-up start until peak, wrapping past midnight; used as the
+  # auto-revert timeout so a missed stop trigger cannot leave dispatch armed.
+  window_minutes: >-
+    {% set s = today_at(top_up_start) %}{% set e = today_at(peak_start) %}{% if e <= s %}{% set e = e + timedelta(days=1) %}{% endif %}{{ ((e - s).total_seconds() / 60) | int }}
+
+triggers:
+  - trigger: time
+    at: !input top_up_start
+    id: start
+  - trigger: time
+    at: !input peak_start
+    id: stop
+  - trigger: numeric_state
+    entity_id: !input soc_sensor
+    above: !input target_soc
+    id: reached
+
+actions:
+  - choose:
+      # Begin topping up, but only if we are not already at/above the target.
+      - conditions:
+          - condition: trigger
+            id: start
+          - condition: numeric_state
+            entity_id: !input soc_sensor
+            below: !input target_soc
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ power_entity != '' }}"
+            then:
+              - action: number.set_value
+                target:
+                  entity_id: "{{ power_entity }}"
+                data:
+                  value: "{{ charge_power }}"
+          - action: sungrow.set_battery_mode
+            data:
+              mode: force_charge
+              duration_minutes: "{{ window_minutes }}"
+              device_id: "{{ dispatch_device }}"
+      # Target reached early, or the peak window started — revert.
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: reached
+              - condition: trigger
+                id: stop
+        sequence:
+          - action: sungrow.set_battery_mode
+            data:
+              mode: self_consumption
+              device_id: "{{ dispatch_device }}"
