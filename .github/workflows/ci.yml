@@ -388,18 +388,26 @@ jobs:
             done
 
   # Main release-candidate dev builds — a push to main that changed the component,
-  # once CI is green. Never for the "chore(main): release X.Y.Z" commit (matched via
-  # ": release ") which release-please lands when its PR merges.
+  # once CI is green. Never for the release-please commit.
   #
   # Tags are vX.Y.Z-rc.N on a synthetic version commit (version files only).
   # Install RCs via the prerelease tag / HACS instead. main is never mutated.
+  #
+  # The release-please commit is matched on its *subject* — squash merges produce
+  # "chore(main): release X.Y.Z", merge commits reference the
+  # release-please--branches-- head. Do not go back to testing `contains` for
+  # ': release ' against the whole message: squash merges put the PR body in the
+  # commit, so any commit whose body merely mentions that prefix silently
+  # suppresses its own RC. That happened in dimplex-controller-hass, to the commit
+  # that was documenting this very guard.
   dev-release-main:
     needs: [changes, lint, test, hacs_validate]
     if: >-
       needs.changes.outputs.component == 'true' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      !contains(github.event.head_commit.message, ': release ')
+      !startsWith(github.event.head_commit.message, 'chore(main): release ') &&
+      !contains(github.event.head_commit.message, '/release-please--branches--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
