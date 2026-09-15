@@ -251,6 +251,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.plants_service = plants_service
         # UserAuth-backed client for a cloud user-account entry (#268); None otherwise.
         self._user_auth = user_auth
+        # True for the cloud user-account transport (app/web API). Lets the entity
+        # builders tell cloud_user apart from a Modbus-only entry (both have no
+        # ``plants_service``) so cloud_user is routed down the cloud entity path, not the
+        # local-Modbus one (#456/#457).
+        self.uses_user_api: bool = user_auth is not None
         self.plant_id = plant_id
         self.plant_name = plant_name
         # The user-configured poll interval, restored after a rate-limit back-off (#156).
@@ -302,6 +307,22 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # empty until the cloud_user setup probe runs. Nameplate/usable capacity (kWh) and
         # battery type — not a power figure (#450).
         self.battery_capacity: dict[str, Any] = {}
+        # Latest fault detail from the app fault API (cloud_user only, #457). Best-effort:
+        # ``fault_list`` is the most recent page of open faults (``queryFaultList``) and
+        # ``fault_summary`` the raw ``getDevFaultCountByPsId`` payload. Both stay empty when
+        # the endpoints are unavailable. These only *enrich* the plant Fault binary sensor's
+        # attributes; the sensor's on/off is driven by the reliable fault/alarm counts, so a
+        # missing fault API never changes the problem state.
+        self.fault_list: list[dict[str, Any]] = []
+        self.fault_summary: dict[str, Any] = {}
+        # EV charger ("charging pile") discovery + realtime for cloud_user (#456). Best-effort
+        # and feature-detected: ``charging_piles`` is the discovered charger list (cached, it
+        # is slow-changing metadata) and ``charger_data`` maps each charger uuid to its latest
+        # realtime payload. Both stay empty when the account has no chargers or the endpoints
+        # are absent, so nothing is created on plants without a charger.
+        self.charging_piles: list[dict[str, Any]] = []
+        self.charger_data: dict[str, dict[str, Any]] = {}
+        self._charging_piles_loaded = False
         # How long (minutes) a forced Charge/Discharge command stays active before the
         # command select auto-reverts it to Stop, so a forced command can't silently
         # persist and curtail PV (#157/#148). 0 disables auto-revert (legacy behaviour).
@@ -483,6 +504,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
         await self._async_refresh_user_device_data()
+        await self._async_refresh_faults()
+        await self._async_refresh_chargers()
         points = map_plant_detail_to_points(detail)
         return normalize_power_units(normalize_energy_units(tag_source(points, "cloud_user")))
 
@@ -537,6 +560,72 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_data = {
             uuid: normalize_energy_units(tag_source(points, "cloud_user")) for uuid, points in mapped.items()
         }
+
+    async def _async_refresh_faults(self) -> None:
+        """Best-effort refresh of the plant fault detail from the app fault API (#457).
+
+        cloud_user only. Populates ``fault_list`` (most recent open faults) and
+        ``fault_summary`` (raw per-type counts) to enrich the plant Fault binary sensor's
+        attributes. Every failure is non-fatal and leaves the last-known values in place —
+        this never affects the sensor's on/off (that is driven by the reliable fault/alarm
+        counts), so an unavailable fault API cannot flip the problem state.
+
+        Gated on ``enable_device_sensors`` for parity with the other opt-in per-device
+        fetches, so the extra calls are only spent when the user has asked for the richer
+        entity set.
+        """
+        if self._user_auth is None or not self.enable_device_sensors:
+            return
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                faults = await self._user_auth.async_query_faults(self.plant_id)
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
+        else:
+            self.fault_list = list(faults) if isinstance(faults, list) else []
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                summary = await self._user_auth.async_get_fault_count(self.plant_id)
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Fault count fetch failed for %s: %s", self.plant_name, err)
+        else:
+            self.fault_summary = dict(summary) if isinstance(summary, dict) else {}
+
+    async def _async_refresh_chargers(self) -> None:
+        """Best-effort discovery + realtime for EV chargers on cloud_user (#456).
+
+        The charger list (``getChargingPileList``) is slow-changing metadata, so it is
+        fetched once and cached; each poll then refreshes every charger's realtime payload
+        (``getChargingPileRealData``). Feature-detected and non-fatal: a plant with no
+        chargers, or an account/region without the endpoints, leaves ``charging_piles`` and
+        ``charger_data`` empty and no charger entities are created.
+
+        Gated on ``enable_device_sensors`` — chargers are per-device entities, so the extra
+        calls are only spent when the user opted into the richer entity set.
+        """
+        if self._user_auth is None or not self.enable_device_sensors:
+            return
+        if not self._charging_piles_loaded:
+            try:
+                async with asyncio.timeout(self._poll_timeout):
+                    piles = await self._user_auth.async_get_charging_piles(self.plant_id)
+            except (PySolarCloudException, ClientError, TimeoutError) as err:
+                _LOGGER.debug("Charger discovery failed for %s: %s", self.plant_name, err)
+                return
+            self.charging_piles = [p for p in piles if isinstance(p, dict) and p.get("uuid") is not None]
+            self._charging_piles_loaded = True
+            if self.charging_piles:
+                _LOGGER.debug("Discovered %d EV charger(s) for %s", len(self.charging_piles), self.plant_name)
+        for pile in self.charging_piles:
+            uuid = str(pile["uuid"])
+            try:
+                async with asyncio.timeout(self._poll_timeout):
+                    data = await self._user_auth.async_get_charging_pile_realtime(pile["uuid"])
+            except (PySolarCloudException, ClientError, TimeoutError, ValueError) as err:
+                _LOGGER.debug("Charger realtime fetch failed for %s (%s): %s", uuid, self.plant_name, err)
+                continue
+            if isinstance(data, dict) and data:
+                self.charger_data[uuid] = data
 
     async def async_probe_battery_power_limit(self) -> None:
         """Best-effort resolve the real battery charge/discharge power ceiling (#450).

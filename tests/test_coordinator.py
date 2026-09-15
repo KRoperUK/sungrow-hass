@@ -1505,6 +1505,9 @@ async def test_user_update_populates_device_data_from_device_list(hass: HomeAssi
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
     client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
     entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
 
@@ -1532,6 +1535,9 @@ async def test_user_update_keeps_last_known_device_data_when_refresh_fails(hass:
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
     entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
 
@@ -1578,6 +1584,9 @@ async def test_user_update_device_fetch_failure_is_non_fatal(hass: HomeAssistant
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
     client.async_get_devices = AsyncMock(side_effect=PySolarCloudException({"error": "rate_limit"}))
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
     entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
 
@@ -1598,6 +1607,9 @@ async def test_user_update_refreshes_the_live_device_list(hass: HomeAssistant):
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
     entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
     coordinator = SungrowPlantCoordinator(
         hass, entry, None, "12345", "Test Plant", [{"uuid": "stale", "device_type": 1}], user_auth=client
@@ -1615,6 +1627,9 @@ async def test_user_update_keeps_devices_when_refresh_returns_empty(hass: HomeAs
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
     entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
     known = [_user_battery_device()]
     coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", known, user_auth=client)
@@ -1650,3 +1665,104 @@ async def test_user_update_transient_rides_grace_window(hass: HomeAssistant):
     data = await coordinator._async_update_data()
 
     assert data == {"total_active_power": {"value": "1.2"}}
+
+
+# ---------------------------------------------------------------------------
+# App-parity 0.16.0: fault (#457) + EV charger (#456) refresh on cloud_user
+# ---------------------------------------------------------------------------
+
+
+def _user_client_with_extras(**overrides):
+    """A cloud_user client mock with the plant-detail + app-parity calls stubbed empty."""
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    client.async_get_charging_pile_realtime = AsyncMock(return_value={})
+    for name, value in overrides.items():
+        setattr(client, name, value)
+    return client
+
+
+async def test_user_update_populates_fault_and_charger_data(hass: HomeAssistant):
+    """cloud_user poll enriches fault detail and discovers chargers (#456/#457)."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = _user_client_with_extras(
+        async_query_faults=AsyncMock(
+            return_value=[{"fault_name": "Grid overvoltage", "fault_code": "10", "fault_level": "2"}]
+        ),
+        async_get_fault_count=AsyncMock(return_value={"total_count": 1}),
+        async_get_charging_piles=AsyncMock(return_value=[{"uuid": 7, "device_name": "Wallbox"}]),
+        async_get_charging_pile_realtime=AsyncMock(
+            return_value={"charge_power": {"value": "3200", "unit": "W"}, "status": "charging"}
+        ),
+    )
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    assert coordinator.fault_list[0]["fault_name"] == "Grid overvoltage"
+    assert coordinator.fault_summary == {"total_count": 1}
+    assert [p["uuid"] for p in coordinator.charging_piles] == [7]
+    assert coordinator.charger_data["7"]["charge_power"]["value"] == "3200"
+
+
+async def test_user_update_fault_and_charger_refresh_is_non_fatal(hass: HomeAssistant):
+    """Fault/charger endpoints failing must not fail the poll or wipe plant points."""
+    from pysolarcloud import PySolarCloudException
+
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = _user_client_with_extras(
+        async_query_faults=AsyncMock(side_effect=PySolarCloudException("boom")),
+        async_get_fault_count=AsyncMock(side_effect=PySolarCloudException("boom")),
+        async_get_charging_piles=AsyncMock(side_effect=PySolarCloudException("boom")),
+    )
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["current_power"]["value"] == "1"
+    assert coordinator.fault_list == []
+    assert coordinator.charging_piles == []
+    assert coordinator.charger_data == {}
+
+
+async def test_user_update_skips_fault_and_charger_when_option_off(hass: HomeAssistant):
+    """Fault/charger calls are only spent when per-device sensors are enabled."""
+    client = _user_client_with_extras(
+        async_query_faults=AsyncMock(return_value=[{"fault_name": "x"}]),
+        async_get_charging_piles=AsyncMock(return_value=[{"uuid": 1}]),
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_query_faults.assert_not_awaited()
+    client.async_get_charging_piles.assert_not_awaited()
+    assert coordinator.fault_list == []
+    assert coordinator.charging_piles == []
+
+
+async def test_charger_discovery_is_cached_realtime_refreshes(hass: HomeAssistant):
+    """Charger list is discovered once (slow-changing); realtime refreshes every poll."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    client = _user_client_with_extras(
+        async_get_charging_piles=AsyncMock(return_value=[{"uuid": 7}]),
+        async_get_charging_pile_realtime=AsyncMock(return_value={"charge_power": 1000}),
+    )
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    client.async_get_charging_piles.assert_awaited_once()
+    assert client.async_get_charging_pile_realtime.await_count == 2
+    assert coordinator.charger_data["7"]["charge_power"] == 1000

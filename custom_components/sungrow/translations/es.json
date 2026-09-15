@@ -203,6 +203,9 @@
       "device_fault": {
         "name": "Fallo"
       },
+      "plant_fault": {
+        "name": "Fallo de la planta"
+      },
       "pv_generating": {
         "name": "FV generando"
       },

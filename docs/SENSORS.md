@@ -120,6 +120,7 @@ Alongside the plant sensors, the integration adds **diagnostic** entities that d
 | Entity | Device class | Meaning |
 |---|---|---|
 | Fault | `problem` | On when the device reports a fault or alarm (`dev_fault_status`); Off when normal. Exposes an `operating_status` attribute with a human-readable reason for inverter/ESS devices (e.g. *Shut down due to faults*, *Low insulation resistance*, *Running with alarm*), so you see *why* — available even without per-device sensors enabled. |
+| Plant Fault | `problem` | Plant-level "is anything wrong?" — On when the plant reports any fault or alarm count, Off when both are zero. On the user-account transport it also exposes the latest fault name/code/level from the iSolarCloud fault log as attributes (best-effort). |
 | Connectivity | `connectivity` | On = online, Off = offline (`dev_status`). Exposes the commissioning/grid-connection date as an attribute. |
 
 **Per-device diagnostic sensors** — surfaced when **Create per-device sensors** is enabled (Configure → options), polled per device type from the documented measure-point catalog:
@@ -128,6 +129,7 @@ Alongside the plant sensors, the integration adds **diagnostic** entities that d
 - **Battery / ESS** (hybrid systems): battery level (SOC), state of health, voltage, current, temperature, and total charge/discharge energy, plus cell/module health — **max/min cell voltage** (imbalance), **max/min module temperature** (thermal spread), operation status, DC-contactor status and fault-module ID. Health-oriented points (voltage, current, temperature, SOH, and all the cell/module health points) are marked *Diagnostic*; SOC and charge/discharge energy stay primary sensors for dashboards.
 - **Energy meter:** instantaneous active / reactive / apparent power, power factor, grid frequency, per-phase voltage & current, and forward/reverse (import/export) active energy. (A meter that only reports energy — e.g. the SGSmartMeter — surfaces just those.)
 - **Communication module (WiNet-S):** WLAN signal strength and wireless signal strength.
+- **EV charger** (user-account transport only): each charging pile discovered on the account becomes its own device, with best-effort numeric sensors read from its realtime payload (charge power, session energy, …). Read-only for now; a unit is shown only when the API reports one, and field typing will be refined as live charger payloads are confirmed.
 
 ## Plant health & tariffs
 

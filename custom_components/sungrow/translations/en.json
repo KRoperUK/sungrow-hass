@@ -203,6 +203,9 @@
       "device_fault": {
         "name": "Fault"
       },
+      "plant_fault": {
+        "name": "Plant Fault"
+      },
       "pv_generating": {
         "name": "PV Generating"
       },

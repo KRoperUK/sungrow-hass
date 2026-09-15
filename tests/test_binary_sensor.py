@@ -368,3 +368,83 @@ def test_decode_power_flow_status_returns_every_key():
     every_bit = sum(1 << bit for bit, _ in POWER_FLOW_STATUS_BITS)
     all_on = decode_power_flow_status(every_bit)
     assert all(value is True for value in all_on.values())
+
+
+# ---------------------------------------------------------------------------
+# Plant-level Fault problem binary sensor (#457)
+# ---------------------------------------------------------------------------
+
+
+def _plant_fault_coordinator(*, plant_detail=None, data=None, fault_list=None, plants_service=None, uses_user_api=True):
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.plant_name = "Test Plant"
+    coordinator.plant_detail = plant_detail or {}
+    coordinator.data = data or {}
+    coordinator.fault_list = fault_list or []
+    coordinator.plants_service = plants_service
+    coordinator.uses_user_api = uses_user_api
+    coordinator.devices = []
+    return coordinator
+
+
+def test_plant_fault_sensor_on_off_unknown():
+    """The plant Fault sensor is on for any fault/alarm, off when both are zero, else unknown."""
+    from custom_components.sungrow.binary_sensor import SungrowPlantFaultBinarySensor
+
+    on = SungrowPlantFaultBinarySensor(_plant_fault_coordinator(plant_detail={"fault_count": "2"}))
+    assert on.is_on is True
+    assert on._attr_device_class == BinarySensorDeviceClass.PROBLEM
+    assert on.unique_id == "12345_plant_fault"
+
+    off = SungrowPlantFaultBinarySensor(_plant_fault_coordinator(plant_detail={"fault_count": "0", "alarm_count": "0"}))
+    assert off.is_on is False
+
+    unknown = SungrowPlantFaultBinarySensor(_plant_fault_coordinator())
+    assert unknown.is_on is None
+
+    # cloud_user surfaces the counts as realtime points instead of plant-detail fields.
+    via_points = SungrowPlantFaultBinarySensor(_plant_fault_coordinator(data={"alarm_count": {"value": 3}}))
+    assert via_points.is_on is True
+
+
+def test_plant_fault_sensor_attributes_expose_latest_fault():
+    """On cloud_user the sensor enriches its attributes with the latest fault detail."""
+    from custom_components.sungrow.binary_sensor import SungrowPlantFaultBinarySensor
+
+    coordinator = _plant_fault_coordinator(
+        plant_detail={"fault_count": "1", "alarm_count": "0"},
+        fault_list=[{"fault_name": "Grid overvoltage", "fault_code": "10", "fault_level": "2"}],
+    )
+    attrs = SungrowPlantFaultBinarySensor(coordinator).extra_state_attributes
+    assert attrs["fault_count"] == 1
+    assert attrs["alarm_count"] == 0
+    assert attrs["latest_fault_name"] == "Grid overvoltage"
+    assert attrs["latest_fault_code"] == "10"
+    assert attrs["latest_fault_level"] == "2"
+    assert attrs["open_fault_page_count"] == 1
+
+
+def test_build_binary_sensors_routes_cloud_user_and_modbus():
+    """cloud_user gets the plant Fault sensor; a Modbus-only entry does not."""
+    from custom_components.sungrow.binary_sensor import (
+        SungrowPlantFaultBinarySensor,
+        _build_binary_sensors,
+    )
+
+    cloud_user = _plant_fault_coordinator(uses_user_api=True)
+    cloud_user.data = {}
+    built = _build_binary_sensors(cloud_user)
+    assert any(isinstance(e, SungrowPlantFaultBinarySensor) for e in built)
+
+    # A cloud_user device row without dev_fault_status gets no per-device fault sensor.
+    cloud_user.devices = [{"uuid": "b1"}]
+    built = _build_binary_sensors(cloud_user)
+    assert not any(isinstance(e, SungrowDeviceFaultBinarySensor) for e in built)
+
+    # Modbus-only (no plants_service, not user API) never gets the plant Fault sensor.
+    modbus = _plant_fault_coordinator(uses_user_api=False)
+    modbus.data = {}
+    modbus.devices = []
+    built = _build_binary_sensors(modbus)
+    assert not any(isinstance(e, SungrowPlantFaultBinarySensor) for e in built)

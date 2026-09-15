@@ -203,6 +203,9 @@
       "device_fault": {
         "name": "Störung"
       },
+      "plant_fault": {
+        "name": "Anlagenstörung"
+      },
       "pv_generating": {
         "name": "PV erzeugt"
       },
