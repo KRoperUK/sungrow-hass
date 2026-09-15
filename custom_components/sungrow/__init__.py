@@ -99,7 +99,12 @@ MODBUS_ONLY_PLATFORMS: list[Platform] = [
 ]
 # cloud_user has sensors plus dispatch (UserControl over the app/web API, #271). No
 # binary sensors (device fault/connectivity come from the OAuth device list shape).
-CLOUD_USER_PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
+CLOUD_USER_PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 
 
 def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:

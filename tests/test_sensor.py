@@ -1256,3 +1256,67 @@ async def test_cloud_user_battery_soc_becomes_a_sensor(hass: HomeAssistant):
     assert soc.native_value == 32.2
     # Attached to the battery device, not the plant.
     assert (DOMAIN, "dev-battery-1") in soc._attr_device_info["identifiers"]
+
+
+# ---------------------------------------------------------------------------
+# EV charger (charging pile) sensors (#456)
+# ---------------------------------------------------------------------------
+
+
+def _charger_coordinator(piles, charger_data):
+    from unittest.mock import MagicMock
+
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    coordinator.plant_name = "Test Plant"
+    coordinator.via_device_id = None
+    coordinator.local_configuration_url = None
+    coordinator.last_update_success = True
+    coordinator.charging_piles = piles
+    coordinator.charger_data = charger_data
+    return coordinator
+
+
+def test_build_charger_sensors_from_realtime_payload():
+    """Each numeric field of a charger's realtime payload becomes a sensor (#456)."""
+    from custom_components.sungrow.sensor import SungrowChargerSensor, _build_charger_sensors
+
+    coordinator = _charger_coordinator(
+        [{"uuid": 7, "device_name": "Wallbox"}],
+        {"7": {"charge_power": {"value": "3200", "unit": "W"}, "session_energy": "1.5", "status": "charging"}},
+    )
+    built = _build_charger_sensors(coordinator)
+
+    # "status" is non-numeric and is skipped; the two numeric fields become sensors.
+    assert {s._field for s in built} == {"charge_power", "session_energy"}
+    power = next(s for s in built if s._field == "charge_power")
+    assert isinstance(power, SungrowChargerSensor)
+    assert power.native_value == 3200.0
+    assert power._attr_native_unit_of_measurement == "W"
+    assert power.unique_id == "12345_charger_7_charge_power"
+    assert power.name == "Charge Power"
+    # A field with no unit in the payload gets no assumed unit.
+    energy = next(s for s in built if s._field == "session_energy")
+    assert energy.native_value == 1.5
+    assert getattr(energy, "_attr_native_unit_of_measurement", None) is None
+
+
+def test_build_charger_sensors_empty_without_chargers():
+    """No chargers discovered (or no realtime payload) yields no charger sensors."""
+    from custom_components.sungrow.sensor import _build_charger_sensors
+
+    assert _build_charger_sensors(_charger_coordinator([], {})) == []
+    assert _build_charger_sensors(_charger_coordinator([{"uuid": 7}], {})) == []
+
+
+def test_charger_sensor_unavailable_when_charger_drops_out():
+    """A charger sensor goes unavailable if its charger leaves the realtime payload."""
+    from custom_components.sungrow.sensor import _build_charger_sensors
+
+    coordinator = _charger_coordinator([{"uuid": 7}], {"7": {"charge_power": 1000}})
+    power = _build_charger_sensors(coordinator)[0]
+    assert power.available is True
+    assert power.native_value == 1000.0
+    coordinator.charger_data = {}
+    assert power.available is False
+    assert power.native_value is None

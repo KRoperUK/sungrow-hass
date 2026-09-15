@@ -13,11 +13,13 @@ from typing import Any
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pysolarcloud.plants import DeviceType
 
 from . import SungrowConfigEntry, build_device_info_for
+from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
 from .measure_points import resolve_enum_value
@@ -67,10 +69,103 @@ def connectivity_is_on(status: Any) -> bool | None:
     return None
 
 
+def _coerce_count(raw: Any) -> int | None:
+    """Coerce a fault/alarm count to int, or None when absent/non-numeric."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return int(float(raw))
+    except TypeError, ValueError:
+        return None
+
+
+def _plant_problem_counts(coordinator: SungrowPlantCoordinator) -> tuple[int | None, int | None]:
+    """Return ``(fault_count, alarm_count)`` from the most reliable source available.
+
+    cloud_only fills these on the plant-detail payload; cloud_user surfaces them as
+    realtime measure points. A count that is not reported comes back as ``None``.
+    """
+
+    def _pick(key: str) -> int | None:
+        raw = coordinator.plant_detail.get(key)
+        if raw is None:
+            point = (coordinator.data or {}).get(key)
+            if isinstance(point, dict):
+                raw = point.get("value")
+        return _coerce_count(raw)
+
+    return _pick("fault_count"), _pick("alarm_count")
+
+
+# Common (app-internal, region-varying) fault-detail keys → the attribute we surface them
+# under. Best-effort: only keys actually present in the fault payload are exposed, since
+# the shape is unverified against a live device (#457).
+_FAULT_DETAIL_ATTRS: tuple[tuple[str, str], ...] = (
+    ("fault_name", "latest_fault_name"),
+    ("fault_code", "latest_fault_code"),
+    ("fault_level", "latest_fault_level"),
+    ("fault_type_name", "latest_fault_type"),
+    ("happen_time", "latest_fault_time"),
+    ("fault_time", "latest_fault_time"),
+)
+
+
+class SungrowPlantFaultBinarySensor(CoordinatorEntity[SungrowPlantCoordinator], BinarySensorEntity):
+    """Plant-level PROBLEM sensor: on when the plant reports any fault or alarm (#457).
+
+    The on/off is driven by the reliable fault/alarm counts (plant-detail on ``cloud_only``,
+    realtime points on ``cloud_user``). On ``cloud_user`` it is enriched with the latest
+    fault detail from the app fault API (best-effort, ``fault_list``) as attributes; that
+    enrichment never changes the on/off, so an unavailable fault API cannot mislead the
+    problem state. ``None`` (unknown) when no count is reported at all.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "plant_fault"
+
+    def __init__(self, coordinator: SungrowPlantCoordinator) -> None:
+        """Initialize the plant-level fault/problem binary sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.plant_id}_plant_fault"
+        # Minimal link to the already-registered plant service device.
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, coordinator.plant_id)})
+
+    @property
+    def is_on(self) -> bool | None:
+        """True when the plant reports any fault or alarm; None when neither is known."""
+        fault, alarm = _plant_problem_counts(self.coordinator)
+        if fault is None and alarm is None:
+            return None
+        return (fault or 0) > 0 or (alarm or 0) > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the counts plus, on cloud_user, the latest fault detail (best-effort)."""
+        fault, alarm = _plant_problem_counts(self.coordinator)
+        attrs: dict[str, Any] = {"fault_count": fault, "alarm_count": alarm}
+        fault_list = self.coordinator.fault_list
+        latest = fault_list[0] if fault_list else None
+        if isinstance(latest, dict):
+            for src, dest in _FAULT_DETAIL_ATTRS:
+                if src in latest and dest not in attrs:
+                    attrs[dest] = latest.get(src)
+        if fault_list:
+            attrs["open_fault_page_count"] = len(fault_list)
+        return attrs
+
+
 def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySensorEntity]:
     """Build the fault + connectivity binary sensors for every device the plant reports."""
     sensors: list[BinarySensorEntity] = []
-    if coordinator.plants_service is None:
+    # A Modbus-only entry has neither a cloud plants service nor a user-account client.
+    # cloud_user shares "no plants_service" with Modbus but must follow the cloud path,
+    # so key the branch on ``uses_user_api`` rather than ``plants_service is None`` alone.
+    # ``is True`` (not just truthiness) so a MagicMock coordinator in tests, whose auto
+    # attributes are truthy, still takes the Modbus branch it expects.
+    uses_user_api = getattr(coordinator, "uses_user_api", False) is True
+    if coordinator.plants_service is None and not uses_user_api:
         # Modbus-only path: the local inverter's connectivity is driven by the last poll.
         data = coordinator.data or {}
         has_power_flow = "power_flow_status" in data
@@ -87,11 +182,22 @@ def _build_binary_sensors(coordinator: SungrowPlantCoordinator) -> list[BinarySe
                     )
         return sensors
 
+    # Cloud path (cloud_only and cloud_user): per-device fault/connectivity sensors plus a
+    # plant-level PROBLEM sensor. The plant Fault sensor is derived from the reliable
+    # fault/alarm counts so it works on both transports (#457). Per-device sensors are
+    # emitted first so their positions are stable for existing consumers/tests.
+    # cloud_only device rows always carry dev_fault_status / dev_status; cloud_user device
+    # rows may not, so only create a per-device sensor when its source field is present to
+    # avoid a row of permanently-"unknown" entities.
+    is_cloud_only = coordinator.plants_service is not None
     for device in coordinator.devices:
         if not device.get("uuid"):
             continue
-        sensors.append(SungrowDeviceFaultBinarySensor(coordinator, device))
-        sensors.append(SungrowDeviceConnectivityBinarySensor(coordinator, device))
+        if is_cloud_only or "dev_fault_status" in device:
+            sensors.append(SungrowDeviceFaultBinarySensor(coordinator, device))
+        if is_cloud_only or "dev_status" in device:
+            sensors.append(SungrowDeviceConnectivityBinarySensor(coordinator, device))
+    sensors.append(SungrowPlantFaultBinarySensor(coordinator))
     return sensors
 
 

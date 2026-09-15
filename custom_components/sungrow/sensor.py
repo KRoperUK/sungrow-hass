@@ -201,11 +201,20 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
                     continue
                 sensors.append(sensor)
 
+    # EV chargers (charging piles) on the cloud_user transport (#456): each discovered
+    # charger becomes its own device with best-effort numeric sensors built from the
+    # realtime payload. Feature-detected — nothing is created when the account has no
+    # charger. Read-only this release.
+    sensors.extend(_build_charger_sensors(coordinator))
+
     # Modbus-only diagnostic sensor (#361): a text sensor whose state is the last
     # error string ("ok" on success). Disabled by default — power users enable it
     # in the entity registry so they can alert on Modbus stalls without decoding
     # the ``extra_state_attributes`` on the connectivity binary_sensor.
-    if coordinator.plants_service is None:
+    # ``is True`` (not truthiness) so a MagicMock coordinator in tests, whose auto
+    # attributes are truthy, still takes the Modbus-only branch it expects; cloud_user
+    # (real ``uses_user_api is True``) is excluded from the local-Modbus diagnostic sensor.
+    if coordinator.plants_service is None and getattr(coordinator, "uses_user_api", False) is not True:
         for device in coordinator.devices:
             if device.get("device_type") == DeviceType.INVERTER and device.get("uuid"):
                 sensors.append(SungrowModbusStatusSensor(coordinator, device))
@@ -559,3 +568,111 @@ class SungrowModbusStatusSensor(CoordinatorEntity[SungrowPlantCoordinator], Sens
         if diag.get("skipped_blocks"):
             attrs["skipped_blocks"] = diag["skipped_blocks"]
         return attrs
+
+
+def _charger_numeric(raw: Any) -> tuple[float | None, str | None]:
+    """Extract a numeric value (and optional unit) from a charger realtime field.
+
+    The charging-pile realtime payload shape is model/region-dependent and unverified
+    against a live device (#456), so this tolerates both a bare scalar and a
+    ``{"value": ..., "unit": ...}`` wrapper. Returns ``(None, None)`` for anything
+    non-numeric so the caller can skip it rather than create a junk sensor.
+    """
+    unit: str | None = None
+    if isinstance(raw, dict):
+        unit = raw.get("unit") or raw.get("point_unit")
+        raw = raw.get("value")
+    if raw is None or isinstance(raw, bool):
+        return None, None
+    try:
+        return float(raw), (str(unit) if unit not in (None, "") else None)
+    except TypeError, ValueError:
+        return None, None
+
+
+def _build_charger_sensors(coordinator: SungrowPlantCoordinator) -> list[SensorEntity]:
+    """Build best-effort numeric sensors for each discovered EV charger (#456).
+
+    cloud_user only, feature-detected: nothing is produced when no charger was
+    discovered or its realtime payload has no numeric fields. Each charger is its own
+    device (nested under the plant via ``build_device_info_for``), and every numeric
+    field in its realtime payload becomes a diagnostic sensor. Units are surfaced only
+    when the payload carries one; no device_class is asserted because the field
+    semantics are not yet confirmed against a live charger.
+    """
+    piles = getattr(coordinator, "charging_piles", None)
+    charger_data = getattr(coordinator, "charger_data", None)
+    if not piles or not charger_data:
+        return []
+    sensors: list[SensorEntity] = []
+    piles_by_uuid = {str(p["uuid"]): p for p in piles if p.get("uuid") is not None}
+    for uuid, payload in charger_data.items():
+        if not isinstance(payload, dict):
+            continue
+        pile = piles_by_uuid.get(uuid, {})
+        charger_device = {
+            "uuid": f"charger_{uuid}",
+            "device_name": (
+                pile.get("device_name")
+                or pile.get("ps_key_name")
+                or pile.get("charger_name")
+                or pile.get("name")
+                or f"EV Charger {uuid}"
+            ),
+            "device_model_code": pile.get("device_model_code") or pile.get("model_name"),
+            "device_sn": pile.get("device_sn") or pile.get("sn"),
+        }
+        device_info = build_device_info_for(coordinator, charger_device)
+        for field, raw in payload.items():
+            value, unit = _charger_numeric(raw)
+            if value is None:
+                continue
+            sensors.append(SungrowChargerSensor(coordinator, uuid, str(field), device_info, unit))
+    return sensors
+
+
+class SungrowChargerSensor(CoordinatorEntity[SungrowPlantCoordinator], SensorEntity):
+    """A single numeric field of an EV charger's realtime payload (#456).
+
+    Read-only, diagnostic, cloud_user only. The value is read live from
+    ``coordinator.charger_data`` so it tracks each poll. No ``device_class`` is set
+    because the charging-pile field semantics are unverified against a live device; a
+    ``unit`` is applied only when the payload provides one. A follow-up can promote the
+    known power/energy fields to typed sensors once a live payload is captured.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: SungrowPlantCoordinator,
+        charger_uuid: str,
+        field: str,
+        device_info: Any,
+        unit: str | None,
+    ) -> None:
+        """Initialize a charger field sensor."""
+        super().__init__(coordinator)
+        self._charger_uuid = charger_uuid
+        self._field = field
+        self._attr_unique_id = f"{coordinator.plant_id}_charger_{charger_uuid}_{field}"
+        # Humanise the raw field key for the entity name (no translation key: the field
+        # set is dynamic and unverified, so a fixed strings.json entry can't cover it).
+        self._attr_name = field.replace("_", " ").strip().title()
+        self._attr_device_info = device_info
+        if unit:
+            self._attr_native_unit_of_measurement = unit
+
+    @property
+    def available(self) -> bool:
+        """Unavailable if the poll failed or the charger dropped out of the payload."""
+        return super().available and self._charger_uuid in (self.coordinator.charger_data or {})
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current numeric value of this charger field."""
+        payload = (self.coordinator.charger_data or {}).get(self._charger_uuid, {})
+        value, _ = _charger_numeric(payload.get(self._field))
+        return value

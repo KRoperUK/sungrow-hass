@@ -203,6 +203,9 @@
       "device_fault": {
         "name": "Nam"
       },
+      "plant_fault": {
+        "name": "Nam Gorsaf"
+      },
       "pv_generating": {
         "name": "PV yn cynhyrchu"
       },

@@ -203,6 +203,9 @@
       "device_fault": {
         "name": "Défaut"
       },
+      "plant_fault": {
+        "name": "Défaut de l'installation"
+      },
       "pv_generating": {
         "name": "PV en production"
       },
