@@ -210,12 +210,150 @@ async def test_reauth_code_in_fragment(hass: HomeAssistant, mock_auth):
 
 
 # ---------------------------------------------------------------------------
+# Manual code / URL parsing (#396)
+# ---------------------------------------------------------------------------
+# Users paste the authorization code in several shapes: a bare code, a full redirect
+# URL (query or fragment), or just the `code=...` fragment copied out of the address
+# bar. Only inputs starting with the literal "http" used to be parsed, so a pasted
+# `code=E5s9st` was sent to the token endpoint verbatim and rejected.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Bare code.
+        ("some_code", "some_code"),
+        ("  spaced_code  ", "spaced_code"),
+        # Full URL — code in the query, first or later parameter.
+        ("http://ha.local:8123/api/sungrow_hass/callback?code=query_code&state=x", "query_code"),
+        ("https://ha.example/api/sungrow_hass/callback?state=x&code=middle_code", "middle_code"),
+        # Full URL — code in the fragment.
+        ("http://ha.local:8123/callback#state=abc?code=frag_query_code", "frag_query_code"),
+        ("https://ha.example/callback#code=frag_only_code", "frag_only_code"),
+        # Query/fragment fragment with no scheme — the shape reported in #396.
+        ("code=param_code", "param_code"),
+        ("?code=query_only_code", "query_only_code"),
+        ("#code=hash_only_code", "hash_only_code"),
+        ("code=param_code&state=xyz", "param_code"),
+        # Upper-case scheme — the old `startswith("http")` test was case-sensitive.
+        ("HTTP://ha.local:8123/api/sungrow_hass/callback?code=upper_code", "upper_code"),
+        # Percent-encoded value is decoded.
+        ("http://ha.example/api/sungrow_hass/callback?code=abc%3Ddef", "abc=def"),
+        # Nothing usable -> None so the caller surfaces a validation error.
+        ("https://ha.example/callback?state=x&other=y", None),
+        ("code=", None),
+        ("", None),
+        ("   ", None),
+        (None, None),
+    ],
+)
+def test_extract_authorization_code(raw, expected):
+    """The manual-entry parser accepts every code/URL shape a user may paste (#396)."""
+    from custom_components.sungrow.config_flow import _extract_authorization_code
+
+    assert _extract_authorization_code(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "code=pasted_param_code",
+        "?code=pasted_param_code",
+        "#code=pasted_param_code",
+        "HTTP://ha.local:8123/api/sungrow_hass/callback?code=pasted_param_code",
+    ],
+)
+async def test_reauth_accepts_code_fragment_shapes(hass: HomeAssistant, mock_auth, pasted):
+    """Regression #396: pasting `code=...` (not a full URL) must extract the code.
+
+    Before the fix the whole string was sent as the code, so the token exchange failed
+    and the user saw a generic error on both the bare code and the pasted URL.
+    """
+    entry = _hub_entry(hass)
+    flow_id = await _reauth_to_manual(hass, entry)
+
+    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(flow_id, user_input={"code": pasted})
+        await hass.async_block_till_done()
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_auth.async_authorize.call_args[0][0] == "pasted_param_code"
+
+
+async def test_finish_step_authorization_failed_shows_manual_form(hass: HomeAssistant, mock_auth):
+    """The library's *real* token-exchange failure maps to ``invalid_auth_code`` (#396).
+
+    ``Auth.async_authorize`` raises ``AuthError({"error": "authorization_failed", ...})``
+    with iSolarCloud's own envelope folded into the description — not ``invalid_grant``.
+    Matching only ``invalid_grant`` meant a spent/expired code fell through to the generic
+    handler, which is exactly the ``cloud_oauth.py:352`` log line in the report.
+    """
+    from pysolarcloud import AuthError
+
+    flow = _flow_at_finish(hass)
+    flow._code = "one-time-code"
+    flow.auth_client = mock_auth
+    flow.auth_client.async_authorize = AsyncMock(
+        side_effect=AuthError(
+            {
+                "error": "authorization_failed",
+                "error_description": (
+                    "{'result_msg': 'Invalid authorization code: tSQsoO', 'result_code': '2', 'error': 'invalid_grant'}"
+                ),
+            }
+        )
+    )
+
+    result = await flow.async_step_finish()
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "auth_manual"
+    assert result["errors"] == {"base": "invalid_auth_code"}
+    # The used code has been cleared so the next submission doesn't re-send the same one.
+    assert flow._code is None
+
+
+async def test_finish_step_redirect_uri_mismatch_surfaces_redirect_error(hass: HomeAssistant, mock_auth):
+    """A token-exchange 'Redirect URI mismatch.' points at the redirect config, not the code (#396).
+
+    This arrives as ``authorization_failed`` too, so it must be recognised *before* the
+    code-rejected branch — otherwise the user is told to fetch a fresh code that will
+    fail for the same reason.
+    """
+    from pysolarcloud import AuthError
+
+    flow = _flow_at_finish(hass)
+    flow._code = "some-code"
+    flow.auth_client = mock_auth
+    flow.auth_client.async_authorize = AsyncMock(
+        side_effect=AuthError(
+            {
+                "error": "authorization_failed",
+                "error_description": "{'result_msg': 'Redirect URI mismatch.', 'result_code': '5'}",
+            }
+        )
+    )
+
+    result = await flow.async_step_finish()
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_redirect_uri"}
+    # The code was fine — don't discard it for a redirect problem.
+    assert flow._code == "some-code"
+
+
+# ---------------------------------------------------------------------------
 # Phase 2: Authorization via reauth — error paths
 # ---------------------------------------------------------------------------
 
 
 async def test_reauth_url_without_code(hass: HomeAssistant, mock_auth):
-    """A URL with no code in query OR fragment returns an error form."""
+    """A URL with no code in query OR fragment returns an error form.
+
+    The error is ``invalid_auth`` rather than a generic ``unknown``: the parser knows
+    the input carried no usable code (#396).
+    """
     entry = _hub_entry(hass)
     flow_id = await _reauth_to_manual(hass, entry)
 
@@ -223,7 +361,7 @@ async def test_reauth_url_without_code(hass: HomeAssistant, mock_auth):
     result = await hass.config_entries.flow.async_configure(flow_id, user_input={"code": bad_url})
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["errors"]["base"] == "unknown"
+    assert result["errors"]["base"] == "invalid_auth"
 
 
 async def test_reauth_no_tokens(hass: HomeAssistant, mock_auth_no_tokens):
