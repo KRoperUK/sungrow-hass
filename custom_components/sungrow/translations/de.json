@@ -193,6 +193,10 @@
     "dispatch_rating_unknown": {
       "title": "Lade-/Entladeleistungsgrenze konnte nicht ermittelt werden",
       "description": "Die Leistungsgrenze für **{plant}** konnte aus dem Modellcode **{model}** nicht ermittelt werden, daher ist der Regler auf {ceiling} W begrenzt statt auf die tatsächliche Leistung des Wechselrichters. Ist der Wechselrichter größer, endet der Regler deshalb zu früh. Betroffene Steuerungen: {parameters}. Bitte melden Sie den Modellcode, damit die Leistungsdaten ergänzt werden können."
+    },
+    "api_rate_warning": {
+      "title": "API-Aufruflimit von iSolarCloud wird bald erreicht",
+      "description": "Diese Integration führt etwa **{observed}** iSolarCloud-API-Aufrufe pro Stunde aus und nähert sich damit dem Budget des kostenlosen Tarifs von etwa **{budget}** Aufrufen pro Stunde. Den größten Anteil hat: **{dominant}**. Steigt die Rate weiter, lehnt iSolarCloud Anfragen ab (E999) und die Daten werden nicht mehr aktualisiert. Um weniger Aufrufe zu machen, erhöhen Sie das Abfrageintervall in den Integrationsoptionen und deaktivieren Sie – falls nicht benötigt – die Sensoren pro Gerät. Diese Warnung verschwindet automatisch, sobald die Rate sinkt."
     }
   },
   "entity": {

@@ -18,6 +18,15 @@ from homeassistant.util import dt as dt_util
 from pysolarcloud import AuthError, PySolarCloudException, UserAuth
 from pysolarcloud.plants import DeviceType, Plants
 
+from .api_rate import (
+    CALL_TYPE_DEVICE_LIST,
+    CALL_TYPE_DEVICE_REALTIME,
+    CALL_TYPE_PLANT_DETAIL,
+    CALL_TYPE_REALTIME,
+    CALL_TYPE_USER_DEVICE_FETCH,
+    ApiCallRateTracker,
+    label_for,
+)
 from .auth import AUTH_ERRORS
 from .const import (
     BATTERY_DEVICE_POINTS,
@@ -220,6 +229,12 @@ _REPAIR_CODES: dict[str, frozenset[str]] = {
 }
 _REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
 
+# Translation key for the proactive API-rate warning Repair (#434). Unlike the reactive
+# ``rate_limited`` Repair (raised only after iSolarCloud returns E999), this one fires
+# while the observed rate is merely *approaching* the budget, so the user can widen the
+# poll interval before requests start being rejected.
+_RATE_WARNING_ISSUE = "api_rate_warning"
+
 
 class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage fetching data from a single plant."""
@@ -233,12 +248,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plant_name: str,
         devices: list[dict[str, Any]] | None = None,
         user_auth: UserAuth | None = None,
+        rate_tracker: ApiCallRateTracker | None = None,
     ) -> None:
         """Initialize the coordinator.
 
         ``plants_service`` is ``None`` for a cloud-free entry: either a Modbus-only entry
         (data comes from the local Modbus client, #159) or a cloud user-account entry
         (``user_auth`` set, data comes from the app/web API, #268).
+
+        ``rate_tracker`` counts the outbound API calls this coordinator makes so the
+        integration can warn before the iSolarCloud quota is exhausted (#434). One tracker
+        is shared across a config entry's plant coordinators (the budget is per account),
+        passed in by ``__init__.py``. When omitted, a cloud transport creates its own so
+        direct construction (and tests) still tracks; a Modbus-only entry gets none —
+        local reads spend no API budget.
         """
         scan_seconds = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
@@ -256,6 +279,19 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ``plants_service``) so cloud_user is routed down the cloud entity path, not the
         # local-Modbus one (#456/#457).
         self.uses_user_api: bool = user_auth is not None
+        # Rolling-window counter of the outbound API calls this coordinator makes,
+        # tagged by call type, so the integration can warn as the observed rate
+        # approaches the iSolarCloud budget (#434). Only cloud transports get one:
+        # Modbus reads spend no API budget. A shared tracker is passed in by
+        # ``__init__.py`` (the budget is per account, shared across the entry's plants);
+        # when constructed directly (tests), a cloud transport makes its own.
+        is_cloud = plants_service is not None or user_auth is not None
+        self.rate_tracker: ApiCallRateTracker | None = rate_tracker or (
+            ApiCallRateTracker(time_fn=hass.loop.time) if is_cloud else None
+        )
+        # Latched once the proactive rate Repair is raised, so it is cleared exactly once
+        # when the observed rate falls back under the threshold.
+        self._rate_repair_raised = False
         self.plant_id = plant_id
         self.plant_name = plant_name
         # The user-configured poll interval, restored after a rate-limit back-off (#156).
@@ -411,6 +447,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # async_get_realtime_data returns a dict of plants keyed by plant_id:
             # { "123": { "code1": {...}, "code2": {...} } }
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_REALTIME)
                 all_plants_data = await self.plants_service.async_get_realtime_data(
                     [self.plant_id], extra_measure_points=self.extra_measure_points or None
                 )
@@ -461,6 +498,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         cloud_data = cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
+        # Proactively warn if this poll's calls push the observed rate toward the budget
+        # (#434). Advisory only — never throttles or fails the poll.
+        self._async_check_rate_budget()
         return normalize_energy_units(tag_source(cloud_data, "cloud"))
 
     async def _async_modbus_only_update(self) -> dict[str, Any]:
@@ -494,6 +534,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         assert self._user_auth is not None
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_REALTIME)
                 detail = await self._user_auth.async_get_plant_detail(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             if is_auth_error(err):
@@ -507,6 +548,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_refresh_faults()
         await self._async_refresh_chargers()
         points = map_plant_detail_to_points(detail)
+        # Proactively warn if this poll's calls push the observed rate toward the budget
+        # (#434). The per-poll device-list fetch is the dominant contributor here (#439).
+        self._async_check_rate_budget()
         return normalize_power_units(normalize_energy_units(tag_source(points, "cloud_user")))
 
     async def _async_refresh_user_device_data(self) -> None:
@@ -530,6 +574,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_USER_DEVICE_FETCH)
                 devices = await self._user_auth.async_get_devices(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             # Do not bail out. On this transport the device list *is* the per-device
@@ -578,6 +623,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 faults = await self._user_auth.async_query_faults(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
@@ -585,6 +631,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.fault_list = list(faults) if isinstance(faults, list) else []
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 summary = await self._user_auth.async_get_fault_count(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Fault count fetch failed for %s: %s", self.plant_name, err)
@@ -608,6 +655,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._charging_piles_loaded:
             try:
                 async with asyncio.timeout(self._poll_timeout):
+                    self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                     piles = await self._user_auth.async_get_charging_piles(self.plant_id)
             except (PySolarCloudException, ClientError, TimeoutError) as err:
                 _LOGGER.debug("Charger discovery failed for %s: %s", self.plant_name, err)
@@ -620,6 +668,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             uuid = str(pile["uuid"])
             try:
                 async with asyncio.timeout(self._poll_timeout):
+                    self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                     data = await self._user_auth.async_get_charging_pile_realtime(pile["uuid"])
             except (PySolarCloudException, ClientError, TimeoutError, ValueError) as err:
                 _LOGGER.debug("Charger realtime fetch failed for %s (%s): %s", uuid, self.plant_name, err)
@@ -649,11 +698,13 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         info: dict[str, Any] | None = None
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 capacity = await self._user_auth.async_get_battery_capacity(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Battery capacity probe failed for %s: %s", self.plant_name, err)
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 info = await self._user_auth.async_get_battery_info(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Battery info probe failed for %s: %s", self.plant_name, err)
@@ -773,6 +824,83 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for key in _REPAIR_CODES:
             ir.async_delete_issue(self.hass, DOMAIN, f"{key}_{self.plant_id}")
 
+    def _record_api_call(self, call_type: str) -> None:
+        """Count one outbound iSolarCloud call against the rate tracker (#434).
+
+        No-op when there is no tracker (a Modbus-only entry makes no API calls).
+        """
+        if self.rate_tracker is not None:
+            self.rate_tracker.record(call_type)
+
+    def record_api_call(self, call_type: str) -> None:
+        """Public hook so non-poll cloud calls (dispatch writes) count too (#434).
+
+        The dispatch entities (number/select) share this coordinator and write via the
+        cloud ``Control``/``UserControl`` client; recording here keeps those calls in the
+        same per-entry budget. On a Modbus-only entry the tracker is ``None`` so a local
+        holding-register write is correctly not counted.
+        """
+        self._record_api_call(call_type)
+
+    def _rate_issue_id(self) -> str:
+        """Return the per-entry issue id for the proactive rate Repair (#434).
+
+        Keyed on the config entry, not the plant, because the budget is per account and
+        the tracker is shared across the entry's plant coordinators — one Repair per
+        entry, not one per plant.
+        """
+        entry = self.config_entry
+        entry_id = entry.entry_id if entry is not None else self.plant_id
+        return f"{_RATE_WARNING_ISSUE}_{entry_id}"
+
+    def _async_check_rate_budget(self) -> None:
+        """Warn (log + Repair) as the observed API rate approaches the budget (#434).
+
+        Evaluated lazily after a successful cloud poll — no timer or task. When the
+        trailing-hour rate reaches the warning threshold it logs once per crossing and
+        raises a per-entry Repair naming the dominant call type; when the rate falls back
+        below the threshold the Repair is cleared. This is advisory only: it never
+        throttles or fails the poll (auto-stretching the interval is deferred to a
+        follow-up — see #434).
+        """
+        tracker = self.rate_tracker
+        if tracker is None:
+            return
+        issue_id = self._rate_issue_id()
+        if tracker.is_approaching_budget():
+            observed = int(round(tracker.observed_rate_per_hour()))
+            dominant = tracker.dominant_type()
+            dominant_label = label_for(dominant) if dominant is not None else "polling"
+            if not tracker.warning_active:
+                tracker.warning_active = True
+                _LOGGER.warning(
+                    "Sungrow is making ~%d iSolarCloud calls/hour, approaching the ~%d/hour budget; "
+                    "the %s dominates. Increase the polling interval (or disable per-device sensors) "
+                    "to avoid the API rejecting requests (E999).",
+                    observed,
+                    tracker.budget_per_hour,
+                    dominant_label,
+                )
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=_RATE_WARNING_ISSUE,
+                translation_placeholders={
+                    "observed": str(observed),
+                    "budget": str(tracker.budget_per_hour),
+                    "dominant": dominant_label,
+                },
+                learn_more_url=_REPAIR_LEARN_MORE,
+            )
+            self._rate_repair_raised = True
+        elif tracker.warning_active or self._rate_repair_raised:
+            tracker.warning_active = False
+            self._rate_repair_raised = False
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     async def _async_maybe_refresh_devices(self) -> None:
         """Refresh the device list periodically rather than on every poll (saves quota).
 
@@ -791,6 +919,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         assert self.plants_service is not None  # only reached on the cloud path
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_LIST)
                 devices = await self.plants_service.async_get_plant_devices(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Could not refresh devices for plant %s: %s", self.plant_id, err)
@@ -818,6 +947,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         assert self.plants_service is not None  # only reached on the cloud path
         try:
             async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_PLANT_DETAIL)
                 details = await self.plants_service.async_get_plant_details(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
             _LOGGER.debug("Could not refresh plant detail for plant %s: %s", self.plant_id, err)
@@ -932,6 +1062,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             try:
                 async with asyncio.timeout(self._poll_timeout):
+                    self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                     result = await self.plants_service.async_get_device_realtime(
                         self.plant_id,
                         device_type,

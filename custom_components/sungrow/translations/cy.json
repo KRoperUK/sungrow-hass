@@ -193,6 +193,10 @@
     "dispatch_rating_unknown": {
       "title": "Nid oedd modd pennu terfyn pŵer gwefru/rhyddhau",
       "description": "Nid oedd modd pennu terfyn pŵer **{plant}** o'r cod model **{model}**, felly mae'r llithrydd wedi'i gapio i {ceiling} W yn lle gallu gwirioneddol y gwrthdröydd. Os yw'r gwrthdröydd yn fwy na hynny, dyma pam mae'r llithrydd yn stopio'n gynnar. Rheolyddion yr effeithir arnynt: {parameters}. Agorwch fater gyda'r cod model fel y gellir ychwanegu ei radd."
+    },
+    "api_rate_warning": {
+      "title": "Yn agosáu at derfyn galwadau API iSolarCloud",
+      "description": "Mae'r integreiddiad hwn yn gwneud tua **{observed}** o alwadau API iSolarCloud yr awr, sy'n agosáu at gyllideb y cynllun rhad ac am ddim o tua **{budget}** o alwadau yr awr. Y cyfrannwr mwyaf yw: **{dominant}**. Os yw'r gyfradd yn parhau i godi, bydd iSolarCloud yn dechrau gwrthod ceisiadau (E999) a bydd data'n peidio â diweddaru. I wneud llai o alwadau, cynyddwch y cyfwng holi yn opsiynau'r integreiddiad, ac — os nad oes eu hangen — diffoddwch y synwyryddion fesul dyfais. Mae'r rhybudd hwn yn clirio'n awtomatig unwaith i'r gyfradd ostwng."
     }
   },
   "entity": {

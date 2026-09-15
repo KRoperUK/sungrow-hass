@@ -193,6 +193,10 @@
     "dispatch_rating_unknown": {
       "title": "Charge/discharge power limit could not be determined",
       "description": "The power limit for **{plant}** could not be determined from the model code **{model}**, so the slider is capped at {ceiling} W rather than the inverter's real capability. If the inverter is larger than that, this is why the slider stops early. Affected controls: {parameters}. Please open an issue with the model code so its rating can be added."
+    },
+    "api_rate_warning": {
+      "title": "Approaching the iSolarCloud API call limit",
+      "description": "This integration is making about **{observed}** iSolarCloud API calls per hour, which is approaching the free plan's budget of about **{budget}** calls per hour. The biggest contributor is the **{dominant}**. If the rate keeps climbing, iSolarCloud will start rejecting requests (E999) and data will stop updating. To make fewer calls, increase the polling interval in the integration options, and — if you don't need them — turn off per-device sensors. This warning clears automatically once the rate drops."
     }
   },
   "entity": {

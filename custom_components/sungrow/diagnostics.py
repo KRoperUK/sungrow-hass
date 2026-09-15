@@ -14,6 +14,7 @@ from pysolarcloud import PySolarCloudException
 
 from . import SungrowConfigEntry, SungrowData
 from ._serialization import anonymise_device_keys, catalog_rows, jsonable
+from .api_rate import ApiCallRateTracker
 from .const import DOMAIN
 from .model_capabilities import resolve_capabilities
 
@@ -212,6 +213,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
         if getattr(coordinator, "modbus_diagnostics", None):
             modbus_diag = dict(coordinator.modbus_diagnostics)
 
+        # Observed API call rate per call type (#434). Only cloud transports have a
+        # tracker; a Modbus-only coordinator reports nothing here (no API budget spent).
+        # ``getattr`` + ``isinstance`` keeps this robust against a MagicMock coordinator.
+        api_call_rate: dict[str, Any] = {}
+        tracker = getattr(coordinator, "rate_tracker", None)
+        if isinstance(tracker, ApiCallRateTracker):
+            api_call_rate = tracker.as_diagnostics()
+
         plant_data[plant_id] = {
             "plant_name": coordinator.plant_name,
             "last_update_success": coordinator.last_update_success,
@@ -227,6 +236,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Sungrow
             "points_catalog": build_points_catalog(coordinator.data, device_realtime, models_by_type),
             # Local Modbus-only diagnostic metadata (skipped blocks, last error, family).
             "modbus_diagnostics": modbus_diag,
+            # Observed self-generated API call rate, per call type, against the budget
+            # (#434). Empty {} on the Modbus-only transport.
+            "api_call_rate": api_call_rate,
         }
 
     return async_redact_data(

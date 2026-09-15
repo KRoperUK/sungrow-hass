@@ -193,6 +193,10 @@
     "dispatch_rating_unknown": {
       "title": "No se pudo determinar el límite de potencia de carga/descarga",
       "description": "El límite de potencia de **{plant}** no se pudo determinar a partir del código de modelo **{model}**, por lo que el control se limita a {ceiling} W en lugar de la capacidad real del inversor. Si el inversor es mayor, esta es la razón por la que el control se detiene antes. Controles afectados: {parameters}. Abra una incidencia con el código de modelo para que se añada su potencia."
+    },
+    "api_rate_warning": {
+      "title": "Se está acercando al límite de llamadas a la API de iSolarCloud",
+      "description": "Esta integración está realizando unas **{observed}** llamadas a la API de iSolarCloud por hora, acercándose al presupuesto del plan gratuito de unas **{budget}** llamadas por hora. El mayor contribuyente es: **{dominant}**. Si la tasa sigue subiendo, iSolarCloud empezará a rechazar solicitudes (E999) y los datos dejarán de actualizarse. Para hacer menos llamadas, aumente el intervalo de sondeo en las opciones de la integración y, si no los necesita, desactive los sensores por dispositivo. Este aviso desaparece automáticamente cuando la tasa baja."
     }
   },
   "entity": {

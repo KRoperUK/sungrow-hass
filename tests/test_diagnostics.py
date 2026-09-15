@@ -93,6 +93,58 @@ async def test_config_entry_diagnostics(hass: HomeAssistant):
     json.dumps(diag)
 
 
+async def test_diagnostics_reports_observed_api_call_rate(hass: HomeAssistant):
+    """The dump reports the observed per-call-type API rate against the budget (#434)."""
+    from custom_components.sungrow.api_rate import (
+        CALL_TYPE_DEVICE_REALTIME,
+        CALL_TYPE_REALTIME,
+        ApiCallRateTracker,
+    )
+
+    tracker = ApiCallRateTracker(budget_per_hour=2000, warn_fraction=0.8, window_seconds=3600)
+    for _ in range(30):
+        tracker.record(CALL_TYPE_REALTIME)
+    for _ in range(12):
+        tracker.record(CALL_TYPE_DEVICE_REALTIME)
+
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    coordinator = _make_coordinator("1", "P", {}, plants_service=None)
+    coordinator.rate_tracker = tracker
+    coordinator.device_data = {}
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    rate = diag["plants"]["1"]["api_call_rate"]
+
+    assert rate["budget_per_hour"] == 2000
+    assert rate["warn_threshold_per_hour"] == 1600
+    assert rate["observed_rate_per_hour"] == 42
+    assert rate["approaching_budget"] is False
+    assert rate["dominant_call_type"] == CALL_TYPE_REALTIME
+    assert rate["by_call_type"] == {CALL_TYPE_DEVICE_REALTIME: 12, CALL_TYPE_REALTIME: 30}
+    json.dumps(diag)
+
+
+async def test_diagnostics_omits_api_call_rate_without_tracker(hass: HomeAssistant):
+    """A Modbus-only coordinator (no tracker) reports an empty api_call_rate (#434)."""
+    entry = MagicMock()
+    entry.entry_id = "e"
+    entry.data = {"gateway": "Europe", "app_id": "a"}
+    entry.options = {}
+
+    coordinator = _make_coordinator("1", "P", {}, plants_service=None)
+    coordinator.rate_tracker = None
+    coordinator.device_data = {}
+    entry.runtime_data = SungrowData(coordinators=[coordinator], control=MagicMock(), devices={})
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["plants"]["1"]["api_call_rate"] == {}
+
+
 async def test_config_entry_diagnostics_no_data(hass: HomeAssistant):
     """Diagnostics handle a config entry with no stored runtime data."""
     entry = MagicMock()
