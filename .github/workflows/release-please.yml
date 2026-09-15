@@ -71,6 +71,22 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
                   GH_REPO: ${{ github.repository }}
               run: |
+                  # Delete a release and its tag ref, tolerating an already-missing
+                  # tag (see cleanup-pr-release.yml / #444): drop the release, then
+                  # remove the tag ref only if it still exists so a shared/removed
+                  # ref can't 404 and fail the prune under `bash -e`.
+                  delete_release_and_tag() {
+                    tag="$1"
+                    gh release delete "$tag" --yes 2>/dev/null || true
+                    if gh api "repos/${GH_REPO}/git/refs/tags/${tag}" >/dev/null 2>&1; then
+                      gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${tag}" >/dev/null \
+                        && echo "Deleted tag ref ${tag}" \
+                        || echo "Warning: could not delete tag ref ${tag}"
+                    else
+                      echo "Tag ${tag} already absent — nothing to clean up"
+                    fi
+                  }
+
                   echo "Release created; deleting all dev pre-releases (rc / pr / legacy dev-*)."
                   gh release list --limit 1000 --json tagName,isPrerelease \
                     --jq '.[] | select(.isPrerelease) | .tagName' \
@@ -81,5 +97,5 @@ jobs:
                         *) continue ;;
                       esac
                       echo "Deleting ${tag}"
-                      gh release delete "$tag" --yes --cleanup-tag
+                      delete_release_and_tag "$tag"
                     done
