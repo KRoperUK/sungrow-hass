@@ -45,6 +45,26 @@ _NAMED_SCALAR_FIELDS: dict[str, str] = {
     "fault_count": "fault_count",
 }
 
+# Best-effort fallback units for named plant fields whose companion ``*_unit`` the app
+# reliably pairs but a rare payload may omit (#384).
+#
+# ``async_get_plant_detail`` posts ``getPsDetailWithPsType`` since sungrow-isolarcloud
+# 0.16.0 — the app's realtime household view, which returns ``curr_power`` alongside a
+# ``curr_power_unit`` (the decompiled app reads the two together as
+# ``DeviceDataBean.curr_power`` / ``curr_power_unit``, observed as ``"W"``; the library's
+# own test returns ``{"value": "3200", "unit": "W"}``). The W/kW ambiguity that previously
+# blocked a unit here was an artefact of the *old* ``getPsDetail`` call that mis-sent a
+# ``getPsList`` parameter and returned unit-less realtime fields; that call is gone.
+#
+# So when the unit is present it stays authoritative (``normalize_power_units`` still
+# rescales a ``kW`` reading to ``W`` downstream); only when it is *absent* do we fall back
+# to ``W`` so the Current Power sensor classifies as power (device_class=power, unit=W,
+# state_class=measurement via ``resolve_classification``) instead of dropping to a
+# unit-less, device-class-less sensor that Home Assistant refuses long-term statistics for
+# (#384). Scoped to the power field only — energy fields keep unit-driven handling so a
+# Wh/kWh mix is never guessed.
+_NAMED_FIELD_FALLBACK_UNITS: dict[str, str] = {"curr_power": "W"}
+
 
 def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
     """Convert a ``getPsDetail`` ``result_data`` dict to the realtime point shape.
@@ -82,21 +102,37 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
         val = detail.get(field)
         if isinstance(val, dict) and val.get("value") not in (None, ""):
             unit = val.get("unit") or ""
-            if not unit and code not in _WARNED_MISSING_UNIT:
-                # Without a unit the value's scale is unknowable (this field is observed
-                # arriving as both W and kW), so the sensor gets a state class but no
-                # device class or unit. Surface it once so the real payload can be
-                # captured and the base unit pinned down (#384).
-                _WARNED_MISSING_UNIT.add(code)
-                _LOGGER.warning(
-                    "iSolarCloud returned no unit for plant field %r (value=%r); the %r "
-                    "sensor will record statistics but without a unit or device class. "
-                    "Please report this payload at "
-                    "https://github.com/KRoperUK/sungrow-hass/issues/384",
-                    field,
-                    val.get("value"),
-                    code,
-                )
+            if not unit:
+                # The app reliably pairs this field with a ``*_unit``; fall back to a
+                # known base unit when a payload omits it so the sensor still classifies
+                # (#384). Only power has a safe fallback — see _NAMED_FIELD_FALLBACK_UNITS.
+                fallback = _NAMED_FIELD_FALLBACK_UNITS.get(field)
+                if fallback:
+                    unit = fallback
+                    if code not in _WARNED_MISSING_UNIT:
+                        _WARNED_MISSING_UNIT.add(code)
+                        _LOGGER.debug(
+                            "iSolarCloud omitted the unit for plant field %r; defaulting %r to %r "
+                            "(getPsDetailWithPsType normally pairs it with a unit)",
+                            field,
+                            code,
+                            fallback,
+                        )
+                elif code not in _WARNED_MISSING_UNIT:
+                    # No safe fallback (e.g. an energy field that could be Wh or kWh): the
+                    # value's scale is unknowable, so the sensor gets a state class but no
+                    # device class or unit. Surface it once so the real payload can be
+                    # captured and the base unit pinned down (#384).
+                    _WARNED_MISSING_UNIT.add(code)
+                    _LOGGER.warning(
+                        "iSolarCloud returned no unit for plant field %r (value=%r); the %r "
+                        "sensor will record statistics but without a unit or device class. "
+                        "Please report this payload at "
+                        "https://github.com/KRoperUK/sungrow-hass/issues/384",
+                        field,
+                        val.get("value"),
+                        code,
+                    )
             points[code] = {"id": code, "code": code, "value": val.get("value"), "unit": unit}
 
     for field, code in _NAMED_SCALAR_FIELDS.items():

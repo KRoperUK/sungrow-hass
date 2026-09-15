@@ -111,19 +111,33 @@ def test_maps_total_income():
 # ---------------------------------------------------------------------------
 
 
-def test_named_field_without_unit_still_mapped():
-    """A named field with a value but no unit is still surfaced, with an empty unit."""
+def test_current_power_without_unit_falls_back_to_watts():
+    """curr_power with no unit falls back to W so it still classifies as power (#384).
+
+    getPsDetailWithPsType (lib 0.16.0) pairs curr_power with a unit; on the rare payload
+    that omits it, W is the safe base unit (the app reads curr_power/curr_power_unit
+    together, observed as W). normalize_power_units still rescales a real kW reading.
+    """
     points = map_plant_detail_to_points({"curr_power": {"value": "372"}})
     assert points["current_power"]["value"] == "372"
-    assert points["current_power"]["unit"] == ""
+    assert points["current_power"]["unit"] == "W"
 
 
-def test_named_field_missing_unit_warns_once(caplog):
-    """The missing unit is logged once per code so the real payload can be captured.
+def test_current_power_unit_fallback_classifies_as_power():
+    """The W fallback makes the sensor a proper power sensor (device+state class) (#384)."""
+    from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
-    Without a unit the scale is unknowable (this field is observed as both W and kW),
-    so the warning is the only signal that the sensor lost its device class/unit.
-    """
+    from custom_components.sungrow.measure_points import resolve_classification
+
+    point = map_plant_detail_to_points({"curr_power": {"value": "372"}})["current_power"]
+    assert resolve_classification(point["unit"], point["code"], point["id"]) == (
+        SensorDeviceClass.POWER,
+        SensorStateClass.MEASUREMENT,
+    )
+
+
+def test_current_power_missing_unit_does_not_warn(caplog):
+    """The power fallback is a silent debug, not a warning (#384)."""
     import logging
 
     from custom_components.sungrow import user_realtime
@@ -131,11 +145,30 @@ def test_named_field_missing_unit_warns_once(caplog):
     user_realtime._WARNED_MISSING_UNIT.clear()
     with caplog.at_level(logging.WARNING, logger=user_realtime.__name__):
         map_plant_detail_to_points({"curr_power": {"value": "372"}})
-        map_plant_detail_to_points({"curr_power": {"value": "486"}})
+
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+def test_energy_field_missing_unit_still_warns_once(caplog):
+    """A field with no safe fallback (energy could be Wh or kWh) still warns once (#384).
+
+    Only power has a safe base-unit fallback; energy fields keep the unit-less state and
+    surface the missing unit so the real payload can be captured.
+    """
+    import logging
+
+    from custom_components.sungrow import user_realtime
+
+    user_realtime._WARNED_MISSING_UNIT.clear()
+    with caplog.at_level(logging.WARNING, logger=user_realtime.__name__):
+        map_plant_detail_to_points({"today_energy": {"value": "12.5"}})
+        map_plant_detail_to_points({"today_energy": {"value": "13.0"}})
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
-    assert "curr_power" in warnings[0].getMessage()
+    assert "today_energy" in warnings[0].getMessage()
+    # The value keeps an empty unit (scale unknowable), unlike the power fallback.
+    assert map_plant_detail_to_points({"today_energy": {"value": "12.5"}})["today_energy"]["unit"] == ""
 
 
 def test_named_field_with_unit_does_not_warn(caplog):
