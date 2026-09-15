@@ -40,6 +40,8 @@ def _coordinator_with(plant_id, plant_name):
     # Auto-revert off by default (a MagicMock would otherwise read as a truthy duration
     # and arm the timer); the #157 revert tests set a real value.
     coordinator.forced_dispatch_duration_minutes = 0
+    # No real battery power ceiling by default; the #450 tests set an int to override.
+    coordinator.battery_power_limit_w = None
     # Registry device id of the parent (plant) device entities nest under.
     coordinator.via_device_id = f"plant-device-{plant_id}"
     return coordinator
@@ -730,6 +732,63 @@ async def test_charge_power_max_lifts_sh_rs_above_ac_rating(hass: HomeAssistant)
 
     power = next(e for e in added if e.param == "charge_discharge_power")
     assert power._attr_native_max_value == 6600
+
+
+async def test_charge_power_max_prefers_real_battery_limit(hass: HomeAssistant):
+    """A real battery power ceiling from the app battery endpoints overrides the datasheet (#450).
+
+    When the coordinator resolves a genuine charge/discharge power limit it takes
+    precedence over the datasheet estimate, so the slider tracks real hardware.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].battery_power_limit_w = 8000  # e.g. a de-rated pack
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 8000  # real limit, not the 10600 W datasheet value
+    # The AC-side export limit is unaffected by a battery-side power limit.
+    export_limit = next(e for e in added if e.param == "feed_in_limitation_value")
+    assert export_limit._attr_native_max_value == 10000
+
+
+async def test_real_battery_limit_used_when_model_unknown(hass: HomeAssistant):
+    """The real battery limit sizes the slider even when no model rating resolves (#450).
+
+    An unknown model code normally falls back to DEFAULT_MAX_DISPATCH_POWER; a resolved
+    real limit replaces that conservative default.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "MysteryBox"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].battery_power_limit_w = 7200
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 7200
+    assert power._attr_native_max_value != DEFAULT_MAX_DISPATCH_POWER
+
+
+async def test_no_real_battery_limit_preserves_datasheet_ceiling(hass: HomeAssistant):
+    """With no resolved limit (None), the existing datasheet resolution is unchanged (#450)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": DeviceType.ENERGY_STORAGE_SYSTEM, "device_model_code": "SH10RT-V112"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].battery_power_limit_w = None
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    power = next(e for e in added if e.param == "charge_discharge_power")
+    assert power._attr_native_max_value == 10600  # unchanged datasheet battery limit
 
 
 async def test_feed_in_limitation_stays_on_ac_rating(hass: HomeAssistant):
