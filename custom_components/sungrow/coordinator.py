@@ -68,6 +68,78 @@ BACKOFF_MAX_INTERVAL = timedelta(hours=1)
 _LOGGER = logging.getLogger(__name__)
 
 
+# Plausible per-device battery charge/discharge POWER field names in the app battery
+# endpoints (``getBatteryCapacityByPsIdV2`` / ``getPsBatteryInfo``).
+#
+# UNVERIFIED against a live device (#450): the decompiled app's
+# ``getBatteryCapacityByPsIdV2`` response (``BatteryCapacityVOOversea``) carries the
+# battery *type* and *capacity* (kWh) — a settings screen — **not** a charge/discharge
+# power (W) limit, and ``getPsBatteryInfo``'s field set is documented unverified in the
+# library. So :func:`resolve_battery_power_limit_w` is best-effort feature-detection: it
+# returns ``None`` for the observed capacity shape (leaving the datasheet/model-code
+# nameplate resolution in ``number.py`` untouched), and only overrides the dispatch
+# ceiling when a real, unit-qualified power field actually appears in a payload.
+_BATTERY_POWER_FIELD_HINTS = (
+    "max_charge_power",
+    "max_discharge_power",
+    "charge_power",
+    "discharge_power",
+    "rated_power",
+)
+
+
+def _coerce_power_watts(raw: Any) -> int | None:
+    """Coerce a battery-endpoint power field to watts, or ``None`` when not confidently a power.
+
+    Accepts either a scalar or an app-style ``{"value", "unit"}`` dict. Converts an
+    explicit ``kW`` unit ×1000; trusts an explicit ``W`` unit as-is. With no/unknown unit
+    it only accepts a value already in a plausible watt range (300–100 000 W) so a bare
+    ``kW`` figure (e.g. ``10``) is rejected rather than mis-scaled 1000×. The unit-less
+    branch is live-untested (#450).
+    """
+    value: Any = raw
+    unit: Any = None
+    if isinstance(raw, dict):
+        value, unit = raw.get("value"), raw.get("unit")
+    try:
+        num = float(value)
+    except TypeError, ValueError:
+        return None
+    if num <= 0:
+        return None
+    u = str(unit or "").strip().lower()
+    if u == "kw":
+        return int(round(num * 1000))
+    if u == "w":
+        return int(round(num))
+    if 300 <= num <= 100_000:
+        return int(round(num))
+    return None
+
+
+def resolve_battery_power_limit_w(*payloads: dict[str, Any] | None) -> int | None:
+    """Return a real battery charge/discharge power ceiling (W) from battery payloads, or ``None``.
+
+    Scans each payload's top-level keys for a recognised power field
+    (:data:`_BATTERY_POWER_FIELD_HINTS`) and takes the largest confidently-watt value
+    (charge and discharge sliders share one ceiling). Returns ``None`` when no such field
+    is present — the expected outcome for the observed capacity-only shape — so callers
+    fall back to the existing nameplate resolution. See the note on
+    :data:`_BATTERY_POWER_FIELD_HINTS` for why this is best-effort.
+    """
+    best: int | None = None
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key, raw in payload.items():
+            if not any(hint in str(key).lower() for hint in _BATTERY_POWER_FIELD_HINTS):
+                continue
+            watts = _coerce_power_watts(raw)
+            if watts is not None and (best is None or watts > best):
+                best = watts
+    return best
+
+
 # Developer-Portal whitelist rejections (Appendix 2). These must keep RETRYING rather
 # than trigger reauth — re-authorizing can't add an IP/user to the app's whitelist — even
 # though pysolarcloud >=0.9.0 types E919 as an ``AuthError``. Guarded ahead of the
@@ -220,6 +292,16 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # once at setup; defaults True (fail-open) so a failed check never hides a
         # real battery user's controls.
         self.has_battery: bool = True
+        # Real battery charge/discharge power ceiling (W) resolved from the app battery
+        # endpoints, or None when unavailable/unconfirmed — see #450 and
+        # ``async_probe_battery_power_limit``. When set it overrides the datasheet/model
+        # nameplate ceiling for the battery power slider; when None the existing
+        # resolution (number.py) is preserved unchanged.
+        self.battery_power_limit_w: int | None = None
+        # Raw battery-capacity payload (app ``getBatteryCapacityByPsIdV2``) for diagnostics;
+        # empty until the cloud_user setup probe runs. Nameplate/usable capacity (kWh) and
+        # battery type — not a power figure (#450).
+        self.battery_capacity: dict[str, Any] = {}
         # How long (minutes) a forced Charge/Discharge command stays active before the
         # command select auto-reverts it to Stop, so a forced command can't silently
         # persist and curtail PV (#157/#148). 0 disables auto-revert (legacy behaviour).
@@ -455,6 +537,42 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_data = {
             uuid: normalize_energy_units(tag_source(points, "cloud_user")) for uuid, points in mapped.items()
         }
+
+    async def async_probe_battery_power_limit(self) -> None:
+        """Best-effort resolve the real battery charge/discharge power ceiling (#450).
+
+        On the cloud_user transport the app battery endpoints
+        (``getBatteryCapacityByPsIdV2`` / ``getPsBatteryInfo``) may expose the real
+        per-device power limit. When a confident watt figure is found it is stored on
+        ``battery_power_limit_w`` and overrides the datasheet/model-code nameplate ceiling
+        for the charge/discharge slider (number.py); otherwise the attribute stays ``None``
+        and the existing resolution is preserved. Called once at setup, guarded by
+        ``has_battery``. Every failure is non-fatal — this only sizes a slider ceiling.
+
+        .. note::
+            The observed capacity payload carries kWh capacity + battery type, not a power
+            field, so in practice this leaves the ceiling unchanged; it lights up only if a
+            real power field ever appears. See ``resolve_battery_power_limit_w``.
+        """
+        if self._user_auth is None or not self.has_battery:
+            return
+        capacity: dict[str, Any] | None = None
+        info: dict[str, Any] | None = None
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                capacity = await self._user_auth.async_get_battery_capacity(self.plant_id)
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Battery capacity probe failed for %s: %s", self.plant_name, err)
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                info = await self._user_auth.async_get_battery_info(self.plant_id)
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Battery info probe failed for %s: %s", self.plant_name, err)
+        self.battery_capacity = capacity or {}
+        limit = resolve_battery_power_limit_w(capacity, info)
+        if limit is not None:
+            self.battery_power_limit_w = limit
+            _LOGGER.debug("Resolved real battery power ceiling for %s: %s W", self.plant_name, limit)
 
     async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
         """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.

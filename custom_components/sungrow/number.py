@@ -244,11 +244,16 @@ def _resolve_ac_rated_power(target: dict[str, Any], fallbacks: Sequence[dict[str
     return DEFAULT_MAX_DISPATCH_POWER
 
 
-def _resolve_battery_rated_power(target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()) -> int:
+def _resolve_battery_rated_power(
+    target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = (), *, api_limit_w: int | None = None
+) -> int:
     """Return the device's battery-side rated power (max of charge/discharge) in watts.
 
-    Falls back to the AC rating for models without battery entries in the catalog, and
-    finally to :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
+    ``api_limit_w`` (a real power ceiling resolved from the app battery endpoints, #450)
+    wins first when present, so the slider tracks real hardware instead of the datasheet
+    estimate or the static default. Otherwise falls back to the datasheet catalog, then the
+    model-code regex, then each ``fallbacks`` device, and finally
+    :data:`DEFAULT_MAX_DISPATCH_POWER` — same conservative floor as
     :func:`_resolve_ac_rated_power`.
 
     ``fallbacks`` are the plant's other inverters/energy-storage systems, tried in order
@@ -256,6 +261,8 @@ def _resolve_battery_rated_power(target: dict[str, Any], fallbacks: Sequence[dic
     sometimes labels a hybrid's ESS entry with the battery model code, which used to
     clamp the slider to the default below what the hardware supports (#422).
     """
+    if api_limit_w is not None and api_limit_w > 0:
+        return api_limit_w
     for device in (target, *fallbacks):
         rating = _device_battery_rating(device)
         if rating is not None:
@@ -264,33 +271,40 @@ def _resolve_battery_rated_power(target: dict[str, Any], fallbacks: Sequence[dic
 
 
 def _resolve_param_max_power(
-    param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()
+    param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = (), *, battery_limit_w: int | None = None
 ) -> int | None:
     """Return the slider ceiling for a watt-valued dispatch parameter, or ``None``.
 
     Consults :data:`_POWER_PARAM_RATING_KIND` to decide whether the parameter is
-    AC-side or battery-side, and routes to the appropriate resolver. Returns
-    ``None`` for parameters that aren't watt-valued (their bounds are static).
+    AC-side or battery-side, and routes to the appropriate resolver. ``battery_limit_w``
+    is the real battery power ceiling resolved from the app battery endpoints (#450),
+    preferred for battery-side params. Returns ``None`` for parameters that aren't
+    watt-valued (their bounds are static).
     """
     kind = _POWER_PARAM_RATING_KIND.get(param)
     if kind == "ac":
         return _resolve_ac_rated_power(target, fallbacks)
     if kind == "battery":
-        return _resolve_battery_rated_power(target, fallbacks)
+        return _resolve_battery_rated_power(target, fallbacks, api_limit_w=battery_limit_w)
     return None
 
 
-def _resolve_param_rating(param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = ()) -> int | None:
+def _resolve_param_rating(
+    param: str, target: dict[str, Any], fallbacks: Sequence[dict[str, Any]] = (), *, battery_limit_w: int | None = None
+) -> int | None:
     """Return the rating a watt-valued parameter resolves to, or ``None`` when none exists.
 
     :func:`_resolve_param_max_power` cannot answer this: it returns
     :data:`DEFAULT_MAX_DISPATCH_POWER` both when a device genuinely is that size (SG5.0RS is
     legitimately 5000 W) and when nothing could be resolved at all. The Repair must fire only
-    for the second case, so the per-device helpers are consulted directly here.
+    for the second case, so the per-device helpers are consulted directly here. A real
+    ``battery_limit_w`` (#450) counts as resolved for a battery-side param.
     """
     kind = _POWER_PARAM_RATING_KIND.get(param)
     if kind is None:
         return None
+    if kind == "battery" and battery_limit_w is not None and battery_limit_w > 0:
+        return battery_limit_w
     for device in (target, *fallbacks):
         rating = _device_ac_rating(device) if kind == "ac" else _device_battery_rating(device)
         if rating is not None:
@@ -367,6 +381,11 @@ def _build_numbers(
     # no nameplate resolved anywhere on the plant (#429). Collected so the Repair can be
     # raised (or cleared) once, after the whole control set is known.
     unresolved_ratings: list[str] = []
+    # Real battery power ceiling from the app battery endpoints, when resolved (#450);
+    # None preserves the datasheet/model-code resolution below. Require a real int so a
+    # MagicMock coordinator in tests (auto-attribute) is treated as "unresolved".
+    raw_limit = getattr(coordinator, "battery_power_limit_w", None)
+    battery_limit_w = raw_limit if isinstance(raw_limit, int) else None
     for param, meta in DISPATCH_NUMBERS.items():
         # Hide battery-only controls on PV-only plants — see #148.
         if meta.get("battery_only") and not coordinator.has_battery:
@@ -375,9 +394,12 @@ def _build_numbers(
             continue
         # Watt-valued params get their slider ceiling from the device's rated power
         # (:func:`_resolve_param_max_power` returns ``None`` for non-watt params).
-        if param in _POWER_PARAM_RATING_KIND and _resolve_param_rating(param, target, rating_fallbacks) is None:
+        if (
+            param in _POWER_PARAM_RATING_KIND
+            and _resolve_param_rating(param, target, rating_fallbacks, battery_limit_w=battery_limit_w) is None
+        ):
             unresolved_ratings.append(param)
-        max_power = _resolve_param_max_power(param, target, rating_fallbacks)
+        max_power = _resolve_param_max_power(param, target, rating_fallbacks, battery_limit_w=battery_limit_w)
         if max_power is not None and max_power != meta["native_max_value"]:
             meta = {**meta, "native_max_value": max_power}
         entities.append(SungrowDispatchNumber(coordinator, control, target, param, meta))

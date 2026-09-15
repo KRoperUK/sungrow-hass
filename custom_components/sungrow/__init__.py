@@ -466,6 +466,14 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         # User API has no design_capacity_battery plant-detail field in this path; gate
         # battery-only controls on ESS/battery device presence (same fail-open default).
         coordinator.has_battery = _has_battery_device(devices) if devices else True
+        # Best-effort: resolve the real battery charge/discharge power ceiling from the app
+        # battery endpoints so the dispatch slider isn't capped at the static default when
+        # the hardware differs (#450). Non-fatal — leaves the existing nameplate resolution
+        # in place when unavailable.
+        try:
+            await coordinator.async_probe_battery_power_limit()
+        except Exception as err:  # noqa: BLE001 - per-plant isolation; best effort
+            _LOGGER.debug("Battery power-limit probe failed for %s: %s", plant_name, err)
         devices_by_plant[plant_id] = devices
         coordinators.append(coordinator)
 
