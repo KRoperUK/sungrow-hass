@@ -1,8 +1,7 @@
 """Derive calendar-day energy from a lifetime counter.
 
-Two families of local-Modbus registers are unreliable for "today" and are computed
-from the matching lifetime counter instead, because the device-side daily register
-cannot be trusted:
+Shared by every local-Modbus daily register that cannot be trusted to mean "today".
+Two families of registers qualify, and both use the same subtraction and baseline:
 
 * **Daily yield** (#223 / Modbus SG-RS): on several SG-RS + WiNet-S firmwares the
   documented "Daily power yields" register (wire 5002) never resets at midnight — it
@@ -29,13 +28,13 @@ from typing import Any
 
 
 @dataclass
-class DailyYieldBaseline:
-    """Mutable baseline used to derive today's yield from lifetime total."""
+class DerivedDailyBaseline:
+    """Mutable baseline used to derive today's figure from a lifetime counter."""
 
-    # total_yield at the start of ``baseline_date`` (local calendar day).
+    # Lifetime total at the start of ``baseline_date`` (local calendar day).
     baseline: float | None = None
     baseline_date: date | None = None
-    # Most recent total_yield sample (used as the next day's baseline on rollover).
+    # Most recent lifetime total sample (used as the next day's baseline on rollover).
     last_total: float | None = None
 
     def to_store(self) -> dict[str, Any]:
@@ -47,7 +46,7 @@ class DailyYieldBaseline:
         }
 
     @classmethod
-    def from_store(cls, data: dict[str, Any] | None) -> DailyYieldBaseline:
+    def from_store(cls, data: dict[str, Any] | None) -> DerivedDailyBaseline:
         """Restore from HA Store (tolerant of missing/partial payloads)."""
         if not data:
             return cls()
@@ -85,13 +84,13 @@ def _usable_anchor(value: float | None, total: float) -> float:
     return value
 
 
-def step_daily_yield(
-    total_yield: float,
+def step_derived_daily(
+    total: float,
     local_date: date,
-    state: DailyYieldBaseline,
+    state: DerivedDailyBaseline,
     first_anchor: float | None = None,
-) -> tuple[float, DailyYieldBaseline]:
-    """Advance baseline state for one ``total_yield`` sample; return (daily, new_state).
+) -> tuple[float, DerivedDailyBaseline]:
+    """Advance baseline state for one lifetime-counter sample; return (daily, new_state).
 
     * On the first sample of a new local calendar day, the baseline becomes the
       previous sample's total (``last_total``), which is the best available estimate
@@ -103,7 +102,7 @@ def step_daily_yield(
       until the next midnight (midday install / empty store).
     * A missing or non-positive baseline (``None`` or 0) is re-anchored to the current
       total, so a lifetime counter that read 0 at the day boundary can't make daily
-      report the whole lifetime yield (#400).
+      report the whole lifetime counter (#400).
     * If total drops below the baseline (meter reset / firmware glitch), the baseline
       resets to the new total and daily is 0.
     """
@@ -111,23 +110,23 @@ def step_daily_yield(
         # Prefer yesterday's last sample as start-of-today; on a genuinely fresh start the
         # caller's seed beats the current total, which would report a day of 0.
         anchor = state.last_total if state.last_total is not None else first_anchor
-        new_baseline = _usable_anchor(anchor, total_yield)
+        new_baseline = _usable_anchor(anchor, total)
         new_date = local_date
     else:
-        new_baseline = _usable_anchor(state.baseline, total_yield)
+        new_baseline = _usable_anchor(state.baseline, total)
         new_date = local_date
 
-    if total_yield < new_baseline:
+    if total < new_baseline:
         # Lifetime counter went backwards — re-anchor rather than report negative day.
-        new_baseline = total_yield
+        new_baseline = total
         daily = 0.0
     else:
-        daily = total_yield - new_baseline
+        daily = total - new_baseline
 
-    new_state = DailyYieldBaseline(
+    new_state = DerivedDailyBaseline(
         baseline=new_baseline,
         baseline_date=new_date,
-        last_total=total_yield,
+        last_total=total,
     )
     return round(daily, 3), new_state
 
@@ -136,8 +135,8 @@ def apply_derived_daily_yield(
     data: dict[str, Any],
     *,
     local_date: date,
-    state: DailyYieldBaseline,
-) -> tuple[dict[str, Any], DailyYieldBaseline, float | None]:
+    state: DerivedDailyBaseline,
+) -> tuple[dict[str, Any], DerivedDailyBaseline, float | None]:
     """Overwrite ``daily_yield`` from ``total_yield`` when lifetime total is present.
 
     Returns ``(data, new_state, daily_or_None)``. Leaves ``data`` unchanged when
@@ -150,7 +149,7 @@ def apply_derived_daily_yield(
     if total is None:
         return data, state, None
 
-    daily, new_state = step_daily_yield(total, local_date, state)
+    daily, new_state = step_derived_daily(total, local_date, state)
     unit = total_point.get("unit") or "kWh"
     existing_raw = data.get("daily_yield")
     existing: dict[str, Any] = existing_raw if isinstance(existing_raw, dict) else {}
@@ -166,6 +165,29 @@ def apply_derived_daily_yield(
         },
     }
     return data, new_state, daily
+
+
+# Ceiling used to spot a lifetime counter that has gone to garbage rather than counted.
+# Deliberately far above any domestic service (~145 A three-phase): its only job is to
+# reject an impossible jump, not to model the site's supply. A disconnected smart meter
+# is the known cause — the inverter keeps answering these registers with sentinel-adjacent
+# values (mkaiser#692), and an upward jump has no other guard: the baseline logic below
+# only re-anchors on a *decrease*.
+MAX_GRID_POWER_W = 100_000
+
+
+def implausible_counter_jump(previous: float | None, current: float, elapsed_seconds: float | None) -> bool:
+    """Return whether a lifetime counter moved further than the wiring could carry.
+
+    Compares the step against ``MAX_GRID_POWER_W`` over the time since the previous
+    sample, so it fails open in every direction that matters: no previous sample (first
+    poll), no elapsed time (restart), or a long gap between polls (HA was down, a poll
+    backed off) all raise or remove the allowance rather than rejecting real catch-up.
+    """
+    if previous is None or elapsed_seconds is None or elapsed_seconds <= 0:
+        return False
+    allowed_kwh = MAX_GRID_POWER_W * elapsed_seconds / 3_600_000
+    return (current - previous) > allowed_kwh
 
 
 # Lifetime counter -> daily counter pairs derived locally (#471). Keyed by the local
@@ -184,11 +206,11 @@ DERIVED_DAILY_COUNTER_PAIRS: tuple[tuple[str, str], ...] = (
 class DerivedDailyEnergyState:
     """Per-lifetime-counter baselines for locally derived daily grid energy (#471).
 
-    One :class:`DailyYieldBaseline` per lifetime code, because each counter
+    One :class:`DerivedDailyBaseline` per lifetime code, because each counter
     (import / export) crosses midnight independently.
     """
 
-    baselines: dict[str, DailyYieldBaseline] = field(default_factory=dict)
+    baselines: dict[str, DerivedDailyBaseline] = field(default_factory=dict)
 
     def to_store(self) -> dict[str, Any]:
         """Serialize for HA Store (keyed by the lifetime code)."""
@@ -200,7 +222,7 @@ class DerivedDailyEnergyState:
         if not data:
             return cls()
         baselines = {
-            str(code): DailyYieldBaseline.from_store(raw) for code, raw in data.items() if isinstance(raw, dict)
+            str(code): DerivedDailyBaseline.from_store(raw) for code, raw in data.items() if isinstance(raw, dict)
         }
         return cls(baselines=baselines)
 
@@ -210,6 +232,7 @@ def apply_derived_daily_grid_energy(
     *,
     local_date: date,
     state: DerivedDailyEnergyState,
+    untrusted: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], DerivedDailyEnergyState, dict[str, float]]:
     """Fill unreliable daily grid import/export from the lifetime counters (#471).
 
@@ -231,12 +254,20 @@ def apply_derived_daily_grid_energy(
     A counter whose lifetime total is absent is skipped, so a meterless plant stays
     silent rather than publishing a fabricated ``0`` (the #387 contract).
 
+    ``untrusted`` names lifetime codes whose latest sample the caller has already rejected
+    (see :func:`implausible_counter_jump`). Those are left alone entirely — no derived
+    value, no baseline movement — so a counter that returns to sane values later resumes
+    the day where it left off, and the entity reads what the device itself reports in the
+    meantime rather than a spike.
+
     Returns ``(data, new_state, derived)``; ``derived`` maps each daily code to the value
     published for it (empty when nothing was derived).
     """
     baselines = dict(state.baselines)
     derived: dict[str, float] = {}
     for total_code, daily_code in DERIVED_DAILY_COUNTER_PAIRS:
+        if total_code in untrusted:
+            continue
         total_point = data.get(total_code)
         if not isinstance(total_point, dict):
             continue
@@ -256,8 +287,8 @@ def apply_derived_daily_grid_energy(
         no_history = baseline is None or baseline.baseline_date is None
         first_anchor = total - raw if no_history and raw is not None and 0 < raw <= total else None
 
-        daily, baselines[total_code] = step_daily_yield(
-            total, local_date, baseline or DailyYieldBaseline(), first_anchor
+        daily, baselines[total_code] = step_derived_daily(
+            total, local_date, baseline or DerivedDailyBaseline(), first_anchor
         )
 
         unit = total_point.get("unit") or "kWh"
