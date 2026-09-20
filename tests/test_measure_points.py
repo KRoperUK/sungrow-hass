@@ -425,6 +425,31 @@ def test_cloud_daily_energy_left_as_total_increasing(point_id):
     assert mp.resolve_classification("Wh", "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
 
 
+@pytest.mark.parametrize("code", ["daily_imported_energy", "daily_exported_energy"])
+def test_derived_daily_grid_energy_is_total_increasing(code):
+    """A locally derived daily grid figure IS an Energy-dashboard source (#471).
+
+    The exclusion above exists because we don't know what a given firmware puts in the
+    register. A value we derived from the lifetime counter has no such doubt: it is
+    monotonic within the day and resets at local midnight by construction.
+    """
+    assert mp.resolve_classification("kWh", code, code, derived=True) == (SensorDeviceClass.ENERGY, TI)
+    # The same code read off the device stays a plain measurement.
+    assert mp.resolve_classification("kWh", code, code) == (None, M)
+
+
+def test_derived_flag_does_not_promote_other_resetting_codes():
+    """Only the codes we actually derive are upgraded; the rest keep the #431 treatment."""
+    assert mp.resolve_classification("kWh", "daily_battery_charge", "daily_battery_charge", derived=True) == (None, M)
+
+
+def test_derived_energy_codes_track_the_derivation_table():
+    """The classification set is read from the derivation itself, so the two can't drift."""
+    from custom_components.sungrow.daily_yield import DERIVED_DAILY_COUNTER_PAIRS
+
+    assert frozenset(daily for _, daily in DERIVED_DAILY_COUNTER_PAIRS) == mp._DERIVED_ENERGY_CODES
+
+
 def test_cumulative_and_resetting_energy_sets_are_disjoint():
     """A point can't be both a monotonic lifetime total and a resetting daily register."""
     assert not (mp._CUMULATIVE_ENERGY_POINT_IDS & mp._RESETTING_ENERGY_CODES)

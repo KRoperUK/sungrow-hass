@@ -382,11 +382,13 @@ does count import/export, those counters are kept.
 If your meter **is** fitted and the lifetime `total_imported_energy` /
 `total_exported_energy` counters work but `daily_imported_energy` /
 `daily_exported_energy` is stuck at `0` or missing, the integration derives the daily
-figures from the lifetime ones (`total − start-of-day`), so the daily entities are usable
-for cost templates. Those carry `source: modbus_derived` as an attribute; the derivation
-only fills in a missing or zero register and never shadows one that is counting. This is
-the widely reported case where the daily register reads `0` while the lifetime totals are
-correct (e.g. [mkaiser#529](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/529))
+figures from the lifetime ones (`total − start-of-day`) and takes the register over
+entirely. Those entities carry `source: modbus_derived` and — because the derived value is
+ours, monotonic within the day and reset at local midnight — are published as
+`device_class: energy`, `state_class: total_increasing`, so they can be selected directly
+as **Grid consumption** / **Return to grid** on the Energy dashboard. This is the widely
+reported case where the daily register reads `0` while the lifetime totals are correct
+(e.g. [mkaiser#529](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/529))
 — the same register map, so the register addresses line up with that project.
 
 There are two setups where the *lifetime* counters are empty too, and the derived sensors

@@ -14,6 +14,7 @@ from typing import Any, NamedTuple
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
+from .daily_yield import DERIVED_DAILY_COUNTER_PAIRS
 from .measure_points_data import CODE_ALIASES, ENUM_MAPS, RAW_POINTS
 
 _MEASUREMENT = SensorStateClass.MEASUREMENT
@@ -249,14 +250,22 @@ def _classify_by_code(code: str) -> _ClassPair | None:
     return None
 
 
-def resolve_classification(unit: str | None, code: str, point_id: str) -> _ClassPair:
+def resolve_classification(unit: str | None, code: str, point_id: str, *, derived: bool = False) -> _ClassPair:
     """Resolve (device_class, state_class) for a measure point.
 
     The API unit is authoritative; the catalog and code keywords are fallbacks
     for the many documented points that report no unit.
+
+    ``derived`` marks a value this integration computed from a lifetime counter rather
+    than read off the device (``source: modbus_derived``). Those are genuinely
+    monotonic within the day and reset at local midnight by construction, so they are
+    safe as ``ENERGY``/``TOTAL_INCREASING`` — see ``_DERIVED_ENERGY_CODES``.
     """
     if point_id in ENUM_MAPS:
         return (SensorDeviceClass.ENUM, None)
+
+    if derived and (point_id in _DERIVED_ENERGY_CODES or code in _DERIVED_ENERGY_CODES):
+        return (SensorDeviceClass.ENERGY, _TOTAL_INCREASING)
 
     override = _POINT_OVERRIDES.get(point_id)
     if override is not None:
@@ -385,6 +394,15 @@ _RESETTING_ENERGY_CODES = frozenset(
         "daily_exported_energy",
     }
 )
+
+# --- Locally derived daily energy (issue #471) --------------------------------
+# The daily codes the coordinator computes from their lifetime counter instead of
+# trusting the device register (``source: modbus_derived``). The raw registers stay
+# plain measurements above — we don't know what a given firmware puts in them — but our
+# own subtraction is monotonic within the day and resets at local midnight, so the
+# derived entity can safely be an Energy-dashboard source. Kept in step with the
+# derivation itself by reading the same pair table.
+_DERIVED_ENERGY_CODES = frozenset(daily for _, daily in DERIVED_DAILY_COUNTER_PAIRS)
 
 
 def _build_overrides() -> dict[str, _ClassPair]:

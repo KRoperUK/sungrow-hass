@@ -89,14 +89,18 @@ def step_daily_yield(
     total_yield: float,
     local_date: date,
     state: DailyYieldBaseline,
+    first_anchor: float | None = None,
 ) -> tuple[float, DailyYieldBaseline]:
     """Advance baseline state for one ``total_yield`` sample; return (daily, new_state).
 
     * On the first sample of a new local calendar day, the baseline becomes the
       previous sample's total (``last_total``), which is the best available estimate
       of energy at local midnight when polls run through the night.
-    * On the first sample ever (no history), baseline is set to the current total so
-      daily starts at 0 until the next midnight (midday install / empty store).
+    * On the first sample ever (no history), the baseline is ``first_anchor`` when the
+      caller has a better estimate of the start-of-day total than the current one — the
+      grid derivation seeds it from the device's own daily register, so the day it takes
+      over doesn't report 0. It falls back to the current total, so daily starts at 0
+      until the next midnight (midday install / empty store).
     * A missing or non-positive baseline (``None`` or 0) is re-anchored to the current
       total, so a lifetime counter that read 0 at the day boundary can't make daily
       report the whole lifetime yield (#400).
@@ -104,9 +108,10 @@ def step_daily_yield(
       resets to the new total and daily is 0.
     """
     if state.baseline_date != local_date:
-        # Prefer yesterday's last sample as start-of-today; else anchor at current total
-        # (fresh install / empty store — daily stays 0 until more production today).
-        new_baseline = _usable_anchor(state.last_total, total_yield)
+        # Prefer yesterday's last sample as start-of-today; on a genuinely fresh start the
+        # caller's seed beats the current total, which would report a day of 0.
+        anchor = state.last_total if state.last_total is not None else first_anchor
+        new_baseline = _usable_anchor(anchor, total_yield)
         new_date = local_date
     else:
         new_baseline = _usable_anchor(state.baseline, total_yield)
@@ -214,10 +219,14 @@ def apply_derived_daily_grid_energy(
     reliable, so "today" is ``total − total at the start of the local day`` — the same
     derivation ``daily_yield`` uses for wire 5002.
 
-    Only a *missing or zero* daily register is filled in. The baseline advances on every
-    sample so the next midnight is anchored correctly, but a device-side register that is
-    reporting real import/export still wins — shadowing a working counter with our own
-    arithmetic would trade one unreliable number for another.
+    While a lifetime counter is present the derived value *replaces* the device's own
+    daily register rather than only filling in a missing/zero one. That is deliberate:
+    the sensor platform classifies a derived value as ``ENERGY``/``TOTAL_INCREASING`` so
+    the Energy dashboard can use it, and it picks that class once, when the entity is
+    built. Letting the source alternate between the raw register and our arithmetic
+    through the day would make the class depend on when Home Assistant last restarted.
+    So the day we take over is seeded from the device's own daily register
+    (``total − daily``), and nothing is lost by the switch.
 
     A counter whose lifetime total is absent is skipped, so a meterless plant stays
     silent rather than publishing a fabricated ``0`` (the #387 contract).
@@ -235,14 +244,19 @@ def apply_derived_daily_grid_energy(
         if total is None:
             continue
 
-        daily, baselines[total_code] = step_daily_yield(
-            total, local_date, baselines.get(total_code) or DailyYieldBaseline()
-        )
-
+        baseline = baselines.get(total_code)
         raw_point = data.get(daily_code)
         raw = _as_float(raw_point.get("value")) if isinstance(raw_point, dict) else None
-        if raw is not None and raw > 0:
-            continue
+
+        # First sample ever: prefer the device's own daily figure as the start-of-day
+        # estimate, so the takeover doesn't report 0 for the rest of the day. Only a
+        # plausible reading is trusted (a flat 0 or a value above the lifetime counter
+        # tells us nothing), and it is never used once we have history to anchor on.
+        first_anchor = total - raw if baseline is None and raw is not None and 0 < raw <= total else None
+
+        daily, baselines[total_code] = step_daily_yield(
+            total, local_date, baseline or DailyYieldBaseline(), first_anchor
+        )
 
         unit = total_point.get("unit") or "kWh"
         data = {
@@ -251,7 +265,7 @@ def apply_derived_daily_grid_energy(
                 "code": daily_code,
                 "value": daily,
                 "unit": unit,
-                # Distinct from the raw broken/absent register so provenance stays honest.
+                # Distinct from the raw register so provenance stays honest.
                 "source": "modbus_derived",
             },
         }
