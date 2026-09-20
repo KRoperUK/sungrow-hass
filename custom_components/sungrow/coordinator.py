@@ -376,7 +376,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Raw-wire diagnostic for #223 (daily_yield register window). Populated on each
         # successful Modbus poll and surfaced on the daily_yield sensor for inspection.
         # The *entity value* is no longer taken from that register — see
-        # ``_async_apply_derived_daily_yield`` (SG-RS firmware never resets wire 5002).
+        # ``_async_apply_derived_daily_values`` (SG-RS firmware never resets wire 5002).
         self.daily_yield_diagnostic: dict[str, Any] | None = None
         # Local Modbus diagnostics surfaced in the config-entry diagnostics download:
         # detected family, unsupported register blocks skipped, and the last error string.
@@ -390,6 +390,15 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._daily_yield_baseline_loaded = False
         # Imported lazily-typed to avoid a circular import at module load; set on first use.
         self._daily_yield_state: Any = None
+        # Persisted baselines for deriving daily grid import/export from the lifetime
+        # counters when the device's own daily register is absent or stuck at 0 (#471).
+        # Separate from the yield baseline so one counter rolling over can't clobber the
+        # other's stored payload.
+        self._grid_daily_store: Store[dict[str, Any]] | None = (
+            Store(hass, 1, f"{DOMAIN}.grid_daily_baseline_{self.plant_id}") if self._modbus_client is not None else None
+        )
+        self._grid_daily_baseline_loaded = False
+        self._grid_daily_state: Any = None
 
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
@@ -520,7 +529,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.modbus_diagnostics = dict(self._modbus_client.modbus_diagnostics)
         await self._async_capture_daily_yield_diagnostic()
         data = normalize_energy_units(cast("dict[str, Any]", data))
-        return await self._async_apply_derived_daily_yield(data)
+        return await self._async_apply_derived_daily_values(data)
 
     async def _async_user_update(self) -> dict[str, Any]:
         """Poll a cloud user-account entry via the app/web API (#268/#269).
@@ -714,40 +723,62 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.battery_power_limit_w = limit
             _LOGGER.debug("Resolved real battery power ceiling for %s: %s W", self.plant_name, limit)
 
-    async def _async_apply_derived_daily_yield(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Replace Modbus ``daily_yield`` with total_yield − start-of-local-day baseline.
+    async def _async_apply_derived_daily_values(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Replace unreliable local-Modbus daily counters with derived values.
 
-        SG-RS wire 5002 does not reset at midnight on observed firmware; lifetime
-        ``total_yield`` is trustworthy. Baseline is persisted so a restart mid-day
-        keeps counting from the same day start.
+        Two derivations share the persisted-baseline mechanism, because both replace a
+        daily register that the device cannot be trusted to reset at local midnight:
 
-        Only applied to families whose raw register is known-broken: the SH hybrids
-        reset wire 13001 correctly, and overriding it would under-report until the
-        first midnight after install (#382).
+        * ``daily_yield`` from ``total_yield`` — only for families whose raw register is
+          known-broken: the SH hybrids reset wire 13001 correctly, and overriding it would
+          under-report until the first midnight after install (#382).
+        * ``daily_imported_energy`` / ``daily_exported_energy`` from the lifetime grid
+          counters when the device's own daily register is absent or stuck at 0 (#471).
+          Deliberately not family-gated: the daily grid registers are firmware-dependent
+          on SG and SH alike (#401), and a live non-zero register is still kept.
+
+        Baselines are persisted so a restart mid-day keeps counting from the same day start.
         """
-        from .daily_yield import DailyYieldBaseline, apply_derived_daily_yield
+        from .daily_yield import (
+            DailyYieldBaseline,
+            DerivedDailyEnergyState,
+            apply_derived_daily_grid_energy,
+            apply_derived_daily_yield,
+        )
 
         if self._daily_yield_store is None:
             return data
-        family = getattr(self._modbus_client, "model", None)
-        if not needs_derived_daily_yield(family):
-            return data
-        if not self._daily_yield_baseline_loaded:
-            stored = await self._daily_yield_store.async_load()
-            self._daily_yield_state = DailyYieldBaseline.from_store(stored)
-            self._daily_yield_baseline_loaded = True
-        if self._daily_yield_state is None:
-            self._daily_yield_state = DailyYieldBaseline()
 
         local_date = dt_util.now().date()
-        data, new_state, daily = apply_derived_daily_yield(data, local_date=local_date, state=self._daily_yield_state)
-        if daily is None:
+        family = getattr(self._modbus_client, "model", None)
+        if needs_derived_daily_yield(family):
+            if not self._daily_yield_baseline_loaded:
+                self._daily_yield_state = DailyYieldBaseline.from_store(await self._daily_yield_store.async_load())
+                self._daily_yield_baseline_loaded = True
+            if self._daily_yield_state is None:
+                self._daily_yield_state = DailyYieldBaseline()
+
+            data, new_state, daily = apply_derived_daily_yield(
+                data, local_date=local_date, state=self._daily_yield_state
+            )
+            if daily is not None and new_state.to_store() != self._daily_yield_state.to_store():
+                await self._daily_yield_store.async_save(new_state.to_store())
+            self._daily_yield_state = new_state
+
+        if self._grid_daily_store is None:
             return data
-        if new_state.to_store() != self._daily_yield_state.to_store():
-            self._daily_yield_state = new_state
-            await self._daily_yield_store.async_save(new_state.to_store())
-        else:
-            self._daily_yield_state = new_state
+        if not self._grid_daily_baseline_loaded:
+            self._grid_daily_state = DerivedDailyEnergyState.from_store(await self._grid_daily_store.async_load())
+            self._grid_daily_baseline_loaded = True
+        if self._grid_daily_state is None:
+            self._grid_daily_state = DerivedDailyEnergyState()
+
+        data, new_grid_state, _derived = apply_derived_daily_grid_energy(
+            data, local_date=local_date, state=self._grid_daily_state
+        )
+        if new_grid_state.to_store() != self._grid_daily_state.to_store():
+            await self._grid_daily_store.async_save(new_grid_state.to_store())
+        self._grid_daily_state = new_grid_state
         return data
 
     async def _async_capture_daily_yield_diagnostic(self) -> None:

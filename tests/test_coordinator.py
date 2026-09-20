@@ -1141,6 +1141,104 @@ async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
     coordinator._daily_yield_store.async_save.assert_not_awaited()
 
 
+async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssistant):
+    """A flat-0 daily-import register is filled in from total_imported_energy (#471)."""
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_imported_energy": {
+                "code": "total_imported_energy",
+                "value": 6470.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            # The SH daily-import register reports a flat 0 (#401).
+            "daily_imported_energy": {"code": "daily_imported_energy", "value": 0.0, "unit": "kWh", "source": "modbus"},
+        }
+    )
+    # SH hybrids keep the raw daily_yield register, so the yield derivation stays out of it.
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    # Pretend we already saw 6462 earlier today.
+    coordinator._grid_daily_baseline_loaded = True
+    coordinator._grid_daily_state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DailyYieldBaseline(
+                baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6462.0
+            )
+        }
+    )
+    coordinator._grid_daily_store = MagicMock()
+    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_imported_energy"]["value"] == 8.0
+    assert data["daily_imported_energy"]["source"] == "modbus_derived"
+    assert data["total_imported_energy"]["value"] == 6470.0
+    coordinator._grid_daily_store.async_save.assert_awaited()
+
+
+async def test_modbus_keeps_live_daily_import_register(hass: HomeAssistant):
+    """A daily-import register that is really counting is never shadowed (#471)."""
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID2", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_imported_energy": {
+                "code": "total_imported_energy",
+                "value": 6470.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            "daily_imported_energy": {
+                "code": "daily_imported_energy",
+                "value": 12.4,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._grid_daily_baseline_loaded = True
+    coordinator._grid_daily_state = DerivedDailyEnergyState()
+    coordinator._grid_daily_store = MagicMock()
+    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_imported_energy"]["value"] == 12.4
+    assert data["daily_imported_energy"]["source"] == "modbus"
+    # The baseline still advanced to the lifetime total, ready for the next midnight.
+    coordinator._grid_daily_store.async_save.assert_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Modbus-only transport (cloud-free entry, #159)
 # ---------------------------------------------------------------------------
