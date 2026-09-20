@@ -34,6 +34,31 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.4.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.3.0...v6.4.0) (2026-09-20)
+
+
+### Features
+
+* **battery:** derive pack-health spreads from the cell/module extremes ([#480](https://github.com/KRoperUK/sungrow-hass/issues/480)) ([834caa8](https://github.com/KRoperUK/sungrow-hass/commit/834caa84d7822665cfbbb4a9f55d7afc5abe24ed))
+* classify cumulative battery/grid energy for the Energy dashboard ([#431](https://github.com/KRoperUK/sungrow-hass/issues/431)) ([#463](https://github.com/KRoperUK/sungrow-hass/issues/463)) ([ade40aa](https://github.com/KRoperUK/sungrow-hass/commit/ade40aa7b658b10c8c88187defa62774759d2d43))
+* **modbus:** make the derived daily grid sensors Energy-dashboard sources ([34a64f6](https://github.com/KRoperUK/sungrow-hass/commit/34a64f678c4286cf35bd88ef41c85aafcf3f9911))
+* **modbus:** surface the raw daily register beside the derived figure ([da67926](https://github.com/KRoperUK/sungrow-hass/commit/da679265f24a779f3cebf043f5aab394dac34c66))
+* **schedule:** let the options form configure more than two windows ([#433](https://github.com/KRoperUK/sungrow-hass/issues/433)) ([#470](https://github.com/KRoperUK/sungrow-hass/issues/470)) ([ad93d95](https://github.com/KRoperUK/sungrow-hass/commit/ad93d955b28f862645ef914d03b0a2cc85ff18df))
+* **schedule:** per-window weekday masks, with boundary containment checks ([#481](https://github.com/KRoperUK/sungrow-hass/issues/481)) ([2717ed8](https://github.com/KRoperUK/sungrow-hass/commit/2717ed86b0234f58f4bbc71f20406fde1eba84b1))
+* track API call rate and warn before the iSolarCloud quota is exhausted ([#434](https://github.com/KRoperUK/sungrow-hass/issues/434)) ([#465](https://github.com/KRoperUK/sungrow-hass/issues/465)) ([ea02591](https://github.com/KRoperUK/sungrow-hass/commit/ea02591da3df26b8c17efec79156b38c86a2f5ea))
+
+
+### Bug Fixes
+
+* **deps:** bump sungrow-isolarcloud to 0.18.0 and handle the typed endpoint error ([#469](https://github.com/KRoperUK/sungrow-hass/issues/469)) ([c900875](https://github.com/KRoperUK/sungrow-hass/commit/c90087529b8d010fd05409573268d6c758205110))
+* **modbus:** delete the derivation baselines when the entry is removed ([8ed3b52](https://github.com/KRoperUK/sungrow-hass/commit/8ed3b5280e878392802623efc203c8b7400aee00))
+* **modbus:** delete the derivation baselines when the entry is removed ([f775bef](https://github.com/KRoperUK/sungrow-hass/commit/f775befa9bbffeb44f09eb3609c5336dec17a88d))
+* **modbus:** derive daily grid import/export from the lifetime counters ([141ff51](https://github.com/KRoperUK/sungrow-hass/commit/141ff5152639ac044773232323c984d21883b89d)), closes [#471](https://github.com/KRoperUK/sungrow-hass/issues/471)
+* **modbus:** give the u32 energy totals a 32-bit NAN sentinel ([#401](https://github.com/KRoperUK/sungrow-hass/issues/401)) ([#468](https://github.com/KRoperUK/sungrow-hass/issues/468)) ([8c1c86f](https://github.com/KRoperUK/sungrow-hass/commit/8c1c86fbe1271ba61fefa73fa0187f396e5aff91))
+* **modbus:** hold a glitched grid counter instead of spiking the dashboard ([#475](https://github.com/KRoperUK/sungrow-hass/issues/475)) ([e322424](https://github.com/KRoperUK/sungrow-hass/commit/e322424e77d10aef40c42c48ed3bb714d4fb561d))
+* **number:** make the kW charge/discharge slider usable and guard the open dispatch ceiling ([#450](https://github.com/KRoperUK/sungrow-hass/issues/450)) ([#461](https://github.com/KRoperUK/sungrow-hass/issues/461)) ([f293fc0](https://github.com/KRoperUK/sungrow-hass/commit/f293fc04c0393844140cf3487999794892129587))
+* **oauth:** accept pasted `code=...` fragments and map the real token-exchange error ([#396](https://github.com/KRoperUK/sungrow-hass/issues/396)) ([#466](https://github.com/KRoperUK/sungrow-hass/issues/466)) ([e7f3d95](https://github.com/KRoperUK/sungrow-hass/commit/e7f3d952b80227f0f61b2ffaa31b543efa9a3720))
+
 ## [6.3.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.2.0...v6.3.0) (2026-09-15)
 
 
