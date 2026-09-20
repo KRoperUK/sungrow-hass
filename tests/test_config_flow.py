@@ -960,6 +960,96 @@ async def test_options_flow_saves_schedule_windows(hass: HomeAssistant, mock_set
     assert entry.options[CONF_SCHEDULE_WINDOWS] == [{"start": "01:00:00", "end": "05:00:00", "mode": "force_charge"}]
 
 
+async def test_options_flow_grows_a_schedule_slot_beyond_the_configured_windows(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """Three configured windows render a spare fourth slot (#433).
+
+    The engine has always read an arbitrary list — only the options form capped users at
+    two windows. The form now shows one more slot than is configured, and no more than
+    the cap.
+    """
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_DATA.copy(),
+        options={
+            CONF_SCAN_INTERVAL: 30,
+            CONF_SCHEDULE_WINDOWS: [
+                {"start": "01:00:00", "end": "05:00:00", "mode": "force_charge"},
+                {"start": "07:00:00", "end": "08:00:00", "mode": "force_discharge"},
+                {"start": "09:00:00", "end": "10:00:00", "mode": "force_charge"},
+            ],
+        },
+        unique_id="test_app_id",
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    keys = {str(m.schema) for m in result["data_schema"].schema}
+
+    # One spare slot beyond the three configured…
+    assert {"schedule_4_start", "schedule_4_end", "schedule_4_mode"} <= keys
+    # …but the spare is not unbounded.
+    assert "schedule_5_start" not in keys
+
+
+async def test_options_flow_saves_more_than_two_windows(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A third window can be added and round-trips through the form (#433)."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # First save keeps the historical two-window shape.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            "schedule_1_end": "05:00:00",
+            "schedule_1_mode": "force_charge",
+            "schedule_2_start": "07:00:00",
+            "schedule_2_end": "08:00:00",
+            "schedule_2_mode": "force_discharge",
+        },
+    )
+    await hass.async_block_till_done()
+    assert len(entry.options[CONF_SCHEDULE_WINDOWS]) == 2
+
+    # Re-opening offers a spare slot; filling it stores a third window.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert "schedule_3_start" in {str(m.schema) for m in result["data_schema"].schema}
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            "schedule_1_end": "05:00:00",
+            "schedule_1_mode": "force_charge",
+            "schedule_2_start": "07:00:00",
+            "schedule_2_end": "08:00:00",
+            "schedule_2_mode": "force_discharge",
+            "schedule_3_start": "17:00:00",
+            "schedule_3_end": "19:00:00",
+            "schedule_3_mode": "force_discharge",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_SCHEDULE_WINDOWS] == [
+        {"start": "01:00:00", "end": "05:00:00", "mode": "force_charge"},
+        {"start": "07:00:00", "end": "08:00:00", "mode": "force_discharge"},
+        {"start": "17:00:00", "end": "19:00:00", "mode": "force_discharge"},
+    ]
+
+
 async def test_options_flow_rejects_half_populated_schedule_slot(
     hass: HomeAssistant, mock_setup_auth, mock_plants_service
 ):

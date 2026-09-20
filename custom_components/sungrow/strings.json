@@ -145,7 +145,7 @@
     "step": {
       "init": {
         "title": "Sungrow Options",
-        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota. The free plan allows ~2000 calls/hour; the minimum is 10 seconds.\n\nOptional scheduled forced-charge / forced-discharge windows repeat daily. Leave both start and end blank to disable a slot; wrap-over-midnight (e.g. 23:30 → 06:00) is allowed.",
+        "description": "Adjust how often Home Assistant polls iSolarCloud. Lower values update more frequently but use more of your API quota. The free plan allows ~2000 calls/hour; the minimum is 10 seconds.\n\nOptional scheduled forced-charge / forced-discharge windows repeat daily. Leave both start and end blank to disable a slot; wrap-over-midnight (e.g. 23:30 → 06:00) is allowed. Filling the last slot reveals another, so you can configure up to four windows.",
         "data": {
           "scan_interval": "Polling interval (seconds)",
           "extra_measure_points": "Extra measure points (point_id=code, comma separated)",
@@ -156,7 +156,13 @@
           "schedule_1_mode": "Schedule 1 — battery mode",
           "schedule_2_start": "Schedule 2 — start (HH:MM, local time)",
           "schedule_2_end": "Schedule 2 — end (HH:MM, local time)",
-          "schedule_2_mode": "Schedule 2 — battery mode"
+          "schedule_2_mode": "Schedule 2 — battery mode",
+          "schedule_3_start": "Schedule 3 — start (HH:MM, local time)",
+          "schedule_3_end": "Schedule 3 — end (HH:MM, local time)",
+          "schedule_3_mode": "Schedule 3 — battery mode",
+          "schedule_4_start": "Schedule 4 — start (HH:MM, local time)",
+          "schedule_4_end": "Schedule 4 — end (HH:MM, local time)",
+          "schedule_4_mode": "Schedule 4 — battery mode"
         }
       },
       "modbus_options": {

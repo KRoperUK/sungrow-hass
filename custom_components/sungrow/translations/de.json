@@ -156,6 +156,12 @@
           "schedule_2_start": "Zeitplan 2 — Start (HH:MM, lokale Zeit)",
           "schedule_2_end": "Zeitplan 2 — Ende (HH:MM, lokale Zeit)",
           "schedule_2_mode": "Zeitplan 2 — Batteriemodus",
+          "schedule_3_start": "Zeitplan 3 — Start (HH:MM, lokale Zeit)",
+          "schedule_3_end": "Zeitplan 3 — Ende (HH:MM, lokale Zeit)",
+          "schedule_3_mode": "Zeitplan 3 — Batteriemodus",
+          "schedule_4_start": "Zeitplan 4 — Start (HH:MM, lokale Zeit)",
+          "schedule_4_end": "Zeitplan 4 — Ende (HH:MM, lokale Zeit)",
+          "schedule_4_mode": "Zeitplan 4 — Batteriemodus",
           "modbus_host": "WiNet-S Modbus host (enter to enable hybrid, clear to disable)"
         }
       },
