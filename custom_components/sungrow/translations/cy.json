@@ -154,15 +154,19 @@
           "schedule_1_start": "Amserlen 1 — cychwyn (HH:MM, amser lleol)",
           "schedule_1_end": "Amserlen 1 — diwedd (HH:MM, amser lleol)",
           "schedule_1_mode": "Amserlen 1 — modd batri",
+          "schedule_1_days": "Amserlen 1 — diwrnodau'r wythnos",
           "schedule_2_start": "Amserlen 2 — cychwyn (HH:MM, amser lleol)",
           "schedule_2_end": "Amserlen 2 — diwedd (HH:MM, amser lleol)",
           "schedule_2_mode": "Amserlen 2 — modd batri",
+          "schedule_2_days": "Amserlen 2 — diwrnodau'r wythnos",
           "schedule_3_start": "Amserlen 3 — cychwyn (HH:MM, amser lleol)",
           "schedule_3_end": "Amserlen 3 — diwedd (HH:MM, amser lleol)",
           "schedule_3_mode": "Amserlen 3 — modd batri",
+          "schedule_3_days": "Amserlen 3 — diwrnodau'r wythnos",
           "schedule_4_start": "Amserlen 4 — cychwyn (HH:MM, amser lleol)",
           "schedule_4_end": "Amserlen 4 — diwedd (HH:MM, amser lleol)",
-          "schedule_4_mode": "Amserlen 4 — modd batri"
+          "schedule_4_mode": "Amserlen 4 — modd batri",
+          "schedule_4_days": "Amserlen 4 — diwrnodau'r wythnos"
         }
       },
       "modbus_options": {

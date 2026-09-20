@@ -189,18 +189,21 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
 def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any, Any]:
     """Build the ``vol.Optional`` fields for each schedule slot (#359).
 
-    Each slot contributes three fields to the options form: a start-time picker,
-    an end-time picker, and a mode dropdown. Defaults are pulled from the
-    entry's currently-persisted ``CONF_SCHEDULE_WINDOWS`` (if any) so re-opening
-    the options form shows the values the user last submitted. The number of slots
-    grows with the configured list (#433).
+    Each slot contributes four fields to the options form: a start-time picker,
+    an end-time picker, a mode dropdown, and a weekday multi-select. Defaults are
+    pulled from the entry's currently-persisted ``CONF_SCHEDULE_WINDOWS`` (if any)
+    so re-opening the options form shows the values the user last submitted. The
+    number of slots grows with the configured list (#433).
     """
     from homeassistant.helpers.selector import (
         SelectOptionDict,
         SelectSelector,
         SelectSelectorConfig,
+        SelectSelectorMode,
         TimeSelector,
     )
+
+    from ..schedule import SCHEDULE_DAYS
 
     current_windows = list(current_options.get(CONF_SCHEDULE_WINDOWS) or [])
     fields: dict[Any, Any] = {}
@@ -237,13 +240,34 @@ def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any,
                 ]
             )
         )
+        # Weekday mask (#433). Every day is pre-selected, which is what a window without a
+        # mask has always meant, so the default renders the previous behaviour and the
+        # collector normalises an all-days selection back to "no mask".
+        stored_days = row.get("days")
+        days_default = (
+            [str(day).strip().lower() for day in stored_days]
+            if isinstance(stored_days, (list, tuple)) and stored_days
+            else list(SCHEDULE_DAYS)
+        )
+        fields[
+            vol.Optional(
+                f"schedule_{slot}_days",
+                default=days_default,
+            )
+        ] = SelectSelector(
+            SelectSelectorConfig(
+                options=[SelectOptionDict(value=day, label=day.upper()) for day in SCHEDULE_DAYS],
+                multiple=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
     return fields
 
 
 def _collect_schedule_windows(
     user_input: dict[str, Any],
     slots: int,
-) -> tuple[list[dict[str, str]], dict[str, str]]:
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Read the per-slot fields back into a normalised ``CONF_SCHEDULE_WINDOWS`` list.
 
     ``slots`` must be the count the form rendered (see :func:`_schedule_slot_count`).
@@ -252,8 +276,14 @@ def _collect_schedule_windows(
     end set) is a user error surfaced as ``invalid_schedule_window`` so they can
     fix it. Overlapping windows are allowed at save time — the engine resolves
     overlaps by picking the latest-starting one.
+
+    A slot with no weekday selected is also an error: the window could never run, and
+    silently saving a schedule that never fires is worse than asking again. Selecting
+    every day is the same as no mask, so it is stored without a ``days`` key (#433).
     """
-    windows: list[dict[str, str]] = []
+    from ..schedule import SCHEDULE_DAYS
+
+    windows: list[dict[str, Any]] = []
     errors: dict[str, str] = {}
     for slot in range(1, slots + 1):
         start = (user_input.get(f"schedule_{slot}_start") or "").strip()
@@ -269,5 +299,16 @@ def _collect_schedule_windows(
             errors["base"] = "invalid_schedule_window"
             _LOGGER.warning("Schedule slot %d has an unknown mode %r", slot, mode)
             continue
-        windows.append({"start": start, "end": end, "mode": mode})
+        raw_days = user_input.get(f"schedule_{slot}_days")
+        selected = [str(day).strip().lower() for day in raw_days] if isinstance(raw_days, (list, tuple)) else []
+        if isinstance(raw_days, (list, tuple)) and not selected:
+            errors["base"] = "invalid_schedule_window"
+            _LOGGER.warning("Schedule slot %d has no weekdays selected, so it would never run", slot)
+            continue
+        row: dict[str, Any] = {"start": start, "end": end, "mode": mode}
+        # All seven days (or a legacy field-less submission) is "every day" — omit the
+        # mask so the stored row, and the engine's log lines, stay uncluttered.
+        if selected and len(set(selected)) < len(SCHEDULE_DAYS):
+            row["days"] = selected
+        windows.append(row)
     return windows, errors

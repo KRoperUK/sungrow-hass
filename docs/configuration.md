@@ -47,6 +47,22 @@ When you set charge/discharge to *Charge* or *Discharge*, the integration switch
 command, and sends the required **EMS heartbeat** so the setting is maintained. *Stop*
 restores Self-consumption mode.
 
+### Scheduled charge / discharge windows
+
+Each window has a start, an end, a battery mode, and the **days of the week** it runs on.
+Leave all seven selected for a window that runs every day — that stores no mask at all, which
+is how windows behaved before day selection existed. Clearing every day is refused: a window
+that can never run is a misconfiguration, not a disabled slot (clear the start and end times
+to disable a slot instead).
+
+Windows are fixed **local** times; sunrise/sunset-relative offsets are not supported yet.
+A window whose end is earlier than its start wraps past midnight and belongs to the day it
+*starts* on, so a Monday-only `23:30 → 06:00` also covers Tuesday morning up to 06:00, and
+then stays off until the following Monday.
+
+Outside every window the battery returns to Self-consumption, so a schedule never leaves the
+inverter stuck in a forced mode.
+
 !!! warning "Battery controls are hidden on PV-only plants"
     Battery dispatch controls (charge/discharge command & power, SOC limits, forced charging,
     battery-first mode) are only created when the plant has a battery/ESS device. On a **PV-only**
