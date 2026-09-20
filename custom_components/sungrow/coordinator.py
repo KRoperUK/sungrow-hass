@@ -748,8 +748,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Baselines are persisted so a restart mid-day keeps counting from the same day start.
         """
-        from .daily_yield import (
-            DailyYieldBaseline,
+        from .derived_daily import (
+            DerivedDailyBaseline,
             DerivedDailyEnergyState,
             apply_derived_daily_grid_energy,
             apply_derived_daily_yield,
@@ -762,10 +762,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         family = getattr(self._modbus_client, "model", None)
         if needs_derived_daily_yield(family):
             if not self._daily_yield_baseline_loaded:
-                self._daily_yield_state = DailyYieldBaseline.from_store(await self._daily_yield_store.async_load())
+                self._daily_yield_state = DerivedDailyBaseline.from_store(await self._daily_yield_store.async_load())
                 self._daily_yield_baseline_loaded = True
             if self._daily_yield_state is None:
-                self._daily_yield_state = DailyYieldBaseline()
+                self._daily_yield_state = DerivedDailyBaseline()
 
             data, new_state, daily = apply_derived_daily_yield(
                 data, local_date=local_date, state=self._daily_yield_state
@@ -806,7 +806,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (the same pattern as ``_device_refresh_warned``); the flag clears when the counter
         reads sanely again, so a later recurrence is reported too.
         """
-        from .daily_yield import DERIVED_DAILY_COUNTER_PAIRS, implausible_counter_jump
+        from .derived_daily import DERIVED_DAILY_COUNTER_PAIRS, implausible_counter_jump
 
         untrusted: set[str] = set()
         for total_code, _ in DERIVED_DAILY_COUNTER_PAIRS:

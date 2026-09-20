@@ -14,7 +14,7 @@ from typing import Any, NamedTuple
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
-from .daily_yield import DERIVED_DAILY_COUNTER_PAIRS
+from .derived_daily import DERIVED_DAILY_COUNTER_PAIRS
 from .measure_points_data import CODE_ALIASES, ENUM_MAPS, RAW_POINTS
 
 _MEASUREMENT = SensorStateClass.MEASUREMENT
