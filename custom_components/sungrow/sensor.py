@@ -135,18 +135,6 @@ PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
 )
 
 
-def infer_device_class(
-    unit: str | None, point_code: str, point_id: str = ""
-) -> tuple[SensorDeviceClass | None, SensorStateClass | None]:
-    """Infer a device and state class for a point (see ``measure_points``).
-
-    Thin wrapper delegating to :func:`resolve_classification`; kept as a public
-    name for the sensor platform and its tests. Returns ``(None, None)`` when the
-    point cannot be classified so it is still created as a plain text sensor.
-    """
-    return resolve_classification(unit, point_code, point_id)
-
-
 def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SensorEntity]:
     """Build the full set of sensors the coordinator currently warrants.
 

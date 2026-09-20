@@ -425,6 +425,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # persistently broken meter logs once instead of every poll (#471).
         self._grid_glitch_warned: set[str] = set()
 
+    async def async_remove_derived_daily_stores(self) -> None:
+        """Delete this plant's persisted derivation baselines.
+
+        Home Assistant does not remove a ``Store`` with the config entry it belongs to, so
+        a deleted local entry would leave both baseline files orphaned in ``.storage``.
+
+        Called only when the entry is *removed*, never on unload: unload happens on every
+        reload (options change, HA restart), and dropping the baselines there would restart
+        the day's derived figures from 0 (#471).
+        """
+        for store in (self._daily_yield_store, self._grid_daily_store):
+            if store is not None:
+                await store.async_remove()
+
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
         """Return a SungrowModbusClient for a Modbus-only entry, else None.
