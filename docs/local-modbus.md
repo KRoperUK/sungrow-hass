@@ -174,14 +174,23 @@ The device’s own daily grid registers are firmware-dependent: some SH firmware
 flat `0` for `daily_imported_energy` ([#401](https://github.com/KRoperUK/sungrow-hass/issues/401)),
 so the entity either reads a permanent 0 or never appears at all.
 
-When the lifetime counters are available, the local entry **derives** calendar-day import
-and export from them — `daily_imported_energy = total_imported_energy − start-of-day`, and
-the same for export (same mechanism as local daily yield, with its own stored baseline).
-The derived entity carries `source: modbus_derived` as an attribute.
+When the lifetime counters are available the local entry **derives** calendar-day import
+and export from them instead — `daily_imported_energy = total_imported_energy −
+start-of-day`, and the same for export (same mechanism as local daily yield, with its own
+stored baseline per counter). The derived entity carries `source: modbus_derived`.
 
-A daily register that is genuinely counting is **never shadowed** — the derivation only
-fills in a missing or zero one. The first calendar day after installing may under-report,
-because the baseline can only be anchored from the moment polling started.
+**The derived value replaces the device register while a lifetime counter exists.** Two
+reasons. It keeps the source — and therefore the entity’s classification — stable, since
+Home Assistant picks the device/state class once, when the entity is first built. And it
+makes these the only local daily energy points published as `device_class: energy`,
+`state_class: total_increasing`, so they can be chosen directly as **Grid consumption** /
+**Return to grid** on the Energy dashboard; the raw registers stay plain measurements
+because we don’t know what a given firmware writes into them (#431).
+
+On the day the derivation starts it is seeded from the device’s own daily figure
+(`total − daily`) when that reading is plausible, so taking over doesn’t reset the day to
+0. A flat-0 register carries no such information, so that day reads 0 until the next local
+midnight.
 
 Both the lifetime counters and the daily registers come from the **external grid meter**
 (CT clamp / DTSU666). With no meter fitted there is nothing to derive from: the points are

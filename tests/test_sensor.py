@@ -125,6 +125,34 @@ def test_resetting_local_energy_sensor_is_not_total_increasing(code):
     assert sensor.native_value == 3.2
 
 
+@pytest.mark.parametrize("code", ["daily_imported_energy", "daily_exported_energy"])
+def test_derived_daily_grid_energy_sensor_is_total_increasing(code):
+    """A *derived* daily grid figure is an ENERGY / TOTAL_INCREASING kWh sensor (#471).
+
+    Unlike the raw register, the integration computed this from the lifetime counter, so
+    it is monotonic within the day and resets at local midnight — the Energy dashboard
+    can take it directly as grid import/export.
+    """
+    point = {"code": code, "value": "8.0", "unit": "kWh", "source": "modbus_derived"}
+    coordinator = _coord_with_devices([], data={code: point})
+    coordinator.plants_service = None  # local Modbus entry
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.ENERGY
+    assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+    assert sensor._attr_native_unit_of_measurement == "kWh"
+    assert sensor.native_value == 8.0
+
+
+def test_derived_classification_is_confined_to_the_grid_daily_codes():
+    """A derived flag alone must not promote an unrelated point to TOTAL_INCREASING."""
+    point = {"code": "daily_battery_charge", "value": "3.2", "unit": "kWh", "source": "modbus_derived"}
+    coordinator = _coord_with_devices([], data={point["code"]: point})
+    coordinator.plants_service = None
+    sensor = SungrowSensor(coordinator, point["code"], "123", "Plant", point)
+    assert sensor._attr_device_class is None
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+
+
 # ---------------------------------------------------------------------------
 # Per-device re-homing (#158)
 # ---------------------------------------------------------------------------

@@ -181,20 +181,75 @@ def test_grid_daily_replaces_flat_zero_register():
     assert out["daily_imported_energy"]["source"] == "modbus_derived"
 
 
-def test_grid_daily_keeps_live_register_but_advances_baseline():
-    """A daily register that is really counting wins; only our baseline moves.
+def test_grid_daily_replaces_live_register_and_advances_baseline():
+    """Once a lifetime counter exists the derived value takes over, so the source is stable.
 
-    Shadowing a working counter with our own arithmetic would trade one unreliable
-    number for another, so the device keeps the value and we stay ready for midnight.
+    The sensor platform picks the device/state class once, when the entity is built, so a
+    value that alternated between the raw register and our arithmetic would be classified
+    by whenever Home Assistant last restarted.
     """
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(3.5)}
 
     out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=_seeded())
 
-    assert derived == {}
-    assert out["daily_imported_energy"]["value"] == 3.5
-    assert out["daily_imported_energy"]["source"] == "modbus"
+    assert derived == {"daily_imported_energy": 8.0}
+    assert out["daily_imported_energy"]["value"] == 8.0
+    assert out["daily_imported_energy"]["source"] == "modbus_derived"
     assert state.baselines["total_imported_energy"].last_total == 6470.0
+
+
+def test_grid_daily_first_sample_is_seeded_from_the_live_register():
+    """Taking over mid-day must not throw away the part of the day already counted.
+
+    Without a seed the baseline anchors at the current total, so the day we switch would
+    read 0 until the next midnight. The device's own figure tells us where midnight was.
+    """
+    data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(12.4)}
+
+    out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+
+    assert derived == {"daily_imported_energy": 12.4}
+    # 6470 − 12.4: the implied start-of-day total.
+    assert round(state.baselines["total_imported_energy"].baseline, 3) == 6457.6
+    assert out["daily_imported_energy"]["value"] == 12.4
+
+
+def test_grid_daily_first_sample_seed_is_ignored_when_implausible():
+    """A reading above the lifetime counter tells us nothing; fall back to a 0 day."""
+    data = {"total_imported_energy": _point(100.0), "daily_imported_energy": _point(500.0)}
+
+    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+
+    assert derived == {"daily_imported_energy": 0.0}
+    assert state.baselines["total_imported_energy"].baseline == 100.0
+
+
+def test_grid_daily_first_sample_flat_zero_register_starts_the_day_at_zero():
+    """A flat-0 register carries no start-of-day information (#401), so the day starts at 0."""
+    data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(0.0)}
+
+    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+
+    assert derived == {"daily_imported_energy": 0.0}
+    assert state.baselines["total_imported_energy"].baseline == 6470.0
+
+
+def test_grid_daily_seed_is_not_reused_once_there_is_history():
+    """Only a genuinely fresh start seeds from the register; later days anchor on yesterday."""
+    state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DailyYieldBaseline(
+                baseline=6400.0, baseline_date=date(2026, 9, 19), last_total=6462.0
+            )
+        }
+    )
+    data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(99.0)}
+
+    _, new_state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=state)
+
+    # Anchored on yesterday's last total (6462), not on the bogus 99 the register reports.
+    assert derived == {"daily_imported_energy": 8.0}
+    assert new_state.baselines["total_imported_energy"].baseline == 6462.0
 
 
 def test_grid_daily_silent_without_lifetime_total():

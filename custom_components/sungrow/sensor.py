@@ -320,7 +320,12 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # sometimes reports a unit as a single Unicode glyph (e.g. ``℃``) that HA
         # rejects for its device class, so normalise it first.
         unit = normalize_unit(init_data.get("unit"))
-        device_class, state_class = resolve_classification(unit, point_code, point_id)
+        # ``modbus_derived`` marks a value the coordinator computed from a lifetime counter
+        # rather than read off the device, which is what lets the daily grid sensors be
+        # Energy-dashboard sources (#471). Decided here, once, at entity construction.
+        device_class, state_class = resolve_classification(
+            unit, point_code, point_id, derived=init_data.get("source") == "modbus_derived"
+        )
         self._attr_device_class = device_class
         self._attr_state_class = state_class
 

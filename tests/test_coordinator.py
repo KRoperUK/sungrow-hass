@@ -1192,8 +1192,13 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     coordinator._grid_daily_store.async_save.assert_awaited()
 
 
-async def test_modbus_keeps_live_daily_import_register(hass: HomeAssistant):
-    """A daily-import register that is really counting is never shadowed (#471)."""
+async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the_day(hass: HomeAssistant):
+    """A counting register is replaced by the derived value, seeded so the day is intact (#471).
+
+    The takeover is unconditional once the lifetime counter exists, so the entity's
+    source — and therefore its classification — is stable across restarts. Seeding from
+    the device's own figure means the reading doesn't drop to 0 mid-day.
+    """
     from datetime import date
     from unittest.mock import patch
 
@@ -1233,8 +1238,9 @@ async def test_modbus_keeps_live_daily_import_register(hass: HomeAssistant):
         mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
         data = await coordinator._async_modbus_only_update()
 
+    # Same figure the device reported, now sourced (and classified) as derived.
     assert data["daily_imported_energy"]["value"] == 12.4
-    assert data["daily_imported_energy"]["source"] == "modbus"
+    assert data["daily_imported_energy"]["source"] == "modbus_derived"
     # The baseline still advanced to the lifetime total, ready for the next midnight.
     coordinator._grid_daily_store.async_save.assert_awaited()
 
