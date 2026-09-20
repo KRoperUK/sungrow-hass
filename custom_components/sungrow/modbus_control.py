@@ -19,6 +19,45 @@ from .modbus_registers import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Dispatch Numbers (``number.py`` ``DISPATCH_NUMBERS``) that have no local holding map,
+# per family. Declared explicitly rather than left to be discovered: a Number added to the
+# cloud control surface without a local write path would otherwise silently do nothing on a
+# local entry — no error, no entity change. ``tests/test_modbus_control.py`` asserts each
+# entry is *exactly* the gap, so adding a Number without either mapping it or listing it
+# here fails the build, and so does mapping a new param without removing it from here.
+#
+# The SG string inverters have no battery, so their whole battery set is cloud-only; the
+# hybrids map the battery set but not the export-ratio / reactive-power params.
+_PV_ONLY_GAP = frozenset(
+    {
+        "charge_discharge_power",
+        "soc_lower_limit",
+        "soc_upper_limit",
+        "feed_in_limitation_value",
+        "feed_in_limitation_ratio",
+        "forced_charging_target_soc_1",
+        "forced_charging_target_soc_2",
+        "q_t",
+        "pf",
+    }
+)
+_HYBRID_GAP = frozenset(
+    {
+        "feed_in_limitation_ratio",
+        "forced_charging_target_soc_1",
+        "forced_charging_target_soc_2",
+        "q_t",
+        "pf",
+    }
+)
+
+CLOUD_ONLY_DISPATCH_NUMBERS: dict[str, frozenset[str]] = {
+    "sg_rs": _PV_ONLY_GAP,
+    "sg_rt": _PV_ONLY_GAP,
+    "sh_rt": _HYBRID_GAP,
+    "sh_rs": _HYBRID_GAP,
+}
+
 
 class ModbusControlError(Exception):
     """A local Modbus control read or write failed."""
