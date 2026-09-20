@@ -195,7 +195,43 @@ def test_grid_daily_replaces_live_register_and_advances_baseline():
     assert derived == {"daily_imported_energy": 8.0}
     assert out["daily_imported_energy"]["value"] == 8.0
     assert out["daily_imported_energy"]["source"] == "modbus_derived"
+    # The device's own figure rides along so the two can be compared from the UI.
+    assert out["daily_imported_energy"]["raw_register_value"] == 3.5
     assert state.baselines["total_imported_energy"].last_total == 6470.0
+
+
+def test_grid_daily_omits_raw_attribute_when_the_register_was_absent():
+    """Nothing to compare against → no ``raw_register_value`` attribute."""
+    out, _, _ = apply_derived_daily_grid_energy(
+        {"total_imported_energy": _point(6470.0)}, local_date=_DAY, state=_seeded()
+    )
+
+    assert "raw_register_value" not in out["daily_imported_energy"]
+
+
+def test_grid_daily_first_sample_seed_ignored_when_the_day_is_the_whole_counter():
+    """``raw == total`` implies a start-of-day baseline of 0, which must not be trusted.
+
+    A 0 baseline is indistinguishable from a glitched one and would hand back the whole
+    lifetime total as "today" (#400), so the day reads 0 instead.
+    """
+    data = {"total_imported_energy": _point(12.4), "daily_imported_energy": _point(12.4)}
+
+    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+
+    assert derived == {"daily_imported_energy": 0.0}
+    assert state.baselines["total_imported_energy"].baseline == 12.4
+
+
+def test_grid_daily_seeds_when_the_stored_entry_carries_no_history():
+    """A partial/corrupt store entry is treated as no history, so it still seeds."""
+    state = DerivedDailyEnergyState(baselines={"total_imported_energy": DailyYieldBaseline()})
+    data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(12.4)}
+
+    _, new_state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=state)
+
+    assert derived == {"daily_imported_energy": 12.4}
+    assert round(new_state.baselines["total_imported_energy"].baseline, 3) == 6457.6
 
 
 def test_grid_daily_first_sample_is_seeded_from_the_live_register():

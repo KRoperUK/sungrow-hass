@@ -1245,6 +1245,56 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
     coordinator._grid_daily_store.async_save.assert_awaited()
 
 
+async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass: HomeAssistant):
+    """The grid Store is written only when a baseline changes, not on every poll.
+
+    ``to_store()`` only moves when a lifetime counter does, which keeps the write rate at
+    a few per hour rather than one per poll.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID3", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_imported_energy": {
+                "code": "total_imported_energy",
+                "value": 6470.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._grid_daily_baseline_loaded = True
+    # Same counter as the payload reports, so the derivation changes nothing.
+    coordinator._grid_daily_state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DailyYieldBaseline(
+                baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
+            )
+        }
+    )
+    coordinator._grid_daily_store = MagicMock()
+    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_imported_energy"]["value"] == 8.0
+    coordinator._grid_daily_store.async_save.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Modbus-only transport (cloud-free entry, #159)
 # ---------------------------------------------------------------------------

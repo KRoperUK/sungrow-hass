@@ -143,6 +143,25 @@ def test_derived_daily_grid_energy_sensor_is_total_increasing(code):
     assert sensor.native_value == 8.0
 
 
+def test_derived_sensor_exposes_the_raw_register_reading():
+    """The device's own figure is surfaced alongside ours, for comparison (#471).
+
+    A flat ``0`` next to a real derived value is the quickest way to see that the register
+    is the broken side, without a diagnostics download.
+    """
+    point = {
+        "code": "daily_imported_energy",
+        "value": "8.0",
+        "unit": "kWh",
+        "source": "modbus_derived",
+        "raw_register_value": 0.0,
+    }
+    coordinator = _coord_with_devices([], data={point["code"]: point})
+    coordinator.plants_service = None
+    sensor = SungrowSensor(coordinator, point["code"], "123", "Plant", point)
+    assert sensor.extra_state_attributes == {"source": "modbus_derived", "raw_register_value": 0.0}
+
+
 def test_derived_classification_is_confined_to_the_grid_daily_codes():
     """A derived flag alone must not promote an unrelated point to TOTAL_INCREASING."""
     point = {"code": "daily_battery_charge", "value": "3.2", "unit": "kWh", "source": "modbus_derived"}

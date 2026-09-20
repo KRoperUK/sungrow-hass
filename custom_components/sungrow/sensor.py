@@ -421,14 +421,20 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         """Expose transport provenance (``cloud`` / ``modbus`` / ``modbus_derived``).
 
         Cloud and Modbus paths both tag ``source`` on the point payload so hybrid setups
-        are debuggable without reading logs. Optional ``daily_yield_diagnostic`` is only
-        present when the Modbus debug option is enabled (gated in the coordinator).
+        are debuggable without reading logs. A value we derived from a lifetime counter
+        also carries the device's own reading as ``raw_register_value``, so the two can be
+        compared from the UI instead of a support round trip. Optional
+        ``daily_yield_diagnostic`` is only present when the Modbus debug option is enabled
+        (gated in the coordinator).
         """
         point = self._current_point()
         source = point.get("source") if point else None
         attrs: dict[str, Any] = {}
         if source:
             attrs["source"] = source
+        raw = point.get("raw_register_value") if point else None
+        if raw is not None:
+            attrs["raw_register_value"] = raw
         if self.point_code == "daily_yield":
             diag = getattr(self.coordinator, "daily_yield_diagnostic", None)
             if diag is not None:
