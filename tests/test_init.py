@@ -18,6 +18,7 @@ from custom_components.sungrow import (
     SungrowAuthCallbackView,
     SungrowData,
     async_remove_config_entry_device,
+    async_remove_entry,
     async_setup,
     async_start_heartbeat,
     async_stop_heartbeat,
@@ -135,6 +136,94 @@ async def test_async_unload_entry(hass: HomeAssistant, mock_setup_auth, mock_pla
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+# ---------------------------------------------------------------------------
+# async_remove_entry — persisted derivation baselines (#471)
+# ---------------------------------------------------------------------------
+
+
+async def _setup_modbus_only(hass: HomeAssistant) -> MockConfigEntry:
+    """Add and set up a Modbus-only entry with a stubbed client."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
+            CONF_SERIAL: "SN123",
+            CONF_MODEL: "SG3.6RS",
+            CONF_MODBUS_HOST: "10.0.0.9",
+        },
+        options={CONF_SCAN_INTERVAL: 30},
+        unique_id="modbus_SN123",
+    )
+    entry.add_to_hass(hass)
+    client = MagicMock()
+    client.model = "sg_rs"
+    client.async_read_realtime = AsyncMock(return_value={})
+    client.async_read_holding = AsyncMock(return_value=[1000])
+    client.async_write_holding = AsyncMock()
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    return entry
+
+
+async def test_remove_entry_deletes_derived_daily_stores(hass: HomeAssistant):
+    """Deleting the entry clears the derivation baselines it persisted (#471).
+
+    Home Assistant does not remove a ``Store`` with the config entry that owns it, so a
+    removed local entry would otherwise leave both baseline files behind in ``.storage``.
+    """
+    entry = await _setup_modbus_only(hass)
+    coordinator = entry.runtime_data.coordinators[0]
+    for attr in ("_daily_yield_store", "_grid_daily_store"):
+        store = MagicMock()
+        store.async_remove = AsyncMock()
+        setattr(coordinator, attr, store)
+
+    await async_remove_entry(hass, entry)
+
+    coordinator._daily_yield_store.async_remove.assert_awaited_once()
+    coordinator._grid_daily_store.async_remove.assert_awaited_once()
+
+
+async def test_unload_keeps_the_derived_daily_stores(hass: HomeAssistant):
+    """A reload must not clear the baselines — that would restart the day at 0 (#471).
+
+    ``async_remove_entry`` is the removal hook precisely because unload also runs on every
+    options change and HA restart, where the day's baseline has to survive.
+    """
+    entry = await _setup_modbus_only(hass)
+    coordinator = entry.runtime_data.coordinators[0]
+    store = MagicMock()
+    store.async_remove = AsyncMock()
+    coordinator._grid_daily_store = store
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    store.async_remove.assert_not_awaited()
+
+
+async def test_remove_entry_without_cloud_stores_is_a_noop(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """A cloud entry has no derivation stores; removing it must not raise."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data.coordinators[0]
+    assert coordinator._daily_yield_store is None
+    assert coordinator._grid_daily_store is None
+
+    await async_remove_entry(hass, entry)
+
+
+async def test_remove_entry_without_runtime_data_is_safe(hass: HomeAssistant):
+    """An entry that was never loaded is removed without error."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="never_loaded")
+    entry.add_to_hass(hass)
+
+    await async_remove_entry(hass, entry)
 
 
 # ---------------------------------------------------------------------------

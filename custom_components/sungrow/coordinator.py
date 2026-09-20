@@ -15,7 +15,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from pysolarcloud import AuthError, DeviceEndpointUnavailable, PySolarCloudException, UserAuth
+from pysolarcloud import AuthError, DeviceEndpointUnavailable, PySolarCloudException, RateLimitError, UserAuth
 from pysolarcloud.plants import DeviceType, Plants
 
 from .api_rate import (
@@ -58,6 +58,7 @@ from .energy_units import normalize_energy_units, normalize_power_units, tag_sou
 from .modbus import SungrowModbusError
 from .modbus_registers import needs_derived_daily_yield
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
+from .pack_health import add_pack_health_points
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
 # the coordinator indefinitely nor let successive polls pile up.
@@ -216,8 +217,30 @@ def describe_api_error(err: Exception) -> str | None:
 
 
 def is_rate_limit_error(err: Exception) -> bool:
-    """Return True if the error is an iSolarCloud quota/throttle rejection (E998/E999)."""
+    """Return True if the error is an iSolarCloud quota/throttle rejection.
+
+    Matched by type first — pysolarcloud types the codes it knows as ``RateLimitError``, so
+    a code added upstream starts backing off without an integration change. ``E998``/``E999``
+    stay listed because the code itself is still needed to name the Repair and pick the hint.
+    """
+    if isinstance(err, RateLimitError):
+        return True
     return isinstance(err, PySolarCloudException) and err.error in RATE_LIMIT_ERRORS
+
+
+def rate_limit_retry_after(err: Exception) -> float | None:
+    """Return the server-suggested back-off in seconds, when the error carries one (#458).
+
+    iSolarCloud sometimes states how long to wait; the typed error surfaces that hint so the
+    integration can back off precisely instead of guessing at a doubling interval. ``None``
+    when the API said nothing, which leaves the doubling behaviour in charge.
+    """
+    if not isinstance(err, RateLimitError):
+        return None
+    value = err.retry_after
+    if value is None or value <= 0:
+        return None
+    return float(value)
 
 
 # iSolarCloud error codes that warrant a user-facing Repair (#153). Each maps to a
@@ -403,6 +426,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # persistently broken meter logs once instead of every poll (#471).
         self._grid_glitch_warned: set[str] = set()
 
+    async def async_remove_derived_daily_stores(self) -> None:
+        """Delete this plant's persisted derivation baselines.
+
+        Home Assistant does not remove a ``Store`` with the config entry it belongs to, so
+        a deleted local entry would leave both baseline files orphaned in ``.storage``.
+
+        Called only when the entry is *removed*, never on unload: unload happens on every
+        reload (options change, HA restart), and dropping the baselines there would restart
+        the day's derived figures from 0 (#471).
+        """
+        for store in (self._daily_yield_store, self._grid_daily_store):
+            if store is not None:
+                await store.async_remove()
+
     @staticmethod
     def _build_modbus_client(config_entry: ConfigEntry) -> Any:
         """Return a SungrowModbusClient for a Modbus-only entry, else None.
@@ -474,7 +511,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Repairs and restores the interval.
             self._async_raise_repair(err)
             if is_rate_limit_error(err):
-                self._adjust_poll_backoff(rate_limited=True)
+                self._adjust_poll_backoff(rate_limited=True, retry_after=rate_limit_retry_after(err))
             # Transient failure (a timeout arrives here as TimeoutError). Rather than flap
             # every entity to "unavailable" on a brief cloud hiccup, keep serving the
             # last-good data while a recent success is still within the grace window (#152);
@@ -505,7 +542,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # on the option inside the fetch.
         raw_devices = await self._async_fetch_device_data()
         self.device_data = {
-            uuid: normalize_energy_units(tag_source(points, "cloud")) for uuid, points in raw_devices.items()
+            uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud")))
+            for uuid, points in raw_devices.items()
         }
 
         # pysolarcloud is untyped, so the realtime payload is Any.
@@ -619,7 +657,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.devices[:] = list(devices)
         mapped = map_device_list_to_points(self.devices)
         self.device_data = {
-            uuid: normalize_energy_units(tag_source(points, "cloud_user")) for uuid, points in mapped.items()
+            uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud_user")))
+            for uuid, points in mapped.items()
         }
 
     async def _async_refresh_faults(self) -> None:
@@ -855,19 +894,34 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return (self.hass.loop.time() - self._last_successful_update) < AVAILABILITY_GRACE_SECONDS
 
-    def _adjust_poll_backoff(self, *, rate_limited: bool) -> None:
+    def _adjust_poll_backoff(self, *, rate_limited: bool, retry_after: float | None = None) -> None:
         """Back off the poll interval on rate-limit errors, restoring it on recovery (#156).
 
-        Each rate-limited poll doubles the interval up to ``BACKOFF_MAX_INTERVAL``, so the
-        integration stops hammering iSolarCloud once it hits the hourly/monthly quota; the
-        next successful poll restores the user's configured interval.
+        Without a server hint each rate-limited poll doubles the interval up to
+        ``BACKOFF_MAX_INTERVAL``, so the integration stops hammering iSolarCloud once it hits
+        the hourly/monthly quota; the next successful poll restores the user's configured
+        interval.
+
+        When iSolarCloud states a retry delay (#458) that is used instead of the guess. It is
+        floored at the user's configured interval — a short hint is not an invitation to poll
+        faster than they asked for — and still capped at ``BACKOFF_MAX_INTERVAL``, so a
+        month-long quota hint cannot park the integration for a month when an hourly retry
+        would pick the reset up sooner.
         """
         if rate_limited:
             current = self.update_interval or self._base_update_interval
-            new = min(current * 2, BACKOFF_MAX_INTERVAL)
+            if retry_after is None:
+                new = min(current * 2, BACKOFF_MAX_INTERVAL)
+            else:
+                new = min(max(timedelta(seconds=retry_after), self._base_update_interval), BACKOFF_MAX_INTERVAL)
             if new != self.update_interval:
                 self.update_interval = new
-                _LOGGER.warning("iSolarCloud rate-limited %s; backing off poll interval to %s", self.plant_name, new)
+                _LOGGER.warning(
+                    "iSolarCloud rate-limited %s; backing off poll interval to %s%s",
+                    self.plant_name,
+                    new,
+                    " (server-suggested)" if retry_after is not None else "",
+                )
         elif self.update_interval != self._base_update_interval:
             self.update_interval = self._base_update_interval
             _LOGGER.info(

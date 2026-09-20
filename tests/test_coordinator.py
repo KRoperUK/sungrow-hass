@@ -1,6 +1,7 @@
 """Tests for the Sungrow data update coordinator."""
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,6 +43,7 @@ from custom_components.sungrow.coordinator import (
     SungrowPlantCoordinator,
     describe_api_error,
     is_auth_error,
+    rate_limit_retry_after,
 )
 
 from .conftest import MOCK_REALTIME_DATA
@@ -246,6 +248,75 @@ async def test_rate_limit_backoff_is_capped(hass: HomeAssistant):
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
     assert coordinator.update_interval == BACKOFF_MAX_INTERVAL
+
+
+async def test_rate_limit_honours_the_server_suggested_backoff(hass: HomeAssistant):
+    """A retry hint from iSolarCloud replaces the doubling guess (#458).
+
+    The typed ``RateLimitError`` carries whatever delay the API advertised, so the
+    integration waits as long as it was told rather than guessing.
+    """
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(
+        side_effect=PySolarCloudException.from_response({"result_code": "E999", "retry_after": 900})
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator.update_interval == timedelta(seconds=900)
+
+    # A second hint of the same length is idempotent rather than compounding.
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == timedelta(seconds=900)
+
+
+async def test_server_suggested_backoff_respects_floor_and_cap(hass: HomeAssistant):
+    """A short hint can't poll faster than configured; an absurd one can't park the entry."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(
+        side_effect=PySolarCloudException.from_response({"result_code": "E999", "retry_after": 5})
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    # Floored at the user's configured interval, not the 5 s the server asked for.
+    assert coordinator.update_interval == timedelta(seconds=300)
+
+    # A month-long hint is capped, so an hourly retry still picks the quota reset up.
+    plants.async_get_realtime_data = AsyncMock(
+        side_effect=PySolarCloudException.from_response({"result_code": "E998", "retry_after": 2_592_000})
+    )
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == BACKOFF_MAX_INTERVAL
+
+
+async def test_rate_limit_without_a_hint_still_doubles(hass: HomeAssistant):
+    """No advertised delay → the original doubling behaviour is unchanged (#156)."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=PySolarCloudException.from_response({"result_code": "E999"}))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant")
+    base = coordinator.update_interval
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base * 2
+
+
+def test_rate_limit_retry_after_reads_only_the_typed_error():
+    """The hint is taken from the typed error, and ignored when unset or nonsensical."""
+    assert (
+        rate_limit_retry_after(PySolarCloudException.from_response({"result_code": "E999", "retry_after": 120}))
+        == 120.0
+    )
+    assert rate_limit_retry_after(PySolarCloudException.from_response({"result_code": "E999"})) is None
+    assert rate_limit_retry_after(PySolarCloudException.from_response({"result_code": "E919"})) is None
+    assert rate_limit_retry_after(ConnectionError("blip")) is None
 
 
 async def test_non_rate_limit_error_does_not_back_off(hass: HomeAssistant):
