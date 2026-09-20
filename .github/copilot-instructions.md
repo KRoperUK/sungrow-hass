@@ -26,8 +26,8 @@ retired in #348.
   heartbeat dies unexpectedly while dispatch is active (#254).
 - `coordinator.py` — `SungrowPlantCoordinator`; realtime + per-device fetch;
   `is_auth_error()`/`is_rate_limit_error()`; availability grace window, rate-limit
-  back-off, Repairs (`whitelist_rejection` / `rate_limited`), and the derived
-  `daily_yield` baseline for families whose daily register never resets (#223/#400).
+  back-off, Repairs (`whitelist_rejection` / `rate_limited`), and the derived daily
+  baselines (`daily_yield`, plus grid import/export, #223/#400/#471).
 - `device_helpers.py` — device-registry helpers. Nest devices with **`via_device_id`**
   (the parent's registry device id; `via_device` is deprecated, #407) and use
   `build_device_info_for()`; open-coding nesting caused #383.
@@ -52,8 +52,8 @@ retired in #348.
 - `modbus.py` / `modbus_registers.py` / `modbus_control.py` — local Modbus client,
   register maps/decoders, and holding-register dispatch. MPPT points are model-gated
   (#398); absent-meter points are suppressed (#387).
-- `daily_yield.py` / `migration.py` / `energy_units.py` / `user_realtime.py` /
-  `model_specs.py` / `model_capabilities.py` — derived daily yield, config-entry
+- `derived_daily.py` / `migration.py` / `energy_units.py` / `user_realtime.py` /
+  `model_specs.py` / `model_capabilities.py` — derived daily energy, config-entry
   migration (v1→v6), unit normalisation + source tagging, the `cloud_user` point mapper,
   and per-model datasheet metadata/family resolution.
 - `const.py` — domain, config keys, gateways, scan-interval defaults, per-device point

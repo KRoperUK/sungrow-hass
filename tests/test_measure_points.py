@@ -445,7 +445,7 @@ def test_derived_flag_does_not_promote_other_resetting_codes():
 
 def test_derived_energy_codes_track_the_derivation_table():
     """The classification set is read from the derivation itself, so the two can't drift."""
-    from custom_components.sungrow.daily_yield import DERIVED_DAILY_COUNTER_PAIRS
+    from custom_components.sungrow.derived_daily import DERIVED_DAILY_COUNTER_PAIRS
 
     assert frozenset(daily for _, daily in DERIVED_DAILY_COUNTER_PAIRS) == mp._DERIVED_ENERGY_CODES
 
