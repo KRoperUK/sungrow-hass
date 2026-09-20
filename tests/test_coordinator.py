@@ -1069,7 +1069,7 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-DY", "SG")
@@ -1084,7 +1084,7 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     )
     # Pretend we already saw 6462 earlier today.
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline(
+    coordinator._daily_yield_state = DerivedDailyBaseline(
         baseline=6462.0, baseline_date=date(2026, 7, 13), last_total=6462.0
     )
     # Avoid Store I/O in the unit test.
@@ -1111,7 +1111,7 @@ async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-SH", "SH")
@@ -1124,7 +1124,7 @@ async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
         }
     )
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline(
+    coordinator._daily_yield_state = DerivedDailyBaseline(
         baseline=1400.0, baseline_date=date(2026, 7, 13), last_total=1400.0
     )
     coordinator._daily_yield_store = MagicMock()
@@ -1146,7 +1146,7 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID", "SH")
@@ -1166,14 +1166,14 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     )
     # SH hybrids keep the raw daily_yield register, so the yield derivation stays out of it.
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
     # Pretend we already saw 6462 earlier today.
     coordinator._grid_daily_baseline_loaded = True
     coordinator._grid_daily_state = DerivedDailyEnergyState(
         baselines={
-            "total_imported_energy": DailyYieldBaseline(
+            "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6462.0
             )
         }
@@ -1202,7 +1202,7 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID2", "SH")
@@ -1225,7 +1225,7 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
         }
     )
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
     coordinator._grid_daily_baseline_loaded = True
@@ -1255,7 +1255,7 @@ async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashb
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID4", "SH")
@@ -1279,13 +1279,13 @@ async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashb
         }
     )
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
     coordinator._grid_daily_baseline_loaded = True
     coordinator._grid_daily_state = DerivedDailyEnergyState(
         baselines={
-            "total_imported_energy": DailyYieldBaseline(
+            "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
             )
         }
@@ -1325,7 +1325,7 @@ async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass
     from datetime import date
     from unittest.mock import patch
 
-    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
 
     entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
     coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID3", "SH")
@@ -1342,14 +1342,14 @@ async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass
         }
     )
     coordinator._daily_yield_baseline_loaded = True
-    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
     coordinator._grid_daily_baseline_loaded = True
     # Same counter as the payload reports, so the derivation changes nothing.
     coordinator._grid_daily_state = DerivedDailyEnergyState(
         baselines={
-            "total_imported_energy": DailyYieldBaseline(
+            "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
             )
         }
