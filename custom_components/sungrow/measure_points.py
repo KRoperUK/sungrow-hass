@@ -379,9 +379,11 @@ _CUMULATIVE_ENERGY_POINT_IDS = frozenset(
 # them graphing without feeding the Energy dashboard or cumulative statistics.
 #
 # ``daily_yield`` is deliberately excluded from this list: the coordinator overwrites it
-# with the derived-daily value (daily_yield.py), which *does* reset at local midnight, so
+# with the derived-daily value (derived_daily.py), which *does* reset at local midnight, so
 # it stays a genuine ENERGY / TOTAL_INCREASING sensor. Cloud daily points are also left
-# untouched — iSolarCloud computes them server-side and resets them reliably.
+# untouched — iSolarCloud computes them server-side and resets them reliably. The two grid
+# codes below have a derived counterpart that *is* an Energy-dashboard source — see
+# ``_DERIVED_ENERGY_CODES``.
 _RESETTING_ENERGY_CODES = frozenset(
     {
         "daily_pv_gen_battery_discharge",

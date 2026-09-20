@@ -1119,7 +1119,7 @@ def daily_yield_diagnostic_dump(
         "total": total,
         # The register this diagnostic reads. Note: on SG-RS families the integration
         # derives ``daily_yield`` from ``total_yield − start-of-day baseline`` (wire 5002
-        # never resets at midnight — see daily_yield.py), so the sensor value will not
+        # never resets at midnight — see derived_daily.py), so the sensor value will not
         # equal ``raw * scale`` here. #400 was reported as this diagnostic disagreeing
         # with the sensor; it is an annotation aid, not the daily_yield source.
         "current_mapping": {

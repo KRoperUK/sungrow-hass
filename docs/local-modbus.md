@@ -177,7 +177,10 @@ so the entity either reads a permanent 0 or never appears at all.
 When the lifetime counters are available the local entry **derives** calendar-day import
 and export from them instead — `daily_imported_energy = total_imported_energy −
 start-of-day`, and the same for export (same mechanism as local daily yield, with its own
-stored baseline per counter). The derived entity carries `source: modbus_derived`.
+stored baseline per counter). The derived entity carries `source: modbus_derived`, plus
+`raw_register_value` — the device's own reading at the time — so the two figures can be
+compared straight from the entity's attributes. A flat `0` next to a real derived value is
+the quickest way to see that the register is the broken side.
 
 **The derived value replaces the device register while a lifetime counter exists.** Two
 reasons. It keeps the source — and therefore the entity’s classification — stable, since
