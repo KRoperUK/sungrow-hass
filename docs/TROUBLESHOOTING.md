@@ -384,7 +384,22 @@ If your meter **is** fitted and the lifetime `total_imported_energy` /
 `daily_exported_energy` is stuck at `0` or missing, the integration derives the daily
 figures from the lifetime ones (`total − start-of-day`), so the daily entities are usable
 for cost templates. Those carry `source: modbus_derived` as an attribute; the derivation
-only fills in a missing or zero register and never shadows one that is counting.
+only fills in a missing or zero register and never shadows one that is counting. This is
+the widely reported case where the daily register reads `0` while the lifetime totals are
+correct (e.g. [mkaiser#529](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/529))
+— the same register map, so the register addresses line up with that project.
+
+There are two setups where the *lifetime* counters are empty too, and the derived sensors
+cannot appear — there is genuinely no local grid data to work from:
+
+- **iHomeManager without a DTSU666.** The grid metrics live on the iHomeManager rather
+  than the inverter, so the inverter's registers stay empty
+  ([mkaiser#651](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/651)).
+- **Firmware that never populates them.** Some SH hardware reports `0` for both the daily
+  *and* the lifetime import/export registers
+  ([mkaiser#364](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/364)).
+
+In both cases use a **cloud** entry for grid figures.
 
 Check `modbus_diagnostics.meter_present` in the local entry's diagnostics download:
 
