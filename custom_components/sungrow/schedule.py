@@ -29,7 +29,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -53,37 +53,82 @@ _SCHEDULE_MODES: frozenset[str] = frozenset({"force_charge", "force_discharge"})
 # outside the scheduled window.
 _MODE_AFTER_WINDOW = "self_consumption"
 
+# Weekday names accepted in a window's ``days`` mask, mapped to ``datetime.weekday()``
+# (Monday = 0). The three-letter forms are what the options-flow multi-select emits;
+# the full names make hand-authored options and YAML just as readable.
+_DAY_NAMES: dict[str, int] = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
+
+# Shortest form of each weekday, Monday first — the values the options-flow multi-select
+# uses and the order they are offered in.
+SCHEDULE_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
 
 @dataclass(frozen=True)
 class ScheduleWindow:
-    """A single daily-repeating window that arms one battery mode.
+    """A single repeating window that arms one battery mode.
 
     ``start`` and ``end`` are local wall-clock times. If ``start >= end`` the
     window wraps over midnight — ``23:30`` → ``06:00`` means "from 23:30 today
-    until 06:00 tomorrow", every day.
+    until 06:00 tomorrow".
+
+    ``days`` restricts the window to a set of weekdays (``datetime.weekday()``,
+    Monday = 0). ``None`` means every day, which is what a window without a mask
+    has always meant, so existing configurations are unaffected.
     """
 
     start: time
     end: time
     mode: str
+    days: frozenset[int] | None = None
 
     def __post_init__(self) -> None:
-        """Validate that the mode is one of the accepted schedule modes."""
+        """Validate the mode and the optional weekday mask."""
         if self.mode not in _SCHEDULE_MODES:
             raise ValueError(f"Invalid schedule mode: {self.mode!r}")
         if self.start == self.end:
             raise ValueError(f"Window start ({self.start}) equals end ({self.end}); a zero-length window has no effect")
+        if self.days is not None:
+            if not self.days:
+                raise ValueError("Window has an empty day mask; it would never run")
+            invalid = sorted(day for day in self.days if day not in range(7))
+            if invalid:
+                raise ValueError(f"Invalid weekday numbers {invalid}; expected 0 (Monday) to 6 (Sunday)")
 
-    def contains(self, now: time) -> bool:
-        """Return True if ``now`` (local wall-clock) is inside this window.
+    def runs_on(self, weekday: int) -> bool:
+        """Return True if this window runs on ``weekday`` (``datetime.weekday()``)."""
+        return self.days is None or weekday in self.days
 
-        Wrap-over-midnight windows (``start >= end``) are handled: ``now`` is
-        inside such a window when it's ``>= start`` OR ``< end``.
+    def contains(self, moment: datetime) -> bool:
+        """Return True if ``moment`` (local) is inside this window.
+
+        Takes a full ``datetime`` rather than a ``time`` because a weekday mask has to
+        know which day the window belongs to, and a wrapping window's small-hours leg
+        belongs to the day it *started* on: a Monday-only ``23:30 → 06:00`` runs into
+        Tuesday morning, and ``06:00`` Tuesday is still "Monday's" window.
         """
+        now = moment.time()
         if self.start < self.end:
-            return self.start <= now < self.end
-        # Wrap over midnight.
-        return now >= self.start or now < self.end
+            return self.runs_on(moment.weekday()) and self.start <= now < self.end
+        # Wraps over midnight: either tonight's leg (from ``start``) or yesterday's
+        # spill into this morning. ``end`` is exclusive, so the closing boundary is out.
+        if now >= self.start:
+            return self.runs_on(moment.weekday())
+        return now < self.end and self.runs_on((moment.weekday() - 1) % 7)
 
 
 @dataclass
@@ -132,8 +177,10 @@ class SungrowScheduler:
                 )
         return cls(hass=hass, entry=entry, windows=windows)
 
-    def active_window(self, now: time) -> ScheduleWindow | None:
-        """Return the schedule window active at ``now`` (local time), or None.
+    def active_window(self, moment: datetime) -> ScheduleWindow | None:
+        """Return the schedule window active at ``moment`` (local), or None.
+
+        Windows whose weekday mask excludes ``moment``'s day are skipped.
 
         Overlap policy: multiple windows can match a given time; the one with
         the latest ``start`` wins. That's the intuitive "most recently entered
@@ -142,7 +189,7 @@ class SungrowScheduler:
         starts count as their raw ``start`` time (a 23:30-06:00 window's start
         is 23:30, later than a 08:00 window's start).
         """
-        matches = [w for w in self.windows if w.contains(now)]
+        matches = [w for w in self.windows if w.contains(moment)]
         if not matches:
             return None
         return max(matches, key=lambda w: w.start)
@@ -164,7 +211,7 @@ class SungrowScheduler:
         # leave the inverter drifting outside the intended mode.
         from homeassistant.util import dt as dt_util
 
-        now_local = dt_util.now().time()
+        now_local = dt_util.now()
         self._current_window = self.active_window(now_local)
         if self._current_window is not None:
             _LOGGER.info(
@@ -176,7 +223,7 @@ class SungrowScheduler:
             )
             await self._apply_mode(self._current_window.mode)
         else:
-            _LOGGER.debug("Entry %s: no schedule window active at %s", self.entry.title, now_local)
+            _LOGGER.debug("Entry %s: no schedule window active at %s", self.entry.title, now_local.time())
 
         # Arm one time-change callback per window boundary. ``async_track_time_change``
         # fires every day at the specified HH:MM:00, so we get daily repetition for free
@@ -237,7 +284,16 @@ class SungrowScheduler:
     async def _on_boundary_impl(self, window: ScheduleWindow, *, entering: bool) -> None:
         """Apply the mode for a boundary crossing.
 
-        On *entering* a window: apply the window's mode.
+        Boundaries are armed for every day — ``async_track_time_change`` has no "Mondays
+        only" form — so a weekday-masked window still receives both callbacks on the days it
+        does not run, and each has to be checked before acting:
+
+        * *entering*: the window must contain the boundary instant, or a Monday-only window
+          would actuate every Tuesday and hold that mode until its next boundary;
+        * *leaving*: the window must have been running a moment before the boundary, or its
+          end callback would release the battery to Self-consumption every non-matching day,
+          stomping whatever mode the user had set.
+
         On *leaving* a window: revert to ``self_consumption`` — but only if the
         window we're leaving is still the ``_current_window``. If a longer
         window is nested inside a shorter one (overlap), the leaving-callback
@@ -245,6 +301,21 @@ class SungrowScheduler:
         battery while the enclosing window should still be active.
         """
         from homeassistant.util import dt as dt_util
+
+        now = dt_util.now()
+        # One second before, because ``end`` is exclusive: at the boundary instant the
+        # window has already closed, so ask whether it was still open just before it.
+        was_running = window.contains(now - timedelta(seconds=1))
+        if not (window.contains(now) if entering else was_running):
+            _LOGGER.debug(
+                "Entry %s: %s window %s-%s does not run now; skipping its %s boundary",
+                self.entry.title,
+                window.mode,
+                window.start.strftime("%H:%M"),
+                window.end.strftime("%H:%M"),
+                "start" if entering else "end",
+            )
+            return
 
         if entering:
             self._current_window = window
@@ -260,8 +331,7 @@ class SungrowScheduler:
 
         # Leaving: if an enclosing (later-starting) window still applies at
         # ``now``, keep its mode; otherwise release the battery.
-        now_local = dt_util.now().time()
-        still_active = self.active_window(now_local)
+        still_active = self.active_window(now)
         if still_active is None:
             _LOGGER.info(
                 "Entry %s: leaving scheduled window %s-%s; releasing battery to Self-consumption",
@@ -338,15 +408,53 @@ def _parse_window(row: Any) -> ScheduleWindow:
     """Parse one schedule window dict into a :class:`ScheduleWindow`.
 
     Accepts the shape produced by the options flow and equivalent user-authored
-    YAML — ``start`` / ``end`` as ``"HH:MM"`` strings (or ``time`` instances)
-    and ``mode`` as one of the accepted mode keys.
+    YAML — ``start`` / ``end`` as ``"HH:MM"`` strings (or ``time`` instances),
+    ``mode`` as one of the accepted mode keys, and an optional ``days`` weekday
+    mask (omitted or empty means every day).
     """
     if not isinstance(row, dict):
         raise TypeError(f"Expected a dict, got {type(row).__name__}")
     start = _coerce_time(row["start"])
     end = _coerce_time(row["end"])
     mode = str(row["mode"]).strip()
-    return ScheduleWindow(start=start, end=end, mode=mode)
+    return ScheduleWindow(start=start, end=end, mode=mode, days=_parse_days(row.get("days")))
+
+
+def _parse_days(value: Any) -> frozenset[int] | None:
+    """Coerce a window's ``days`` mask to weekday numbers, or ``None`` for every day.
+
+    Accepts the three-letter names the options-flow multi-select emits (``["mon", "fri"]``)
+    as well as full names, the numbers ``datetime.weekday()`` uses, and a comma- or
+    space-separated string, so hand-authored options are as forgiving as the form. An
+    absent, empty or all-seven selection means "every day" and is normalised to ``None``
+    so the stored row stays clean.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        items: list[Any] = [part for part in value.replace(",", " ").split() if part]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        raise TypeError(f"Cannot coerce {value!r} ({type(value).__name__}) to a day mask")
+
+    days: set[int] = set()
+    for item in items:
+        if isinstance(item, bool):
+            raise ValueError(f"Invalid weekday {item!r}")
+        if isinstance(item, int):
+            days.add(item)
+            continue
+        name = str(item).strip().lower()
+        if not name:
+            continue
+        if name not in _DAY_NAMES:
+            raise ValueError(f"Unknown weekday {item!r}; expected one of {', '.join(sorted(_DAY_NAMES))}")
+        days.add(_DAY_NAMES[name])
+
+    if not days or days == frozenset(range(7)):
+        return None
+    return frozenset(days)
 
 
 def _coerce_time(value: Any) -> time:

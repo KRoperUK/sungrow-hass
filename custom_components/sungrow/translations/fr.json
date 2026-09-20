@@ -154,15 +154,19 @@
           "schedule_1_start": "Programmation 1 — début (HH:MM, heure locale)",
           "schedule_1_end": "Programmation 1 — fin (HH:MM, heure locale)",
           "schedule_1_mode": "Programmation 1 — mode batterie",
+          "schedule_1_days": "Planification 1 — jours de la semaine",
           "schedule_2_start": "Programmation 2 — début (HH:MM, heure locale)",
           "schedule_2_end": "Programmation 2 — fin (HH:MM, heure locale)",
           "schedule_2_mode": "Programmation 2 — mode batterie",
+          "schedule_2_days": "Planification 2 — jours de la semaine",
           "schedule_3_start": "Programmation 3 — début (HH:MM, heure locale)",
           "schedule_3_end": "Programmation 3 — fin (HH:MM, heure locale)",
           "schedule_3_mode": "Programmation 3 — mode batterie",
+          "schedule_3_days": "Planification 3 — jours de la semaine",
           "schedule_4_start": "Programmation 4 — début (HH:MM, heure locale)",
           "schedule_4_end": "Programmation 4 — fin (HH:MM, heure locale)",
-          "schedule_4_mode": "Programmation 4 — mode batterie"
+          "schedule_4_mode": "Programmation 4 — mode batterie",
+          "schedule_4_days": "Planification 4 — jours de la semaine"
         }
       },
       "modbus_options": {

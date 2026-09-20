@@ -154,15 +154,19 @@
           "schedule_1_start": "Schedule 1 — start (HH:MM, local time)",
           "schedule_1_end": "Schedule 1 — end (HH:MM, local time)",
           "schedule_1_mode": "Schedule 1 — battery mode",
+          "schedule_1_days": "Schedule 1 — days of week",
           "schedule_2_start": "Schedule 2 — start (HH:MM, local time)",
           "schedule_2_end": "Schedule 2 — end (HH:MM, local time)",
           "schedule_2_mode": "Schedule 2 — battery mode",
+          "schedule_2_days": "Schedule 2 — days of week",
           "schedule_3_start": "Schedule 3 — start (HH:MM, local time)",
           "schedule_3_end": "Schedule 3 — end (HH:MM, local time)",
           "schedule_3_mode": "Schedule 3 — battery mode",
+          "schedule_3_days": "Schedule 3 — days of week",
           "schedule_4_start": "Schedule 4 — start (HH:MM, local time)",
           "schedule_4_end": "Schedule 4 — end (HH:MM, local time)",
-          "schedule_4_mode": "Schedule 4 — battery mode"
+          "schedule_4_mode": "Schedule 4 — battery mode",
+          "schedule_4_days": "Schedule 4 — days of week"
         }
       },
       "modbus_options": {

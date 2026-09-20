@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import time
+from datetime import date, datetime, time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,6 +11,18 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS, DOMAIN
 from custom_components.sungrow.schedule import ScheduleWindow, SungrowScheduler
+
+# 2026-09-21 is a Monday, so ``weekday() == 0`` — the reference day for mask tests.
+_MONDAY = date(2026, 9, 21)
+_TUESDAY = date(2026, 9, 22)
+_WEDNESDAY = date(2026, 9, 23)
+_SUNDAY = date(2026, 9, 27)
+
+
+def _at(now: time, on: date = _MONDAY) -> datetime:
+    """Combine a wall-clock time with a date (Monday by default)."""
+    return datetime.combine(on, now)
+
 
 # ---------------------------------------------------------------------------
 # ScheduleWindow — invariants + membership
@@ -47,7 +59,7 @@ def test_schedule_window_rejects_zero_length():
 def test_schedule_window_contains_same_day(now, expected):
     """A ``start < end`` window covers ``[start, end)`` on the same day."""
     window = ScheduleWindow(start=time(1), end=time(5), mode="force_charge")
-    assert window.contains(now) is expected
+    assert window.contains(_at(now)) is expected
 
 
 @pytest.mark.parametrize(
@@ -65,7 +77,45 @@ def test_schedule_window_contains_same_day(now, expected):
 def test_schedule_window_contains_wrap_over_midnight(now, expected):
     """A ``start >= end`` window wraps over midnight: ``[start, 24:00) ∪ [00:00, end)``."""
     window = ScheduleWindow(start=time(23), end=time(6), mode="force_charge")
-    assert window.contains(now) is expected
+    assert window.contains(_at(now)) is expected
+
+
+# ---------------------------------------------------------------------------
+# ScheduleWindow — weekday mask (#433)
+# ---------------------------------------------------------------------------
+
+
+def test_day_mask_restricts_a_same_day_window():
+    """A masked window only runs on its own weekdays."""
+    window = ScheduleWindow(start=time(1), end=time(5), mode="force_charge", days=frozenset({0}))
+
+    assert window.contains(_at(time(3), _MONDAY)) is True
+    assert window.contains(_at(time(3), _TUESDAY)) is False
+    assert window.contains(_at(time(3), _WEDNESDAY)) is False
+
+
+def test_day_mask_attributes_a_wrapping_window_to_its_start_day():
+    """Monday 23:30→06:00 runs into Tuesday morning; Tuesday 02:00 is Monday's window.
+
+    This is the case a naive "is today's weekday in the mask" check gets wrong: it would
+    either skip the second half of the window or run the window on Wednesday morning.
+    """
+    window = ScheduleWindow(start=time(23, 30), end=time(6), mode="force_charge", days=frozenset({0}))
+
+    assert window.contains(_at(time(23, 45), _MONDAY)) is True  # Monday evening leg
+    assert window.contains(_at(time(2), _TUESDAY)) is True  # spill from Monday
+    assert window.contains(_at(time(2), _WEDNESDAY)) is False  # Tuesday night did not run
+    assert window.contains(_at(time(23, 45), _TUESDAY)) is False  # mask is Monday-only
+
+
+def test_day_mask_none_means_every_day():
+    """No mask (the historical shape) runs every day, including wrapping windows."""
+    window = ScheduleWindow(start=time(23, 30), end=time(6), mode="force_charge")
+
+    assert window.contains(_at(time(3), _MONDAY)) is True
+    assert window.contains(_at(time(3), _SUNDAY)) is True
+    assert window.contains(_at(time(23, 45), _SUNDAY)) is True
+    assert _SUNDAY.weekday() == 6
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +135,7 @@ def _entry_with_windows(hass: HomeAssistant, windows: list[dict]) -> MagicMock:
 def test_active_window_returns_none_when_no_windows(hass: HomeAssistant):
     """No configured windows → nothing to activate."""
     scheduler = SungrowScheduler.from_entry(hass, _entry_with_windows(hass, []))
-    assert scheduler.active_window(time(3, 0)) is None
+    assert scheduler.active_window(_at(time(3, 0))) is None
 
 
 def test_active_window_returns_none_when_outside_every_window(hass: HomeAssistant):
@@ -100,7 +150,7 @@ def test_active_window_returns_none_when_outside_every_window(hass: HomeAssistan
             ],
         ),
     )
-    assert scheduler.active_window(time(12, 0)) is None
+    assert scheduler.active_window(_at(time(12, 0))) is None
 
 
 def test_active_window_picks_latest_start_on_overlap(hass: HomeAssistant):
@@ -121,11 +171,11 @@ def test_active_window_picks_latest_start_on_overlap(hass: HomeAssistant):
         ),
     )
     # Inside overlap → shorter (later-started) window wins.
-    active = scheduler.active_window(time(3, 30))
+    active = scheduler.active_window(_at(time(3, 30)))
     assert active is not None
     assert active.mode == "force_discharge"
     # Outside the shorter window but still inside the longer one → longer wins.
-    active = scheduler.active_window(time(5, 0))
+    active = scheduler.active_window(_at(time(5, 0)))
     assert active is not None
     assert active.mode == "force_charge"
 
@@ -197,7 +247,7 @@ async def test_scheduler_start_applies_active_window_on_setup(hass: HomeAssistan
     ):
         tracker.return_value = MagicMock()
         # Simulate "now" being inside the 01:00-05:00 window.
-        fake_now.return_value.time.return_value = time(3, 0)
+        fake_now.return_value = _at(time(3, 0))
         await scheduler.async_start()
 
     # The select got its mode set to Force charge on setup.
@@ -225,7 +275,7 @@ async def test_scheduler_no_active_window_on_setup_does_not_touch_selects(hass: 
     ):
         tracker.return_value = MagicMock()
         # "Now" is well outside every window.
-        fake_now.return_value.time.return_value = time(12, 0)
+        fake_now.return_value = _at(time(12, 0))
         await scheduler.async_start()
 
     fake_select.async_select_option.assert_not_awaited()
@@ -253,7 +303,7 @@ async def test_scheduler_skips_selects_owned_by_other_entries(hass: HomeAssistan
         patch("homeassistant.util.dt.now") as fake_now,
     ):
         tracker.return_value = MagicMock()
-        fake_now.return_value.time.return_value = time(3, 0)
+        fake_now.return_value = _at(time(3, 0))
         await scheduler.async_start()
 
     other_select.async_select_option.assert_not_awaited()
@@ -288,11 +338,108 @@ async def test_scheduler_restores_enclosing_mode_when_inner_window_ends(hass: Ho
 
     with patch("homeassistant.util.dt.now") as fake_now:
         # Inner window just ended; the enclosing 01:00-06:00 window is still active.
-        fake_now.return_value.time.return_value = time(4, 30)
+        fake_now.return_value = _at(time(4, 0))
         await scheduler._on_boundary_impl(inner, entering=False)
 
     fake_select.async_select_option.assert_awaited_with("Force charge")
     assert scheduler._current_window is outer
+
+
+def _register_fake_select(hass: HomeAssistant) -> MagicMock:
+    """Register a battery-mode select the scheduler can drive, and return it."""
+    fake_select = MagicMock()
+    fake_select.async_select_option = AsyncMock()
+    fake_select.hass = hass
+    fake_select.platform = None  # skip async_write_ha_state
+    fake_select.registry_entry = None
+    hass.data.setdefault(DOMAIN, {})["battery_mode_selects"] = {"select.plant_battery": fake_select}
+    return fake_select
+
+
+@pytest.mark.parametrize("entering", [True, False])
+async def test_day_mask_boundary_is_inert_on_a_non_matching_weekday(hass: HomeAssistant, entering):
+    """A masked window's boundaries fire every day, so a non-matching day must do nothing (#433).
+
+    ``async_track_time_change`` arms one callback per boundary per *day*; there is no way to
+    arm it for "Mondays only". Without the containment re-check a Monday-only window would
+    actuate every Tuesday and hold that mode until its next boundary.
+    """
+    entry = _entry_with_windows(
+        hass,
+        [{"start": "01:00", "end": "05:00", "mode": "force_charge", "days": ["mon"]}],
+    )
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    window = scheduler.windows[0]
+    fake_select = _register_fake_select(hass)
+
+    with patch("homeassistant.util.dt.now") as fake_now:
+        fake_now.return_value = _at(time(1, 0), _TUESDAY)
+        await scheduler._on_boundary_impl(window, entering=entering)
+
+    fake_select.async_select_option.assert_not_awaited()
+    assert scheduler._current_window is None
+
+
+async def test_day_mask_boundary_actuates_on_a_matching_weekday(hass: HomeAssistant):
+    """The same boundary on the window's own weekday still actuates normally."""
+    entry = _entry_with_windows(
+        hass,
+        [{"start": "01:00", "end": "05:00", "mode": "force_charge", "days": ["mon"]}],
+    )
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    window = scheduler.windows[0]
+    fake_select = _register_fake_select(hass)
+
+    with patch("homeassistant.util.dt.now") as fake_now:
+        fake_now.return_value = _at(time(1, 0), _MONDAY)
+        await scheduler._on_boundary_impl(window, entering=True)
+
+    fake_select.async_select_option.assert_awaited_with("Force charge")
+    assert scheduler._current_window is window
+
+
+# ---------------------------------------------------------------------------
+# Weekday-mask parsing (#433)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (["mon"], {0}),
+        (["mon", "fri"], {0, 4}),
+        (["monday", "Friday"], {0, 4}),
+        ([0, 4], {0, 4}),
+        ("mon,fri", {0, 4}),
+        ("sat sun", {5, 6}),
+        # Every day, an empty list and an absent mask all mean "no mask".
+        (None, None),
+        ([], None),
+        (["mon", "tue", "wed", "thu", "fri", "sat", "sun"], None),
+    ],
+)
+def test_parse_days_accepts_the_shapes_a_row_can_hold(raw, expected):
+    """The engine reads whatever the form or hand-authored options produce."""
+    from custom_components.sungrow.schedule import _parse_days
+
+    parsed = _parse_days(raw)
+    assert parsed == (None if expected is None else frozenset(expected))
+
+
+def test_parse_days_rejects_an_unknown_weekday():
+    """A typo drops the row (with a warning) rather than silently running every day."""
+    from custom_components.sungrow.schedule import _parse_days
+
+    with pytest.raises(ValueError, match="Unknown weekday"):
+        _parse_days(["monday", "funday"])
+
+
+def test_window_rejects_an_empty_or_out_of_range_mask():
+    """A mask that can never match, or names a day that doesn't exist, is a bug not a no-op."""
+    with pytest.raises(ValueError, match="empty day mask"):
+        ScheduleWindow(start=time(1), end=time(5), mode="force_charge", days=frozenset())
+    with pytest.raises(ValueError, match="Invalid weekday numbers"):
+        ScheduleWindow(start=time(1), end=time(5), mode="force_charge", days=frozenset({7}))
 
 
 async def test_scheduler_stop_cancels_inflight_boundary_task(hass: HomeAssistant):

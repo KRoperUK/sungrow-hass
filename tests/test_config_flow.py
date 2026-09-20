@@ -960,6 +960,70 @@ async def test_options_flow_saves_schedule_windows(hass: HomeAssistant, mock_set
     assert entry.options[CONF_SCHEDULE_WINDOWS] == [{"start": "01:00:00", "end": "05:00:00", "mode": "force_charge"}]
 
 
+async def test_options_flow_stores_and_clears_the_weekday_mask(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """A weekday selection is stored; selecting every day stores no mask at all (#433).
+
+    All seven days means the same as no mask, so normalising it away keeps stored rows —
+    and the engine's log lines — identical to what they were before masks existed.
+    """
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            "schedule_1_end": "05:00:00",
+            "schedule_1_mode": "force_charge",
+            "schedule_1_days": ["mon", "fri"],
+            "schedule_2_start": "07:00:00",
+            "schedule_2_end": "08:00:00",
+            "schedule_2_mode": "force_discharge",
+            "schedule_2_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    windows = entry.options[CONF_SCHEDULE_WINDOWS]
+    assert windows[0]["days"] == ["mon", "fri"]
+    assert "days" not in windows[1]
+
+
+async def test_options_flow_rejects_a_slot_with_no_weekdays(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Clearing every weekday is refused rather than saved as a schedule that never runs."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "01:00:00",
+            "schedule_1_end": "05:00:00",
+            "schedule_1_mode": "force_charge",
+            "schedule_1_days": [],
+        },
+    )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_schedule_window"}
+    assert CONF_SCHEDULE_WINDOWS not in entry.options
+
+
 async def test_options_flow_grows_a_schedule_slot_beyond_the_configured_windows(
     hass: HomeAssistant, mock_setup_auth, mock_plants_service
 ):
