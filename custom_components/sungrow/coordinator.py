@@ -58,6 +58,7 @@ from .energy_units import normalize_energy_units, normalize_power_units, tag_sou
 from .modbus import SungrowModbusError
 from .modbus_registers import needs_derived_daily_yield
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
+from .pack_health import add_pack_health_points
 
 # Upper bound on a single poll's cloud calls, so a hung request can neither stall
 # the coordinator indefinitely nor let successive polls pile up.
@@ -541,7 +542,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # on the option inside the fetch.
         raw_devices = await self._async_fetch_device_data()
         self.device_data = {
-            uuid: normalize_energy_units(tag_source(points, "cloud")) for uuid, points in raw_devices.items()
+            uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud")))
+            for uuid, points in raw_devices.items()
         }
 
         # pysolarcloud is untyped, so the realtime payload is Any.
@@ -655,7 +657,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.devices[:] = list(devices)
         mapped = map_device_list_to_points(self.devices)
         self.device_data = {
-            uuid: normalize_energy_units(tag_source(points, "cloud_user")) for uuid, points in mapped.items()
+            uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud_user")))
+            for uuid, points in mapped.items()
         }
 
     async def _async_refresh_faults(self) -> None:

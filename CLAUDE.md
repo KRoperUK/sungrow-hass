@@ -48,6 +48,7 @@ Grouped by subsystem; every file under `custom_components/sungrow/`.
 | `backfill.py` | Cloud-only backfill engine: resolves series, chunks the window, and imports hourly statistics for cumulative-energy/power points. |
 | `energy_units.py` | Unit normalisation for payloads (Wh→kWh, and kW→W for the `cloud_user` transport) plus `source` provenance tagging. |
 | `user_realtime.py` | Maps the `cloud_user` transport's `getPsDetail` / device-list payloads onto the same measure-point codes the OAuth path produces (#269/#389). |
+| `pack_health.py` | `add_pack_health_points()` — the derived battery pack-health spreads (`cell_imbalance`, `module_temperature_spread`) from the max/min cell voltage and module temperature the device already reports. Runs over every device payload on both cloud transports; skips a spread whose pair is missing, unparseable or inverted, so it is a no-op for devices without cell detail (#430). |
 | `model_specs.py` / `model_capabilities.py` | Per-model datasheet metadata (`spec_for`, tracker/string counts, ratings) and coarse family resolution (`resolve_model_family`, `resolve_capabilities`, `mppt_points_for_model`) used to pick point ranges and gate battery controls. |
 
 **Local Modbus**
