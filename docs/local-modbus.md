@@ -168,6 +168,27 @@ entry **derives** calendar-day yield from lifetime `total_yield` (baseline store
 Cloud daily yield remains whatever iSolarCloud reports — they can differ; that is expected
 with two independent sources.
 
+## Daily grid import/export (local)
+
+The device’s own daily grid registers are firmware-dependent: some SH firmware answers a
+flat `0` for `daily_imported_energy` ([#401](https://github.com/KRoperUK/sungrow-hass/issues/401)),
+so the entity either reads a permanent 0 or never appears at all.
+
+When the lifetime counters are available, the local entry **derives** calendar-day import
+and export from them — `daily_imported_energy = total_imported_energy − start-of-day`, and
+the same for export (same mechanism as local daily yield, with its own stored baseline).
+The derived entity carries `source: modbus_derived` as an attribute.
+
+A daily register that is genuinely counting is **never shadowed** — the derivation only
+fills in a missing or zero one. The first calendar day after installing may under-report,
+because the baseline can only be anchored from the moment polling started.
+
+Both the lifetime counters and the daily registers come from the **external grid meter**
+(CT clamp / DTSU666). With no meter fitted there is nothing to derive from: the points are
+omitted and the entities are absent, so use a **cloud** entry for grid figures
+([#387](https://github.com/KRoperUK/sungrow-hass/issues/387) — check
+`modbus_diagnostics.meter_present` in the entry diagnostics).
+
 ## Local control (active power limit)
 
 On **SG string** local entries (validated on SG3.6RS), the integration can write

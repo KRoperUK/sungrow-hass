@@ -1,20 +1,29 @@
-"""Derive calendar-day yield from lifetime ``total_yield`` (#223 / Modbus SG-RS).
+"""Derive calendar-day energy from a lifetime counter.
 
-On several SG-RS + WiNet-S firmwares the documented "Daily power yields" register
-(wire 5002) never resets at midnight — it climbs in lockstep with lifetime energy
-and reports a multi-day cumulative value. Lifetime ``total_yield`` (wire 5003/5004)
-matches the cloud, so "energy today" is computed as:
+Two families of local-Modbus registers are unreliable for "today" and are computed
+from the matching lifetime counter instead, because the device-side daily register
+cannot be trusted:
 
-    daily = total_yield − total_yield_at_start_of_local_day
+* **Daily yield** (#223 / Modbus SG-RS): on several SG-RS + WiNet-S firmwares the
+  documented "Daily power yields" register (wire 5002) never resets at midnight — it
+  climbs in lockstep with lifetime energy and reports a multi-day cumulative value.
+* **Daily grid import/export** (#471): the daily import/export registers are
+  firmware-dependent — some SH firmware answers a flat 0 (#401) — and the points are
+  omitted entirely when no external grid meter is fitted (#387). The lifetime
+  ``total_imported_energy`` / ``total_exported_energy`` counters are reliable.
 
-The baseline is the last ``total_yield`` observed on the previous local calendar
-day (approximately end-of-yesterday / start-of-today). State is meant to be
-persisted across restarts by the coordinator.
+Both use the same subtraction:
+
+    daily = total − total_at_start_of_local_day
+
+The baseline is the last ``total`` observed on the previous local calendar day
+(approximately end-of-yesterday / start-of-today). State is meant to be persisted
+across restarts by the coordinator.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -152,3 +161,99 @@ def apply_derived_daily_yield(
         },
     }
     return data, new_state, daily
+
+
+# Lifetime counter -> daily counter pairs derived locally (#471). Keyed by the local
+# Modbus register codes, which are the point ids `resolve_classification` sees there.
+# Both families the integration maps expose a lifetime grid counter that tracks the
+# meter even when the daily register does not, so this is deliberately not family-gated
+# the way `needs_derived_daily_yield` is for yield: the daily grid registers are
+# firmware-dependent on SG and SH alike.
+DERIVED_DAILY_COUNTER_PAIRS: tuple[tuple[str, str], ...] = (
+    ("total_imported_energy", "daily_imported_energy"),
+    ("total_exported_energy", "daily_exported_energy"),
+)
+
+
+@dataclass
+class DerivedDailyEnergyState:
+    """Per-lifetime-counter baselines for locally derived daily grid energy (#471).
+
+    One :class:`DailyYieldBaseline` per lifetime code, because each counter
+    (import / export) crosses midnight independently.
+    """
+
+    baselines: dict[str, DailyYieldBaseline] = field(default_factory=dict)
+
+    def to_store(self) -> dict[str, Any]:
+        """Serialize for HA Store (keyed by the lifetime code)."""
+        return {code: baseline.to_store() for code, baseline in self.baselines.items()}
+
+    @classmethod
+    def from_store(cls, data: dict[str, Any] | None) -> DerivedDailyEnergyState:
+        """Restore from HA Store (tolerant of missing/partial payloads)."""
+        if not data:
+            return cls()
+        baselines = {
+            str(code): DailyYieldBaseline.from_store(raw) for code, raw in data.items() if isinstance(raw, dict)
+        }
+        return cls(baselines=baselines)
+
+
+def apply_derived_daily_grid_energy(
+    data: dict[str, Any],
+    *,
+    local_date: date,
+    state: DerivedDailyEnergyState,
+) -> tuple[dict[str, Any], DerivedDailyEnergyState, dict[str, float]]:
+    """Fill unreliable daily grid import/export from the lifetime counters (#471).
+
+    ``daily_imported_energy`` / ``daily_exported_energy`` are firmware-dependent: some
+    SH firmware answers a flat 0 instead of counting the day (#401), and the points are
+    dropped entirely when no external meter is fitted (#387). The lifetime counters are
+    reliable, so "today" is ``total − total at the start of the local day`` — the same
+    derivation ``daily_yield`` uses for wire 5002.
+
+    Only a *missing or zero* daily register is filled in. The baseline advances on every
+    sample so the next midnight is anchored correctly, but a device-side register that is
+    reporting real import/export still wins — shadowing a working counter with our own
+    arithmetic would trade one unreliable number for another.
+
+    A counter whose lifetime total is absent is skipped, so a meterless plant stays
+    silent rather than publishing a fabricated ``0`` (the #387 contract).
+
+    Returns ``(data, new_state, derived)``; ``derived`` maps each daily code to the value
+    published for it (empty when nothing was derived).
+    """
+    baselines = dict(state.baselines)
+    derived: dict[str, float] = {}
+    for total_code, daily_code in DERIVED_DAILY_COUNTER_PAIRS:
+        total_point = data.get(total_code)
+        if not isinstance(total_point, dict):
+            continue
+        total = _as_float(total_point.get("value"))
+        if total is None:
+            continue
+
+        daily, baselines[total_code] = step_daily_yield(
+            total, local_date, baselines.get(total_code) or DailyYieldBaseline()
+        )
+
+        raw_point = data.get(daily_code)
+        raw = _as_float(raw_point.get("value")) if isinstance(raw_point, dict) else None
+        if raw is not None and raw > 0:
+            continue
+
+        unit = total_point.get("unit") or "kWh"
+        data = {
+            **data,
+            daily_code: {
+                "code": daily_code,
+                "value": daily,
+                "unit": unit,
+                # Distinct from the raw broken/absent register so provenance stays honest.
+                "source": "modbus_derived",
+            },
+        }
+        derived[daily_code] = daily
+    return data, DerivedDailyEnergyState(baselines=baselines), derived

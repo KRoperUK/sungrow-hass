@@ -374,10 +374,17 @@ itself. With no meter wired or commissioned, the inverter answers those register
 
 Rather than publish a permanent and entirely plausible `0 kWh` of import/export into the
 Energy dashboard, the integration omits those points when it detects no meter, so the
-entities read `unknown` instead. Detection uses meter **voltage**: a wired meter always
-reports a live grid voltage even at zero power flow. Only zero values are dropped, so if
-your firmware doesn't expose meter voltage but does count import/export, those counters
-are kept.
+entities read `unknown` — or are never created, if they never had a value. Detection uses
+meter **voltage**: a wired meter always reports a live grid voltage even at zero power
+flow. Only zero values are dropped, so if your firmware doesn't expose meter voltage but
+does count import/export, those counters are kept.
+
+If your meter **is** fitted and the lifetime `total_imported_energy` /
+`total_exported_energy` counters work but `daily_imported_energy` /
+`daily_exported_energy` is stuck at `0` or missing, the integration derives the daily
+figures from the lifetime ones (`total − start-of-day`), so the daily entities are usable
+for cost templates. Those carry `source: modbus_derived` as an attribute; the derivation
+only fills in a missing or zero register and never shadows one that is counting.
 
 Check `modbus_diagnostics.meter_present` in the local entry's diagnostics download:
 
