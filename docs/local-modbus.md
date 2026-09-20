@@ -192,6 +192,14 @@ On the day the derivation starts it is seeded from the device’s own daily figu
 0. A flat-0 register carries no such information, so that day reads 0 until the next local
 midnight.
 
+A lifetime counter that jumps by more than the connection could physically carry (measured
+over the time since the previous poll) is treated as a glitch and held back for that poll:
+the entity keeps showing the register's own reading rather than a spike, the baseline does
+not move, and a warning names the counter. That covers a smart meter that has been
+disconnected or has failed, where the inverter keeps answering with garbage. The check
+fails open whenever it has no reference — first poll after a restart, or a long gap
+between polls — so a real catch-up is never rejected.
+
 Both the lifetime counters and the daily registers come from the **external grid meter**
 (CT clamp / DTSU666). With no meter fitted there is nothing to derive from: the points are
 omitted and the entities are absent, so use a **cloud** entry for grid figures

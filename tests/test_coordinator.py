@@ -1245,6 +1245,77 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
     coordinator._grid_daily_store.async_save.assert_awaited()
 
 
+async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashboard(hass: HomeAssistant):
+    """A lifetime counter that jumps impossibly is ignored, and the warning is not repeated.
+
+    A disconnected smart meter makes the inverter answer these registers with garbage
+    (mkaiser#692). Without this the derived daily figure would spike into the Energy
+    dashboard, and a persistently broken meter would warn on every poll.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.daily_yield import DailyYieldBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-GRID4", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_imported_energy": {
+                "code": "total_imported_energy",
+                # Sentinel-ish garbage, as a disconnected meter produces.
+                "value": 4_294_967.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            "daily_imported_energy": {
+                "code": "daily_imported_energy",
+                "value": 1.5,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DailyYieldBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._grid_daily_baseline_loaded = True
+    coordinator._grid_daily_state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DailyYieldBaseline(
+                baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
+            )
+        }
+    )
+    coordinator._grid_daily_store = MagicMock()
+    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+    # Stand in for a previous successful poll: without an elapsed time the guard fails
+    # open by design (a restart must never reject a real catch-up).
+    coordinator._last_successful_update = hass.loop.time() - 30
+
+    with (
+        patch("custom_components.sungrow.coordinator.dt_util") as mock_dt,
+        patch("custom_components.sungrow.coordinator._LOGGER") as mock_log,
+    ):
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        first = await coordinator._async_modbus_only_update()
+        second = await coordinator._async_modbus_only_update()
+
+    # The register's own (sane) figure stands in; no derived spike, no baseline movement.
+    assert first["daily_imported_energy"]["value"] == 1.5
+    assert first["daily_imported_energy"]["source"] == "modbus"
+    assert coordinator._grid_daily_state.baselines["total_imported_energy"].last_total == 6470.0
+    coordinator._grid_daily_store.async_save.assert_not_awaited()
+    assert mock_log.warning.call_count == 1
+    # A second poll through the same glitch must not warn again.
+    assert second["daily_imported_energy"]["value"] == 1.5
+    assert mock_log.warning.call_count == 1
+
+
 async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass: HomeAssistant):
     """The grid Store is written only when a baseline changes, not on every poll.
 

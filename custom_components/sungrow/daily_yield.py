@@ -168,6 +168,29 @@ def apply_derived_daily_yield(
     return data, new_state, daily
 
 
+# Ceiling used to spot a lifetime counter that has gone to garbage rather than counted.
+# Deliberately far above any domestic service (~145 A three-phase): its only job is to
+# reject an impossible jump, not to model the site's supply. A disconnected smart meter
+# is the known cause — the inverter keeps answering these registers with sentinel-adjacent
+# values (mkaiser#692), and an upward jump has no other guard: the baseline logic below
+# only re-anchors on a *decrease*.
+MAX_GRID_POWER_W = 100_000
+
+
+def implausible_counter_jump(previous: float | None, current: float, elapsed_seconds: float | None) -> bool:
+    """Return whether a lifetime counter moved further than the wiring could carry.
+
+    Compares the step against ``MAX_GRID_POWER_W`` over the time since the previous
+    sample, so it fails open in every direction that matters: no previous sample (first
+    poll), no elapsed time (restart), or a long gap between polls (HA was down, a poll
+    backed off) all raise or remove the allowance rather than rejecting real catch-up.
+    """
+    if previous is None or elapsed_seconds is None or elapsed_seconds <= 0:
+        return False
+    allowed_kwh = MAX_GRID_POWER_W * elapsed_seconds / 3_600_000
+    return (current - previous) > allowed_kwh
+
+
 # Lifetime counter -> daily counter pairs derived locally (#471). Keyed by the local
 # Modbus register codes, which are the point ids `resolve_classification` sees there.
 # Both families the integration maps expose a lifetime grid counter that tracks the
@@ -210,6 +233,7 @@ def apply_derived_daily_grid_energy(
     *,
     local_date: date,
     state: DerivedDailyEnergyState,
+    untrusted: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], DerivedDailyEnergyState, dict[str, float]]:
     """Fill unreliable daily grid import/export from the lifetime counters (#471).
 
@@ -231,12 +255,20 @@ def apply_derived_daily_grid_energy(
     A counter whose lifetime total is absent is skipped, so a meterless plant stays
     silent rather than publishing a fabricated ``0`` (the #387 contract).
 
+    ``untrusted`` names lifetime codes whose latest sample the caller has already rejected
+    (see :func:`implausible_counter_jump`). Those are left alone entirely — no derived
+    value, no baseline movement — so a counter that returns to sane values later resumes
+    the day where it left off, and the entity reads what the device itself reports in the
+    meantime rather than a spike.
+
     Returns ``(data, new_state, derived)``; ``derived`` maps each daily code to the value
     published for it (empty when nothing was derived).
     """
     baselines = dict(state.baselines)
     derived: dict[str, float] = {}
     for total_code, daily_code in DERIVED_DAILY_COUNTER_PAIRS:
+        if total_code in untrusted:
+            continue
         total_point = data.get(total_code)
         if not isinstance(total_point, dict):
             continue

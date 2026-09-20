@@ -2,11 +2,14 @@
 
 from datetime import date
 
+import pytest
+
 from custom_components.sungrow.daily_yield import (
     DailyYieldBaseline,
     DerivedDailyEnergyState,
     apply_derived_daily_grid_energy,
     apply_derived_daily_yield,
+    implausible_counter_jump,
     step_daily_yield,
 )
 
@@ -327,6 +330,57 @@ def test_grid_daily_counters_track_independent_baselines():
     # Export had no seeded baseline, so today starts at the current lifetime total.
     assert out["daily_exported_energy"]["value"] == 0.0
     assert set(state.baselines) == {"total_imported_energy", "total_exported_energy"}
+
+
+def test_implausible_jump_rejects_a_counter_that_went_to_garbage():
+    """A step no grid connection could supply is rejected (mkaiser#692 class)."""
+    # 0.5 kWh in 30 s is 60 kW — busy, but physically possible.
+    assert implausible_counter_jump(100.0, 100.5, 30.0) is False
+    # The sentinel-ish garbage a disconnected meter produces is not.
+    assert implausible_counter_jump(100.0, 4_294_967.0, 30.0) is True
+
+
+def test_implausible_jump_allows_a_real_catch_up_after_a_gap():
+    """A long gap raises the allowance, so a genuine catch-up is never rejected."""
+    # HA was down for two days; a plant can legitimately have imported a few hundred kWh.
+    assert implausible_counter_jump(100.0, 400.0, 2 * 24 * 3600) is False
+
+
+@pytest.mark.parametrize(("previous", "elapsed"), [(None, 30.0), (100.0, None), (100.0, 0.0)])
+def test_implausible_jump_fails_open_without_a_reference(previous, elapsed):
+    """No previous sample, no elapsed time or a non-positive one → nothing is rejected."""
+    assert implausible_counter_jump(previous, 999_999.0, elapsed) is False
+
+
+def test_grid_daily_holds_an_untrusted_counter_without_moving_its_baseline():
+    """An untrusted counter is skipped entirely: no derived value, no baseline movement.
+
+    Leaving the baseline alone is what lets the day resume intact once the meter reads
+    sanely again; publishing the device's own figure meanwhile avoids a dashboard spike.
+    """
+    data = {"total_imported_energy": _point(4_294_967.0), "daily_imported_energy": _point(1.5)}
+
+    out, state, derived = apply_derived_daily_grid_energy(
+        data, local_date=_DAY, state=_seeded(), untrusted=frozenset({"total_imported_energy"})
+    )
+
+    assert derived == {}
+    assert state.baselines["total_imported_energy"].last_total == 6462.0
+    # The register's own reading is untouched rather than replaced.
+    assert out["daily_imported_energy"] == _point(1.5)
+
+
+def test_grid_daily_untrusted_counter_leaves_the_code_absent_when_there_is_no_register():
+    """No register to fall back on → the entity reads unknown rather than a spike."""
+    out, _, derived = apply_derived_daily_grid_energy(
+        {"total_imported_energy": _point(4_294_967.0)},
+        local_date=_DAY,
+        state=_seeded(),
+        untrusted=frozenset({"total_imported_energy"}),
+    )
+
+    assert derived == {}
+    assert "daily_imported_energy" not in out
 
 
 def test_grid_daily_state_store_roundtrip():
