@@ -251,23 +251,29 @@ def apply_derived_daily_grid_energy(
         # First sample ever: prefer the device's own daily figure as the start-of-day
         # estimate, so the takeover doesn't report 0 for the rest of the day. Only a
         # plausible reading is trusted (a flat 0 or a value above the lifetime counter
-        # tells us nothing), and it is never used once we have history to anchor on.
-        first_anchor = total - raw if baseline is None and raw is not None and 0 < raw <= total else None
+        # tells us nothing), and it is never used once we have history to anchor on. A
+        # stored entry with no date carries no history either — treat it the same as none.
+        no_history = baseline is None or baseline.baseline_date is None
+        first_anchor = total - raw if no_history and raw is not None and 0 < raw <= total else None
 
         daily, baselines[total_code] = step_daily_yield(
             total, local_date, baseline or DailyYieldBaseline(), first_anchor
         )
 
         unit = total_point.get("unit") or "kWh"
-        data = {
-            **data,
-            daily_code: {
-                "code": daily_code,
-                "value": daily,
-                "unit": unit,
-                # Distinct from the raw register so provenance stays honest.
-                "source": "modbus_derived",
-            },
+        point: dict[str, Any] = {
+            "code": daily_code,
+            "value": daily,
+            "unit": unit,
+            # Distinct from the raw register so provenance stays honest.
+            "source": "modbus_derived",
         }
+        # Keep the device's own reading alongside ours. It is the other half of the
+        # comparison a support thread always ends up asking for ("what does the register
+        # say?"), and a flat 0 next to a real derived figure is the fastest way to see
+        # that the register is the broken side (#401/#471).
+        if raw is not None:
+            point["raw_register_value"] = raw
+        data = {**data, daily_code: point}
         derived[daily_code] = daily
     return data, DerivedDailyEnergyState(baselines=baselines), derived
