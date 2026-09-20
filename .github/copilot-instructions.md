@@ -39,7 +39,7 @@ retired in #348.
   wizard and the `cloud_user` (#268) login. `zeroconf.py` only refreshes the host of a
   **discovery-managed** entry, never a user-set one (#402/#414).
 - `sensor.py` — `SungrowSensor` (plant) + `SungrowDeviceSensor` (per-device) +
-  `SungrowPlantDetailSensor`; `infer_device_class()` maps units → device/state class.
+  `SungrowPlantDetailSensor`; classification comes from `measure_points`.
 - `binary_sensor.py` — per-device Fault (PROBLEM, exposes an `operating_status` reason)
   and Connectivity binary sensors.
 - `number.py` / `select.py` / `schedule.py` — dispatch controls (charge/discharge, SOC
