@@ -18,55 +18,12 @@ from custom_components.sungrow.sensor import (
     SungrowPlantDetailSensor,
     SungrowSensor,
     async_setup_entry,
-    infer_device_class,
 )
 
 from .conftest import MOCK_CONFIG_DATA
 
-# ---------------------------------------------------------------------------
-# infer_device_class
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("unit", "code", "device_class", "state_class"),
-    [
-        ("kW", "power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
-        ("W", "power", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
-        ("kWh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
-        ("Wh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
-        ("MWh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
-        ("V", "voltage", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT),
-        ("A", "current", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT),
-        ("Hz", "freq", SensorDeviceClass.FREQUENCY, SensorStateClass.MEASUREMENT),
-        ("°C", "temp", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT),
-        ("kvar", "reactive", SensorDeviceClass.REACTIVE_POWER, SensorStateClass.MEASUREMENT),
-        # Case-insensitive matching.
-        ("kwh", "energy", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
-        # Battery percentage disambiguated by the code name.
-        ("%", "battery_soc", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT),
-        # Generic percentage gets a state class but no device class.
-        ("%", "efficiency", None, SensorStateClass.MEASUREMENT),
-        # Dimensionless integer tallies graph as a measurement, not text.
-        ("", "afci_fault_count", None, SensorStateClass.MEASUREMENT),
-        # Unknown / empty units.
-        ("", "status", None, None),
-        (None, "status", None, None),
-        ("widgets", "x", None, None),
-    ],
-)
-def test_infer_device_class(unit, code, device_class, state_class):
-    """Units map to the expected device and state classes (issue #19)."""
-    assert infer_device_class(unit, code) == (device_class, state_class)
-
-
-def test_infer_device_class_power_factor_no_unit():
-    """A dimensionless power-factor code classifies via the code (issue #105)."""
-    assert infer_device_class("", "meter_power_factor", "0") == (
-        SensorDeviceClass.POWER_FACTOR,
-        SensorStateClass.MEASUREMENT,
-    )
-
+# Unit -> device/state class mapping is covered in ``test_measure_points`` against
+# ``resolve_classification`` itself, which is what every sensor path calls.
 
 # ---------------------------------------------------------------------------
 # Energy-dashboard classification for cumulative vs. resetting points (#431)

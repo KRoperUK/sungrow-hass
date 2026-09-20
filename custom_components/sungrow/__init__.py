@@ -763,6 +763,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     return unloaded
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> None:
+    """Delete the state this entry persisted outside the config entry itself.
+
+    The local-Modbus derivation baselines live in two ``Store`` files, and Home Assistant
+    does not remove a ``Store`` along with the config entry that owns it — so deleting a
+    local entry would leave both files orphaned in ``.storage``.
+
+    Runs on *removal* only. It must never move to ``async_unload_entry``: unload happens on
+    every reload (options change, HA restart) and dropping the baselines there would restart
+    the day's derived figures from 0 (#471).
+    """
+    runtime = getattr(entry, "runtime_data", None)
+    for coordinator in getattr(runtime, "coordinators", None) or []:
+        await coordinator.async_remove_derived_daily_stores()
+
+
 def _known_device_ids(entry: SungrowConfigEntry) -> set[tuple[str, str]]:
     """Return the device-registry identifiers currently reported by the API.
 

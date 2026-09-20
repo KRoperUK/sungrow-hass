@@ -5,8 +5,48 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
+from pysolarcloud.control import Control
 
-from custom_components.sungrow.modbus_control import ModbusControl, ModbusControlError
+from custom_components.sungrow.modbus_control import (
+    CLOUD_ONLY_DISPATCH_NUMBERS,
+    ModbusControl,
+    ModbusControlError,
+)
+from custom_components.sungrow.modbus_registers import HOLDING_CONTROL_MAPS
+from custom_components.sungrow.number import DISPATCH_NUMBERS
+
+# ---------------------------------------------------------------------------
+# Local-vs-cloud control parity (#436)
+# ---------------------------------------------------------------------------
+
+
+def test_declared_cloud_only_gaps_cover_every_local_family():
+    """A new register-map family must state which Numbers it cannot write locally."""
+    assert set(CLOUD_ONLY_DISPATCH_NUMBERS) == set(HOLDING_CONTROL_MAPS)
+
+
+def test_every_dispatch_number_is_mapped_locally_or_declared_cloud_only():
+    """A cloud Number with no local write path must be declared, not silently absent (#436).
+
+    This is the guard the issue asked for: adding a parameter to ``DISPATCH_NUMBERS``
+    without a local holding map fails here until it is either mapped or listed as a known
+    gap, so a control can no longer be added cloud-only by accident.
+    """
+    for family, points in HOLDING_CONTROL_MAPS.items():
+        local = {point.param for point in points}
+        gap = set(DISPATCH_NUMBERS) - local
+        assert gap == set(CLOUD_ONLY_DISPATCH_NUMBERS[family]), (
+            f"{family}: undeclared cloud-only dispatch numbers {sorted(gap - set(CLOUD_ONLY_DISPATCH_NUMBERS[family]))}, "
+            f"stale declarations {sorted(set(CLOUD_ONLY_DISPATCH_NUMBERS[family]) - gap)}"
+        )
+
+
+def test_local_control_params_exist_in_the_cloud_parameter_specs():
+    """Every locally-writable param is a real cloud parameter, so names can't drift (#436)."""
+    specs = set(Control.PARAMETER_SPECS)
+    for family, points in HOLDING_CONTROL_MAPS.items():
+        unknown = {point.param for point in points} - specs
+        assert not unknown, f"{family} maps unknown control params: {sorted(unknown)}"
 
 
 def _client(*, family: str = "sg_rs") -> MagicMock:
