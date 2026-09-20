@@ -224,6 +224,16 @@ string inverters — use a **cloud** entry for hybrid/battery control
 
 ## Current limitations
 
-- **SG-RS / SG-RT** holding control is limited to active-power limiting for now.
-- Hybrid EMS / battery dispatch over Modbus is not implemented yet.
-- Local and cloud **do not share** entities; configure Energy/dashboards explicitly.
+Local holding control is family-gated, and which params are writable differs by family:
+
+- **SH-RS / SH-RT** hybrids can write the battery dispatch set — charge/discharge power,
+  SOC limits, forced-charge, EMS mode — plus the active-power and export limits. Not yet
+  mapped: the export-limit **ratio**, the forced-charging target SOCs, and reactive power
+  (`q_t` / `pf`).
+- **SG-RS / SG-RT** string inverters have no battery, so only the active-power and
+  limited-power switches are writable; every battery parameter is cloud-only.
+- The exact per-family gap is declared in `CLOUD_ONLY_DISPATCH_NUMBERS`
+  (`modbus_control.py`) and asserted against the dispatch Numbers in CI, so a control
+  added to the cloud surface can't silently do nothing on a local entry.
+
+Local and cloud **do not share** entities; configure Energy/dashboards explicitly.
