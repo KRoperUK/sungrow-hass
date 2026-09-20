@@ -14,8 +14,9 @@ fresher data or raise it to stay within the API's rate limits.
 
 !!! tip "Rate limits"
     iSolarCloud enforces hourly and monthly call quotas. If the quota is exceeded (E998/E999), the
-    integration **automatically backs off** — doubling the effective interval up to a 1-hour cap —
-    and raises a Home Assistant **Repair** (Settings → System → Repairs). To fix the root cause,
+    integration **automatically backs off** — using the delay iSolarCloud suggests when it gives
+    one, otherwise doubling the effective interval, up to a 1-hour cap — and raises a Home
+    Assistant **Repair** (Settings → System → Repairs). To fix the root cause,
     **increase the polling interval** so fewer calls are made; the integration returns to your
     configured interval once the quota recovers.
 
