@@ -117,8 +117,9 @@ when iSolarCloud rejects requests for a reason you can act on:
   itself.
 - **"iSolarCloud API rate limit reached" (E998/E999).** You've exceeded the
   hourly/monthly call quota (the free plan allows ~2000 calls/hour). The
-  integration **automatically backs off** — doubling the effective polling
-  interval up to a 1-hour cap — so it stops hammering the API, but to fix the
+  integration **automatically backs off** — waiting the delay the API suggests
+  when it gives one, otherwise doubling the effective polling interval, up to a
+  1-hour cap — so it stops hammering the API, but to fix the
   root cause, **raise the polling interval** (Configure → Polling interval) and,
   if you have per-device sensors enabled, consider turning them off (each device
   type adds a call per poll). The Repair clears once the quota resets.
