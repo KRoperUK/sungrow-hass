@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import SungrowData
 from custom_components.sungrow.const import DOMAIN
+from custom_components.sungrow.pack_health import add_pack_health_points
 from custom_components.sungrow.sensor import (
     PLANT_DETAIL_SENSORS,
     SungrowDeviceSensor,
@@ -1020,6 +1021,59 @@ async def test_battery_device_sensor_categories(hass: HomeAssistant):
     assert by_code["battery_temperature"].device_class == SensorDeviceClass.TEMPERATURE
     assert by_code["battery_level"].entity_category is None  # SOC is a primary sensor
     assert by_code["battery_level"].device_class == SensorDeviceClass.BATTERY
+
+
+async def test_derived_pack_health_sensors_are_diagnostic(hass: HomeAssistant):
+    """The derived spreads become diagnostic sensors on the battery device (#430).
+
+    End to end from the raw extremes: ``add_pack_health_points`` is what the coordinator
+    runs over each device payload, so feeding its output to the entity builder is the
+    same path a real battery takes.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"total_active_power": {"value": "5.0", "unit": "kW"}})
+    coordinator.enable_device_sensors = True
+    coordinator.devices = [{"uuid": "bat-1", "device_name": "Battery1", "device_type": DeviceType.BATTERY}]
+    extremes = {
+        "battery_max_cell_voltage": {"id": "58610", "code": "battery_max_cell_voltage", "value": 3345, "unit": "mV"},
+        "battery_min_cell_voltage": {"id": "58612", "code": "battery_min_cell_voltage", "value": 3320, "unit": "mV"},
+        "battery_max_module_temperature": {
+            "id": "58614",
+            "code": "battery_max_module_temperature",
+            "value": 28.5,
+            "unit": "°C",
+        },
+        "battery_min_module_temperature": {
+            "id": "58616",
+            "code": "battery_min_module_temperature",
+            "value": 24.0,
+            "unit": "°C",
+        },
+    }
+    coordinator.device_data = {"bat-1": add_pack_health_points(extremes)}
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator], control=MagicMock(), devices={"12345": coordinator.devices}
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    by_code = {e.point_code: e for e in added if isinstance(e, SungrowDeviceSensor)}
+    imbalance = by_code["cell_imbalance"]
+    assert imbalance.entity_category == EntityCategory.DIAGNOSTIC
+    assert imbalance.device_class == SensorDeviceClass.VOLTAGE
+    assert imbalance.native_unit_of_measurement == "mV"
+    assert imbalance.native_value == 25
+
+    spread = by_code["module_temperature_spread"]
+    assert spread.entity_category == EntityCategory.DIAGNOSTIC
+    assert spread.device_class == SensorDeviceClass.TEMPERATURE
+    assert spread.native_value == 4.5
+
+    # The name comes from the code, so it reads properly in the UI without a catalog row.
+    assert imbalance.name == "Cell Imbalance"
 
 
 async def test_device_sensors_not_created_when_disabled(hass: HomeAssistant):

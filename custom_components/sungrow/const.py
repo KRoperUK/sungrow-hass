@@ -262,6 +262,10 @@ BATTERY_DIAGNOSTIC_CODES = frozenset(
         "battery_min_module_temperature",
         "battery_dc_contactor_status",
         "battery_fault_module_id",
+        # Derived spreads between the two above (#430) — the trend that actually
+        # flags a weak cell or a thermal problem, so they belong with the health set.
+        "cell_imbalance",
+        "module_temperature_spread",
     }
 )
 
