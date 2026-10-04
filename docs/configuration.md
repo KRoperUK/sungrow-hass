@@ -56,10 +56,44 @@ is how windows behaved before day selection existed. Clearing every day is refus
 that can never run is a misconfiguration, not a disabled slot (clear the start and end times
 to disable a slot instead).
 
-Windows are fixed **local** times; sunrise/sunset-relative offsets are not supported yet.
-A window whose end is earlier than its start wraps past midnight and belongs to the day it
-*starts* on, so a Monday-only `23:30 → 06:00` also covers Tuesday morning up to 06:00, and
-then stays off until the following Monday.
+A start or end is either a fixed **local** time (`HH:MM`) or **sun-relative**: `sunrise` or
+`sunset`, optionally with an offset of up to ±12 hours — `sunset-00:30`, `sunrise+01:00`.
+The two kinds can be mixed in one window (`22:00 → sunrise`).
+
+A fixed-time window whose end is earlier than its start wraps past midnight and belongs to
+the day it *starts* on, so a Monday-only `23:30 → 06:00` also covers Tuesday morning up to
+06:00, and then stays off until the following Monday.
+
+#### Sunrise / sunset-relative windows
+
+Sun times are calculated for the location and time zone set in Home Assistant
+(*Settings → System → General*), for each calendar day, using the same astral library Home
+Assistant's own sun features use. They follow the season automatically — a
+`sunset-00:30 → sunset+03:00` discharge tracks the evening peak all year. How the edge cases
+behave:
+
+- **Offsets are elapsed time.** `sunset+03:00` is three real hours after sunset, even if the
+  clocks change in between.
+- **A boundary belongs to its sun event's day.** `sunset+03:00` may fall after midnight (in a
+  UK summer it is around 00:20); it still belongs to the day of that sunset, so a Sunday-only
+  `sunset-00:30 → sunset+03:00` runs from Sunday evening into the small hours of Monday.
+- **Overnight or not is decided by the window, not the season.** To tell whether the end
+  belongs to the next day, sunrise counts as 06:00 and sunset as 18:00 (plus any offset):
+  `22:00 → sunrise` and `sunset → sunrise` are overnight windows; `sunrise → sunset` and
+  `sunset → 23:00` are not.
+- **Days where the times don't fit are skipped, with a warning in the log.** If on a given
+  day the end resolves to at or before the start — `sunset → 21:00` in a UK midsummer, when
+  sunset is about 21:20 — the window does not run that day, rather than stretching to almost
+  24 hours.
+- **No sunrise or sunset, no window.** Inside the polar circles, on days the sun never rises
+  or never sets, a window with that boundary does not run that day (logged once per day).
+  There is no fixed-time fallback.
+- **Rejected when saving:** offsets beyond ±12 hours, unknown words, and windows anchored to
+  the same event whose end offset is not after the start offset (`sunset+01:00 → sunset`).
+- **Restarts are safe.** On start-up the active window is worked out from that day's resolved
+  times and its mode applied once; boundaries already passed are not replayed.
+- Overlaps follow the same rule as fixed windows: the window that starts latest (by clock
+  time) wins.
 
 Outside every window the battery returns to Self-consumption, so a schedule never leaves the
 inverter stuck in a forced mode.
