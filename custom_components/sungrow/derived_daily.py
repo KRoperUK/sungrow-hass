@@ -1,7 +1,7 @@
 """Derive calendar-day energy from a lifetime counter.
 
 Shared by every local-Modbus daily register that cannot be trusted to mean "today".
-Two families of registers qualify, and both use the same subtraction and baseline:
+Three families of registers qualify, and all use the same subtraction and baseline:
 
 * **Daily yield** (#223 / Modbus SG-RS): on several SG-RS + WiNet-S firmwares the
   documented "Daily power yields" register (wire 5002) never resets at midnight — it
@@ -10,8 +10,11 @@ Two families of registers qualify, and both use the same subtraction and baselin
   firmware-dependent — some SH firmware answers a flat 0 (#401) — and the points are
   omitted entirely when no external grid meter is fitted (#387). The lifetime
   ``total_imported_energy`` / ``total_exported_energy`` counters are reliable.
+* **Daily battery charge/discharge** (#486): some SH firmware never resets the daily
+  battery registers at midnight (#431). The lifetime ``total_battery_charge`` /
+  ``total_battery_discharge`` counters are monotonic.
 
-Both use the same subtraction:
+All use the same subtraction:
 
     daily = total − total_at_start_of_local_day
 
@@ -167,47 +170,104 @@ def apply_derived_daily_yield(
     return data, new_state, daily
 
 
-# Ceiling used to spot a lifetime counter that has gone to garbage rather than counted.
-# Deliberately far above any domestic service (~145 A three-phase): its only job is to
-# reject an impossible jump, not to model the site's supply. A disconnected smart meter
-# is the known cause — the inverter keeps answering these registers with sentinel-adjacent
-# values (mkaiser#692), and an upward jump has no other guard: the baseline logic below
-# only re-anchors on a *decrease*.
+# Ceilings used to spot a lifetime counter that has gone to garbage rather than counted.
+# Deliberately far above anything real: their only job is to reject an impossible jump,
+# not to model the site. An upward jump has no other guard — the baseline logic below only
+# re-anchors on a *decrease*.
+#
+# Grid: far above any domestic service (~145 A three-phase). A disconnected smart meter is
+# the known cause — the inverter keeps answering these registers with sentinel-adjacent
+# values (mkaiser#692).
 MAX_GRID_POWER_W = 100_000
+# Battery: twice the largest battery charge/discharge rating in ``model_specs`` (SH25T,
+# 25 kW), so no model the local register maps cover can legitimately move its battery
+# counters faster.
+MAX_BATTERY_POWER_W = 50_000
 
 
-def implausible_counter_jump(previous: float | None, current: float, elapsed_seconds: float | None) -> bool:
-    """Return whether a lifetime counter moved further than the wiring could carry.
+def implausible_counter_jump(
+    previous: float | None,
+    current: float,
+    elapsed_seconds: float | None,
+    *,
+    max_power_w: float = MAX_GRID_POWER_W,
+) -> bool:
+    """Return whether a lifetime counter moved further than ``max_power_w`` could carry.
 
-    Compares the step against ``MAX_GRID_POWER_W`` over the time since the previous
-    sample, so it fails open in every direction that matters: no previous sample (first
-    poll), no elapsed time (restart), or a long gap between polls (HA was down, a poll
-    backed off) all raise or remove the allowance rather than rejecting real catch-up.
+    Compares the step against ``max_power_w`` over the time since the previous sample, so
+    it fails open in every direction that matters: no previous sample (first poll), no
+    elapsed time (restart), or a long gap between polls (HA was down, a poll backed off)
+    all raise or remove the allowance rather than rejecting real catch-up.
     """
     if previous is None or elapsed_seconds is None or elapsed_seconds <= 0:
         return False
-    allowed_kwh = MAX_GRID_POWER_W * elapsed_seconds / 3_600_000
+    allowed_kwh = max_power_w * elapsed_seconds / 3_600_000
     return (current - previous) > allowed_kwh
 
 
-# Lifetime counter -> daily counter pairs derived locally (#471). Keyed by the local
-# Modbus register codes, which are the point ids `resolve_classification` sees there.
-# Both families the integration maps expose a lifetime grid counter that tracks the
-# meter even when the daily register does not, so this is deliberately not family-gated
-# the way `needs_derived_daily_yield` is for yield: the daily grid registers are
-# firmware-dependent on SG and SH alike.
-DERIVED_DAILY_COUNTER_PAIRS: tuple[tuple[str, str], ...] = (
-    ("total_imported_energy", "daily_imported_energy"),
-    ("total_exported_energy", "daily_exported_energy"),
+@dataclass(frozen=True)
+class DerivedDailyCounter:
+    """One lifetime counter -> daily counter derivation, with its glitch-guard limits."""
+
+    total_code: str
+    daily_code: str
+    # Physical ceiling the counter's step is judged against (see implausible_counter_jump).
+    max_power_w: float
+    # What to check when the counter is rejected as a glitch; ends the warning message.
+    glitch_hint: str
+
+
+# Lifetime counters derived locally into their daily counterpart. Keyed by the local Modbus
+# register codes, which are the point ids `resolve_classification` sees there. Deliberately
+# not family-gated the way `needs_derived_daily_yield` is for yield: a counter a family
+# doesn't expose is simply absent from the payload and skipped.
+#
+# * Grid import/export (#471): the daily registers are firmware-dependent on SG and SH
+#   alike — some SH firmware answers a flat 0 (#401) — while the lifetime counters track
+#   the meter.
+# * Battery charge/discharge (#486): some SH firmware doesn't reset the daily registers
+#   (13039 / 13025) at midnight, which is why #431 demoted them to a plain measurement —
+#   and that dropped them from the Energy dashboard. The lifetime counters (13040 / 13026)
+#   are monotonic, so deriving from them gives a daily figure that is both trustworthy and
+#   an Energy-dashboard source.
+DERIVED_DAILY_COUNTERS: tuple[DerivedDailyCounter, ...] = (
+    DerivedDailyCounter(
+        "total_imported_energy",
+        "daily_imported_energy",
+        MAX_GRID_POWER_W,
+        "no grid connection could supply. Check the smart meter wiring",
+    ),
+    DerivedDailyCounter(
+        "total_exported_energy",
+        "daily_exported_energy",
+        MAX_GRID_POWER_W,
+        "no grid connection could carry. Check the smart meter wiring",
+    ),
+    DerivedDailyCounter(
+        "total_battery_charge",
+        "daily_battery_charge",
+        MAX_BATTERY_POWER_W,
+        "no battery could absorb. Check the battery's connection to the inverter",
+    ),
+    DerivedDailyCounter(
+        "total_battery_discharge",
+        "daily_battery_discharge",
+        MAX_BATTERY_POWER_W,
+        "no battery could deliver. Check the battery's connection to the inverter",
+    ),
+)
+
+DERIVED_DAILY_COUNTER_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (counter.total_code, counter.daily_code) for counter in DERIVED_DAILY_COUNTERS
 )
 
 
 @dataclass
 class DerivedDailyEnergyState:
-    """Per-lifetime-counter baselines for locally derived daily grid energy (#471).
+    """Per-lifetime-counter baselines for locally derived daily energy (#471/#486).
 
     One :class:`DerivedDailyBaseline` per lifetime code, because each counter
-    (import / export) crosses midnight independently.
+    (grid import / export, battery charge / discharge) crosses midnight independently.
     """
 
     baselines: dict[str, DerivedDailyBaseline] = field(default_factory=dict)
@@ -227,20 +287,21 @@ class DerivedDailyEnergyState:
         return cls(baselines=baselines)
 
 
-def apply_derived_daily_grid_energy(
+def apply_derived_daily_energy(
     data: dict[str, Any],
     *,
     local_date: date,
     state: DerivedDailyEnergyState,
     untrusted: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], DerivedDailyEnergyState, dict[str, float]]:
-    """Fill unreliable daily grid import/export from the lifetime counters (#471).
+    """Derive every ``DERIVED_DAILY_COUNTERS`` daily figure from its lifetime counter.
 
-    ``daily_imported_energy`` / ``daily_exported_energy`` are firmware-dependent: some
-    SH firmware answers a flat 0 instead of counting the day (#401), and the points are
-    dropped entirely when no external meter is fitted (#387). The lifetime counters are
-    reliable, so "today" is ``total − total at the start of the local day`` — the same
-    derivation ``daily_yield`` uses for wire 5002.
+    The daily grid import/export and battery charge/discharge registers are
+    firmware-dependent: some SH firmware answers a flat 0 for daily import (#401), some
+    never resets the daily battery registers (#431/#486), and the grid points are dropped
+    entirely when no external meter is fitted (#387). The lifetime counters are reliable,
+    so "today" is ``total − total at the start of the local day`` — the same derivation
+    ``daily_yield`` uses for wire 5002.
 
     While a lifetime counter is present the derived value *replaces* the device's own
     daily register rather than only filling in a missing/zero one. That is deliberate:
@@ -302,7 +363,7 @@ def apply_derived_daily_grid_energy(
         # Keep the device's own reading alongside ours. It is the other half of the
         # comparison a support thread always ends up asking for ("what does the register
         # say?"), and a flat 0 next to a real derived figure is the fastest way to see
-        # that the register is the broken side (#401/#471).
+        # that the register is the broken side (#401/#471/#486).
         if raw is not None:
             point["raw_register_value"] = raw
         data = {**data, daily_code: point}

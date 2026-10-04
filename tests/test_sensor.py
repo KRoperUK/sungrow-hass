@@ -120,14 +120,30 @@ def test_derived_sensor_exposes_the_raw_register_reading():
     assert sensor.extra_state_attributes == {"source": "modbus_derived", "raw_register_value": 0.0}
 
 
-def test_derived_classification_is_confined_to_the_grid_daily_codes():
+def test_derived_classification_is_confined_to_the_derived_daily_codes():
     """A derived flag alone must not promote an unrelated point to TOTAL_INCREASING."""
-    point = {"code": "daily_battery_charge", "value": "3.2", "unit": "kWh", "source": "modbus_derived"}
+    point = {"code": "daily_battery_charge_from_pv", "value": "3.2", "unit": "kWh", "source": "modbus_derived"}
     coordinator = _coord_with_devices([], data={point["code"]: point})
     coordinator.plants_service = None
     sensor = SungrowSensor(coordinator, point["code"], "123", "Plant", point)
     assert sensor._attr_device_class is None
     assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+
+
+@pytest.mark.parametrize("code", ["daily_battery_charge", "daily_battery_discharge"])
+def test_derived_daily_battery_sensor_is_an_energy_dashboard_source(code):
+    """The derived daily battery entities are ENERGY / TOTAL_INCREASING (#486).
+
+    The Energy dashboard rejected the raw-register versions ("Unexpected device class",
+    "Last reset missing"); the entity built from the derived value must not be.
+    """
+    point = {"code": code, "value": "3.2", "unit": "kWh", "source": "modbus_derived", "raw_register_value": 41.7}
+    coordinator = _coord_with_devices([], data={code: point})
+    coordinator.plants_service = None
+    sensor = SungrowSensor(coordinator, code, "123", "Plant", point)
+    assert sensor._attr_device_class == SensorDeviceClass.ENERGY
+    assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+    assert sensor.native_value == 3.2
 
 
 # ---------------------------------------------------------------------------

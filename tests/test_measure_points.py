@@ -425,9 +425,11 @@ def test_cloud_daily_energy_left_as_total_increasing(point_id):
     assert mp.resolve_classification("Wh", "anything", point_id) == (SensorDeviceClass.ENERGY, TI)
 
 
-@pytest.mark.parametrize("code", ["daily_imported_energy", "daily_exported_energy"])
-def test_derived_daily_grid_energy_is_total_increasing(code):
-    """A locally derived daily grid figure IS an Energy-dashboard source (#471).
+@pytest.mark.parametrize(
+    "code", ["daily_imported_energy", "daily_exported_energy", "daily_battery_charge", "daily_battery_discharge"]
+)
+def test_derived_daily_energy_is_total_increasing(code):
+    """A locally derived daily grid/battery figure IS an Energy-dashboard source (#471/#486).
 
     The exclusion above exists because we don't know what a given firmware puts in the
     register. A value we derived from the lifetime counter has no such doubt: it is
@@ -440,7 +442,8 @@ def test_derived_daily_grid_energy_is_total_increasing(code):
 
 def test_derived_flag_does_not_promote_other_resetting_codes():
     """Only the codes we actually derive are upgraded; the rest keep the #431 treatment."""
-    assert mp.resolve_classification("kWh", "daily_battery_charge", "daily_battery_charge", derived=True) == (None, M)
+    code = "daily_battery_charge_from_pv"
+    assert mp.resolve_classification("kWh", code, code, derived=True) == (None, M)
 
 
 def test_derived_energy_codes_track_the_derivation_table():
@@ -448,6 +451,24 @@ def test_derived_energy_codes_track_the_derivation_table():
     from custom_components.sungrow.derived_daily import DERIVED_DAILY_COUNTER_PAIRS
 
     assert frozenset(daily for _, daily in DERIVED_DAILY_COUNTER_PAIRS) == mp._DERIVED_ENERGY_CODES
+
+
+@pytest.mark.parametrize(
+    ("daily", "total"),
+    [("daily_battery_charge", "total_battery_charge"), ("daily_battery_discharge", "total_battery_discharge")],
+)
+def test_derived_daily_battery_energy_is_energy_dashboard_eligible(daily, total):
+    """Both daily battery sensors resolve to ENERGY + a total state class once derived (#486).
+
+    #431 demoted the raw registers to (None, MEASUREMENT) because some firmware never
+    resets them, and the Energy dashboard rejected them ("Unexpected device class" /
+    "Last reset missing"). Deriving them from the lifetime counter restores the class the
+    dashboard requires, and the lifetime counter they derive from is itself eligible.
+    """
+    device_class, state_class = mp.resolve_classification("kWh", daily, daily, derived=True)
+    assert device_class == SensorDeviceClass.ENERGY
+    assert state_class in (SensorStateClass.TOTAL, TI)
+    assert mp.resolve_classification("kWh", total, total) == (SensorDeviceClass.ENERGY, TI)
 
 
 def test_cumulative_and_resetting_energy_sets_are_disjoint():

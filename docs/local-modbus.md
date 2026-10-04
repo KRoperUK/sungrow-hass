@@ -209,6 +209,24 @@ omitted and the entities are absent, so use a **cloud** entry for grid figures
 ([#387](https://github.com/KRoperUK/sungrow-hass/issues/387) — check
 `modbus_diagnostics.meter_present` in the entry diagnostics).
 
+## Daily battery charge/discharge (local)
+
+Some SH firmware doesn't reset the daily battery registers (`daily_battery_charge` /
+`daily_battery_discharge`, registers 13039 / 13025) at local midnight, so the raw values
+can't be trusted to mean "today" (#431). The lifetime counters (`total_battery_charge` /
+`total_battery_discharge`, registers 13040 / 13026) are monotonic, so the local entry
+**derives** the daily figures from them exactly as it does for grid import/export above
+([#486](https://github.com/KRoperUK/sungrow-hass/issues/486)): same per-counter baseline,
+same `source: modbus_derived` and `raw_register_value` attributes, same takeover seeding,
+and the same `device_class: energy`, `state_class: total_increasing` classification — so
+they can be selected as the battery's **energy going in** / **energy coming out** on the
+Energy dashboard.
+
+The glitch guard applies here too, judged against a battery ceiling (50 kW, twice the
+largest battery rating in the integration's model table) rather than the grid one. A
+family without the lifetime battery counters (the SG string inverters) simply has no
+derived battery entities.
+
 ## Local control (active power limit)
 
 On **SG string** local entries (validated on SG3.6RS), the integration can write

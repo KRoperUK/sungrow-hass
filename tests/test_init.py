@@ -176,7 +176,7 @@ async def test_remove_entry_deletes_derived_daily_stores(hass: HomeAssistant):
     """
     entry = await _setup_modbus_only(hass)
     coordinator = entry.runtime_data.coordinators[0]
-    for attr in ("_daily_yield_store", "_grid_daily_store"):
+    for attr in ("_daily_yield_store", "_energy_daily_store"):
         store = MagicMock()
         store.async_remove = AsyncMock()
         setattr(coordinator, attr, store)
@@ -184,7 +184,7 @@ async def test_remove_entry_deletes_derived_daily_stores(hass: HomeAssistant):
     await async_remove_entry(hass, entry)
 
     coordinator._daily_yield_store.async_remove.assert_awaited_once()
-    coordinator._grid_daily_store.async_remove.assert_awaited_once()
+    coordinator._energy_daily_store.async_remove.assert_awaited_once()
 
 
 async def test_unload_keeps_the_derived_daily_stores(hass: HomeAssistant):
@@ -197,7 +197,7 @@ async def test_unload_keeps_the_derived_daily_stores(hass: HomeAssistant):
     coordinator = entry.runtime_data.coordinators[0]
     store = MagicMock()
     store.async_remove = AsyncMock()
-    coordinator._grid_daily_store = store
+    coordinator._energy_daily_store = store
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -213,7 +213,7 @@ async def test_remove_entry_without_cloud_stores_is_a_noop(hass: HomeAssistant, 
     await hass.async_block_till_done()
     coordinator = entry.runtime_data.coordinators[0]
     assert coordinator._daily_yield_store is None
-    assert coordinator._grid_daily_store is None
+    assert coordinator._energy_daily_store is None
 
     await async_remove_entry(hass, entry)
 

@@ -27,7 +27,8 @@ retired in #348.
 - `coordinator.py` — `SungrowPlantCoordinator`; realtime + per-device fetch;
   `is_auth_error()`/`is_rate_limit_error()`; availability grace window, rate-limit
   back-off, Repairs (`whitelist_rejection` / `rate_limited`), and the derived daily
-  baselines (`daily_yield`, plus grid import/export, #223/#400/#471).
+  baselines (`daily_yield`, plus grid import/export and battery charge/discharge,
+  #223/#400/#471/#486).
 - `device_helpers.py` — device-registry helpers. Nest devices with **`via_device_id`**
   (the parent's registry device id; `via_device` is deprecated, #407) and use
   `build_device_info_for()`; open-coding nesting caused #383.

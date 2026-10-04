@@ -1241,16 +1241,16 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
     # Pretend we already saw 6462 earlier today.
-    coordinator._grid_daily_baseline_loaded = True
-    coordinator._grid_daily_state = DerivedDailyEnergyState(
+    coordinator._energy_daily_baseline_loaded = True
+    coordinator._energy_daily_state = DerivedDailyEnergyState(
         baselines={
             "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6462.0
             )
         }
     )
-    coordinator._grid_daily_store = MagicMock()
-    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
 
     with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
@@ -1260,7 +1260,7 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     assert data["daily_imported_energy"]["value"] == 8.0
     assert data["daily_imported_energy"]["source"] == "modbus_derived"
     assert data["total_imported_energy"]["value"] == 6470.0
-    coordinator._grid_daily_store.async_save.assert_awaited()
+    coordinator._energy_daily_store.async_save.assert_awaited()
 
 
 async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the_day(hass: HomeAssistant):
@@ -1299,10 +1299,10 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
     coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
-    coordinator._grid_daily_baseline_loaded = True
-    coordinator._grid_daily_state = DerivedDailyEnergyState()
-    coordinator._grid_daily_store = MagicMock()
-    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._energy_daily_baseline_loaded = True
+    coordinator._energy_daily_state = DerivedDailyEnergyState()
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
 
     with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
@@ -1313,7 +1313,7 @@ async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the
     assert data["daily_imported_energy"]["value"] == 12.4
     assert data["daily_imported_energy"]["source"] == "modbus_derived"
     # The baseline still advanced to the lifetime total, ready for the next midnight.
-    coordinator._grid_daily_store.async_save.assert_awaited()
+    coordinator._energy_daily_store.async_save.assert_awaited()
 
 
 async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashboard(hass: HomeAssistant):
@@ -1353,16 +1353,16 @@ async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashb
     coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
-    coordinator._grid_daily_baseline_loaded = True
-    coordinator._grid_daily_state = DerivedDailyEnergyState(
+    coordinator._energy_daily_baseline_loaded = True
+    coordinator._energy_daily_state = DerivedDailyEnergyState(
         baselines={
             "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
             )
         }
     )
-    coordinator._grid_daily_store = MagicMock()
-    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
     # Stand in for a previous successful poll: without an elapsed time the guard fails
     # open by design (a restart must never reject a real catch-up).
@@ -1379,12 +1379,151 @@ async def test_modbus_holds_a_glitched_grid_counter_instead_of_spiking_the_dashb
     # The register's own (sane) figure stands in; no derived spike, no baseline movement.
     assert first["daily_imported_energy"]["value"] == 1.5
     assert first["daily_imported_energy"]["source"] == "modbus"
-    assert coordinator._grid_daily_state.baselines["total_imported_energy"].last_total == 6470.0
-    coordinator._grid_daily_store.async_save.assert_not_awaited()
+    assert coordinator._energy_daily_state.baselines["total_imported_energy"].last_total == 6470.0
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
     assert mock_log.warning.call_count == 1
     # A second poll through the same glitch must not warn again.
     assert second["daily_imported_energy"]["value"] == 1.5
     assert mock_log.warning.call_count == 1
+
+
+async def test_modbus_derives_daily_battery_energy_from_the_lifetime_counters(hass: HomeAssistant):
+    """The daily battery registers are replaced by the lifetime-counter derivation (#486).
+
+    A non-resetting raw register (here a multi-day 87.3 kWh) no longer reaches the entity;
+    the derived figure is what the Energy dashboard consumes.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-BATT1", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_battery_charge": {
+                "code": "total_battery_charge",
+                "value": 1250.4,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            "daily_battery_charge": {"code": "daily_battery_charge", "value": 87.3, "unit": "kWh", "source": "modbus"},
+            "total_battery_discharge": {
+                "code": "total_battery_discharge",
+                "value": 1100.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            "daily_battery_discharge": {
+                "code": "daily_battery_discharge",
+                "value": 80.0,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DerivedDailyBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._energy_daily_baseline_loaded = True
+    coordinator._energy_daily_state = DerivedDailyEnergyState(
+        baselines={
+            "total_battery_charge": DerivedDailyBaseline(
+                baseline=1240.0, baseline_date=date(2026, 9, 20), last_total=1249.0
+            ),
+            "total_battery_discharge": DerivedDailyBaseline(
+                baseline=1093.5, baseline_date=date(2026, 9, 20), last_total=1099.0
+            ),
+        }
+    )
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_battery_charge"]["value"] == 10.4
+    assert data["daily_battery_charge"]["source"] == "modbus_derived"
+    assert data["daily_battery_charge"]["raw_register_value"] == 87.3
+    assert data["daily_battery_discharge"]["value"] == 6.5
+    assert data["daily_battery_discharge"]["source"] == "modbus_derived"
+    coordinator._energy_daily_store.async_save.assert_awaited()
+
+
+async def test_modbus_holds_a_battery_counter_against_the_battery_ceiling(hass: HomeAssistant):
+    """A battery counter is judged against the battery ceiling and warned with its own hint.
+
+    0.6 kWh in 30 s (72 kW) is within the grid ceiling but no battery the local maps
+    cover could absorb it, so the battery counter is held while the grid one derives.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-BATT2", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_battery_charge": {
+                "code": "total_battery_charge",
+                "value": 1250.6,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+            "daily_battery_charge": {"code": "daily_battery_charge", "value": 10.0, "unit": "kWh", "source": "modbus"},
+            "total_imported_energy": {
+                "code": "total_imported_energy",
+                "value": 6470.6,
+                "unit": "kWh",
+                "source": "modbus",
+            },
+        }
+    )
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DerivedDailyBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._energy_daily_baseline_loaded = True
+    coordinator._energy_daily_state = DerivedDailyEnergyState(
+        baselines={
+            "total_battery_charge": DerivedDailyBaseline(
+                baseline=1240.0, baseline_date=date(2026, 9, 20), last_total=1250.0
+            ),
+            "total_imported_energy": DerivedDailyBaseline(
+                baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
+            ),
+        }
+    )
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+    coordinator._last_successful_update = hass.loop.time() - 30
+
+    with (
+        patch("custom_components.sungrow.coordinator.dt_util") as mock_dt,
+        patch("custom_components.sungrow.coordinator._LOGGER") as mock_log,
+    ):
+        mock_dt.now.return_value.date.return_value = date(2026, 9, 20)
+        data = await coordinator._async_modbus_only_update()
+
+    assert data["daily_battery_charge"]["value"] == 10.0
+    assert data["daily_battery_charge"]["source"] == "modbus"
+    assert coordinator._energy_daily_state.baselines["total_battery_charge"].last_total == 1250.0
+    assert data["daily_imported_energy"]["value"] == 8.6
+    assert data["daily_imported_energy"]["source"] == "modbus_derived"
+    assert mock_log.warning.call_count == 1
+    args = mock_log.warning.call_args.args
+    assert args[1] == "total_battery_charge"
+    assert "battery" in args[5]
 
 
 async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass: HomeAssistant):
@@ -1416,17 +1555,17 @@ async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass
     coordinator._daily_yield_state = DerivedDailyBaseline()
     coordinator._daily_yield_store = MagicMock()
     coordinator._daily_yield_store.async_save = AsyncMock()
-    coordinator._grid_daily_baseline_loaded = True
+    coordinator._energy_daily_baseline_loaded = True
     # Same counter as the payload reports, so the derivation changes nothing.
-    coordinator._grid_daily_state = DerivedDailyEnergyState(
+    coordinator._energy_daily_state = DerivedDailyEnergyState(
         baselines={
             "total_imported_energy": DerivedDailyBaseline(
                 baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6470.0
             )
         }
     )
-    coordinator._grid_daily_store = MagicMock()
-    coordinator._grid_daily_store.async_save = AsyncMock()
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
     coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
 
     with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
@@ -1434,7 +1573,7 @@ async def test_modbus_does_not_rewrite_the_grid_baseline_when_nothing_moved(hass
         data = await coordinator._async_modbus_only_update()
 
     assert data["daily_imported_energy"]["value"] == 8.0
-    coordinator._grid_daily_store.async_save.assert_not_awaited()
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
