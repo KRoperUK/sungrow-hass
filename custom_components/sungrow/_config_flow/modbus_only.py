@@ -6,8 +6,8 @@ Covers direct-Modbus setup without any iSolarCloud credentials via a guided wiza
 - ``async_step_local_discovery`` — scan for WiNet-S dongles on the LAN, present a
   picker (plus an explicit "Enter IP manually" option and a "Rescan" action). The
   entry point when the user selects **Modbus Only** from the transport selector.
-- ``async_step_local_manual_ip`` — text-field IP entry with a TCP-502 reachability
-  probe. Reached when nothing was discovered or the user opted out of the picker.
+- ``async_step_local_manual_ip`` — text-field IP + port entry with a TCP reachability
+  probe (port defaults to 502; a custom port reaches a Modbus proxy, #485). Reached when nothing was discovered or the user opted out of the picker.
 - ``async_step_local_confirm_identified`` — final confirmation once we have a
   reachable host plus detected model/serial. Runs a real Modbus read as the
   create-entry gate so a comms failure surfaces here, not at the first refresh.
@@ -15,10 +15,15 @@ Covers direct-Modbus setup without any iSolarCloud credentials via a guided wiza
   for the "identify failed" branch (fields pre-filled with anything we did learn)
   and as a compatibility alias for external docs / SOURCE_IMPORT.
 - ``async_step_import`` — programmatic entry creation (legacy hybrid split).
-- ``async_step_reconfigure_modbus`` — update the WiNet-S host on an existing entry.
+- ``async_step_reconfigure_modbus`` — update the WiNet-S host/port on an existing entry.
 
 Zeroconf-driven discovery (a WiNet-S announcing itself while the user is on the HA
 Discovered card, not inside a manual flow) still lives in :mod:`.zeroconf`.
+
+Entries stay keyed on ``modbus_{serial}``, not host/port (#485): one entry per
+inverter, however it is reached. Several inverters behind one proxy on different
+ports have different serials, so each still gets its own entry; the same inverter
+reached via a second host/port updates the existing entry instead of duplicating it.
 """
 
 from __future__ import annotations
@@ -34,15 +39,19 @@ from ..const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     TRANSPORT_MODBUS_ONLY,
 )
+from ..helpers import resolve_modbus_port
 from ._base import _SungrowFlowBase
 from ._helpers import (
+    MODBUS_PORT_VALIDATOR,
     WinetDongle,
     async_discover_winet_dongles,
     async_read_modbus_identity,
@@ -60,13 +69,19 @@ _DISCOVERY_MANUAL = "manual_ip"
 _DISCOVERY_RESCAN = "rescan"
 
 
-def _pinned_host_data(host: str) -> dict[str, Any]:
-    """Entry-data fields that pin the host to a user-chosen value.
+def _pinned_host_data(host: str, port: int) -> dict[str, Any]:
+    """Entry-data fields that pin the host (and port) to a user-chosen value.
 
     Clearing ``CONF_DISCOVERY_MANAGED_HOST`` marks the host as deliberately chosen, so a
-    later WiNet-S discovery must not overwrite it with the dongle's address (#402).
+    later WiNet-S discovery must not overwrite it with the dongle's address (#402) —
+    which matters doubly behind a Modbus proxy, whose host is not the dongle's (#485).
     """
-    return {CONF_MODBUS_HOST: host, CONF_DISCOVERY_MANAGED_HOST: False}
+    return {CONF_MODBUS_HOST: host, CONF_MODBUS_PORT: port, CONF_DISCOVERY_MANAGED_HOST: False}
+
+
+def _host_label(host: str, port: int) -> str:
+    """Render ``host`` for a form description, adding the port only when non-standard."""
+    return host if port == DEFAULT_MODBUS_PORT else f"{host}:{port}"
 
 
 class ModbusOnlyMixin(_SungrowFlowBase):
@@ -99,6 +114,8 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             dongle = self._winet_dongle_by_host(choice)
             if dongle is not None:
                 self._local_wizard_host = dongle.host
+                # A dongle found on the LAN is the WiNet-S itself, so it speaks on 502.
+                self._local_wizard_port = None
                 self._local_wizard_serial = dongle.serial
                 self._local_wizard_model = dongle.model
                 return await self.async_step_local_confirm_identified()
@@ -134,29 +151,37 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         )
 
     async def async_step_local_manual_ip(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Collect a WiNet-S host manually, probe TCP:502, then hand off to identify.
+        """Collect a WiNet-S host + port manually, probe TCP, then hand off to identify.
 
         Reached from the discovery picker's ``manual_ip`` option (or automatically
         when discovery finds nothing). On a reachable host we try to read the model
         + serial via :func:`async_read_modbus_identity`; a full identify goes to the
         confirmation step, a partial or complete identify miss falls through to
         :meth:`async_step_local_setup` with whatever we did learn pre-filled.
+
+        The port defaults to 502 (WiNet-S / inverter LAN); a different one reaches a
+        Modbus proxy such as evcc's ``modbusproxy`` (#485). Both the probe and the
+        identify read use it.
         """
         errors: dict[str, str] = {}
         default_host = self._local_wizard_host or ""
+        default_port = self._local_wizard_port or DEFAULT_MODBUS_PORT
 
         if user_input is not None:
             host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
+            port = int(user_input.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT))
             default_host = host
+            default_port = port
             from ..helpers import async_test_modbus_host
 
-            if not host or not await async_test_modbus_host(host):
+            if not host or not await async_test_modbus_host(host, port):
                 errors["base"] = "host_unreachable"
             else:
                 self._local_wizard_host = host
+                self._local_wizard_port = port
                 # Attempt identity read. Partial or total failure just means the manual
                 # form takes over with what we have.
-                model, serial = await async_read_modbus_identity(host)
+                model, serial = await async_read_modbus_identity(host, port)
                 if serial:
                     self._local_wizard_serial = serial
                 if model:
@@ -170,7 +195,10 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         return self.async_show_form(
             step_id="local_manual_ip",
             data_schema=vol.Schema(
-                {vol.Required(CONF_MODBUS_HOST, default=default_host): str},
+                {
+                    vol.Required(CONF_MODBUS_HOST, default=default_host): str,
+                    vol.Optional(CONF_MODBUS_PORT, default=default_port): MODBUS_PORT_VALIDATOR,
+                },
             ),
             errors=errors,
         )
@@ -186,6 +214,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         with an error so the user can retry or pick a different host.
         """
         host = self._local_wizard_host
+        port = self._local_wizard_port or DEFAULT_MODBUS_PORT
         model = self._local_wizard_model or "Inverter"
         serial = self._local_wizard_serial
 
@@ -195,15 +224,16 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             # discovery rather than creating a partially-populated entry.
             return await self.async_step_local_discovery()
 
+        placeholders = {"host": _host_label(host, port), "model": model, "serial": serial}
         if user_input is not None:
             # Final comms probe: re-read identity, confirm the serial still matches.
             # We accept a partial re-read (missing model on second read) but reject a
             # serial mismatch — that would be a different device on the same host.
-            reread_model, reread_serial = await async_read_modbus_identity(host)
+            reread_model, reread_serial = await async_read_modbus_identity(host, port)
             if reread_serial is None:
                 return self.async_show_form(
                     step_id="local_confirm_identified",
-                    description_placeholders={"host": host, "model": model, "serial": serial},
+                    description_placeholders=placeholders,
                     errors={"base": "comms_probe_failed"},
                 )
             if reread_serial != serial:
@@ -214,11 +244,11 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                 )
                 return self.async_show_form(
                     step_id="local_confirm_identified",
-                    description_placeholders={"host": host, "model": model, "serial": serial},
+                    description_placeholders=placeholders,
                     errors={"base": "serial_mismatch"},
                 )
             await self.async_set_unique_id(f"modbus_{serial}")
-            self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
+            self._abort_if_unique_id_configured(updates=_pinned_host_data(host, port))
             return self.async_create_entry(
                 title=f"Sungrow {model} (local)",
                 data={
@@ -226,13 +256,14 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                     CONF_SERIAL: serial,
                     CONF_MODEL: model,
                     CONF_MODBUS_HOST: host,
+                    CONF_MODBUS_PORT: port,
                 },
                 options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
             )
 
         return self.async_show_form(
             step_id="local_confirm_identified",
-            description_placeholders={"host": host, "model": model, "serial": serial},
+            description_placeholders=placeholders,
             data_schema=vol.Schema({}),
         )
 
@@ -255,12 +286,13 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             host = (user_input.get(CONF_MODBUS_HOST) or "").strip()
             serial = (user_input.get(CONF_SERIAL) or "").strip()
             model = (user_input.get(CONF_MODEL) or "Inverter").strip()
+            port = int(user_input.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT))
 
             from ..helpers import async_test_modbus_host
 
-            if await async_test_modbus_host(host):
+            if await async_test_modbus_host(host, port):
                 await self.async_set_unique_id(f"modbus_{serial}")
-                self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
+                self._abort_if_unique_id_configured(updates=_pinned_host_data(host, port))
                 return self.async_create_entry(
                     title=f"Sungrow {model} (local)",
                     data={
@@ -268,6 +300,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                         CONF_SERIAL: serial,
                         CONF_MODEL: model,
                         CONF_MODBUS_HOST: host,
+                        CONF_MODBUS_PORT: port,
                     },
                     options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
                 )
@@ -278,6 +311,9 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_MODBUS_HOST, default=self._local_wizard_host or ""): str,
+                    vol.Optional(
+                        CONF_MODBUS_PORT, default=self._local_wizard_port or DEFAULT_MODBUS_PORT
+                    ): MODBUS_PORT_VALIDATOR,
                     vol.Required(CONF_SERIAL, default=self._local_wizard_serial or ""): str,
                     vol.Required(CONF_MODEL, default=self._local_wizard_model or "Inverter"): str,
                 }
@@ -292,8 +328,14 @@ class ModbusOnlyMixin(_SungrowFlowBase):
         if not serial or not host:
             return self.async_abort(reason="not_sungrow_device")
         model = str(user_input.get(CONF_MODEL) or "Inverter")
+        # A legacy hybrid entry may have carried a non-standard ``modbus_port`` in its
+        # options; keep it so the split-off local entry still reaches the same endpoint.
+        try:
+            port = int(MODBUS_PORT_VALIDATOR(user_input.get(CONF_MODBUS_PORT) or DEFAULT_MODBUS_PORT))
+        except vol.Invalid:
+            port = DEFAULT_MODBUS_PORT
         await self.async_set_unique_id(f"modbus_{serial}")
-        self._abort_if_unique_id_configured(updates=_pinned_host_data(host))
+        self._abort_if_unique_id_configured(updates=_pinned_host_data(host, port))
         options: dict[str, Any] = {
             CONF_SCAN_INTERVAL: int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_MODBUS_SCAN_INTERVAL)),
         }
@@ -306,33 +348,49 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                 CONF_SERIAL: serial,
                 CONF_MODEL: model,
                 CONF_MODBUS_HOST: host,
+                CONF_MODBUS_PORT: port,
             },
             options=options,
         )
 
     async def async_step_reconfigure_modbus(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Reconfigure a cloud-free Modbus-only entry: update the WiNet-S host (#159).
+        """Reconfigure a cloud-free Modbus-only entry: update the host and port (#159, #485).
 
-        No credentials are involved — the only thing worth changing is the local IP, in
-        case the WiNet-S moved to a new DHCP lease and discovery did not re-announce.
+        No credentials are involved — what is worth changing is the local endpoint: a
+        new DHCP lease the discovery did not re-announce, the inverter's own RJ45 port,
+        or a Modbus proxy on a custom port (#485). The new endpoint must answer on TCP
+        before it is saved, so a typo cannot silently take the entry offline. Saving
+        clears any options-flow port override so the value entered here is the one used.
         """
         entry = self._get_reconfigure_entry()
+        current_host = str(entry.data.get(CONF_MODBUS_HOST) or "")
+        current_port = resolve_modbus_port(entry.options, entry.data)
+        errors: dict[str, str] = {}
         if user_input is not None:
             # Blank means "leave unchanged" so reconfigure can never accidentally clear
             # the host (which would take the entry offline).
-            host = (user_input.get(CONF_MODBUS_HOST) or "").strip() or str(entry.data.get(CONF_MODBUS_HOST) or "")
-            return self.async_update_reload_and_abort(
-                entry,
-                data={**entry.data, **_pinned_host_data(host)},
-                reason="reconfigure_successful",
-            )
+            host = (user_input.get(CONF_MODBUS_HOST) or "").strip() or current_host
+            port = int(user_input.get(CONF_MODBUS_PORT, current_port))
+            from ..helpers import async_test_modbus_host
+
+            if host and await async_test_modbus_host(host, port):
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={**entry.data, **_pinned_host_data(host, port)},
+                    options={k: v for k, v in entry.options.items() if k != CONF_MODBUS_PORT},
+                    reason="reconfigure_successful",
+                )
+            errors["base"] = "host_unreachable"
+            current_host, current_port = host, port
         return self.async_show_form(
             step_id="reconfigure_modbus",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_MODBUS_HOST, default=entry.data.get(CONF_MODBUS_HOST, "")): str,
+                    vol.Required(CONF_MODBUS_HOST, default=current_host): str,
+                    vol.Optional(CONF_MODBUS_PORT, default=current_port): MODBUS_PORT_VALIDATOR,
                 }
             ),
+            errors=errors,
         )
 
     # ------------------------------------------------------------------

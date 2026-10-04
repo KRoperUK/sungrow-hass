@@ -295,14 +295,17 @@ Discovery uses **mDNS/zeroconf**, which does **not** cross subnets or VLANs by d
 
 ### Local reads fail / "Cannot connect" over Modbus
 
-The dongle is reachable for mDNS (port 80) but Modbus reads use **TCP port 502**. If local
-sensors are unavailable:
+The dongle is reachable for mDNS (port 80) but Modbus reads use **TCP port 502** (or the
+port you configured for a Modbus proxy). If local sensors are unavailable:
 
 - Confirm the WiNet-S IP is correct and **reachable on port 502** from the Home Assistant
-  host (a firewall/VLAN ACL may block 502 even when the web UI on 80 is reachable).
+  host (a firewall/VLAN ACL may block 502 even when the web UI on 80 is reachable). Behind
+  a proxy, check the entry's port matches the proxy's listen port (**Reconfigure** shows it).
 - The WiNet-S allows only a **limited number of Modbus TCP clients** — if another tool
-  (another HA integration, a Modbus poller, node-RED) already holds the connection, reads
-  here can fail intermittently. Close the other client.
+  (another HA integration, evcc, a Modbus poller, node-RED) already holds the connection,
+  reads here can fail intermittently. Close the other client, or put a Modbus proxy in
+  front of the dongle and point every client — this entry included, via its **port** — at
+  the proxy (see [Local Modbus → Using a Modbus proxy](local-modbus.md#using-a-modbus-proxy-custom-port)).
 - If the dongle's IP changed, rediscovery updates the stored host, or use **Reconfigure**
   on the local entry.
 
@@ -337,8 +340,8 @@ community workaround:
 - Install [`Akulatraxas/ha-modbusproxy`](https://github.com/Akulatraxas/ha-modbusproxy)
   from HACS (Add-on Store on HAOS / Supervised, or as a Docker sidecar on Container).
 - Point the proxy `upstreamhost` at the WiNet-S IP, leave the port at `502`.
-- **Reconfigure** the local Sungrow entry to point at the proxy's host/port instead
-  of the WiNet-S. The proxy holds one persistent connection to the dongle and
+- **Reconfigure** the local Sungrow entry and enter the proxy's host and **Modbus TCP
+  port** instead of the WiNet-S address. The proxy holds one persistent connection to the dongle and
   multiplexes clients cleanly.
 
 If reads recover with the proxy but not without it, the fault is in the dongle's

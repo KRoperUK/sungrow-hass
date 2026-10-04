@@ -40,9 +40,13 @@
       },
       "local_manual_ip": {
         "title": "WiNet-S-Adresse eingeben",
-        "description": "Geben Sie die IP-Adresse oder den Hostnamen Ihres WiNet-S-Dongles ein. Home Assistant prüft, ob es auf Modbus-Port 502 antwortet, bevor es fortfährt.",
+        "description": "Geben Sie die IP-Adresse oder den Hostnamen Ihres WiNet-S-Dongles (oder eines vorgeschalteten Modbus-Proxys) ein. Home Assistant prüft, ob es auf dem Modbus-Port antwortet, bevor es fortfährt.",
         "data": {
-          "modbus_host": "WiNet-S IP / Hostname"
+          "modbus_host": "WiNet-S IP / Hostname",
+          "modbus_port": "Modbus-TCP-Port"
+        },
+        "data_description": {
+          "modbus_port": "Für einen WiNet-S-Dongle oder den LAN-Port des Wechselrichters bei 502 belassen. Einen anderen Port nur verwenden, wenn die Verbindung über einen Modbus-Proxy läuft (z. B. den modbusproxy von evcc)."
         }
       },
       "local_confirm_identified": {
@@ -54,8 +58,12 @@
         "description": "Modell und Seriennummer des Wechselrichters konnten nicht automatisch erkannt werden. Geben Sie die Details manuell ein — bereits gelesene Werte sind vorausgefüllt.",
         "data": {
           "modbus_host": "WiNet-S IP / Hostname",
+          "modbus_port": "Modbus-TCP-Port",
           "serial": "Seriennummer des Wechselrichters",
           "model": "Wechselrichtermodell"
+        },
+        "data_description": {
+          "modbus_port": "Für einen WiNet-S-Dongle oder den LAN-Port des Wechselrichters bei 502 belassen. Einen anderen Port nur verwenden, wenn die Verbindung über einen Modbus-Proxy läuft (z. B. den modbusproxy von evcc)."
         }
       },
       "cloud_user": {
@@ -108,9 +116,13 @@
       },
       "reconfigure_modbus": {
         "title": "Lokalen Sungrow-Wechselrichter neu konfigurieren",
-        "description": "Aktualisieren Sie die WiNet-S-IP-Adresse, falls sie sich in Ihrem Netzwerk geändert hat. Dies ist eine lokale Modbus-Verbindung — es ist kein iSolarCloud-Konto beteiligt.",
+        "description": "Aktualisieren Sie die WiNet-S-IP-Adresse oder den Modbus-Port, falls sie sich geändert haben, oder richten Sie diesen Eintrag auf einen Modbus-Proxy aus. Home Assistant prüft vor dem Speichern, ob die neue Adresse antwortet. Dies ist eine lokale Modbus-Verbindung — es ist kein iSolarCloud-Konto beteiligt.",
         "data": {
-          "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP)"
+          "modbus_host": "Lokaler Modbus-Host (WiNet-S-IP)",
+          "modbus_port": "Modbus-TCP-Port"
+        },
+        "data_description": {
+          "modbus_port": "Für einen WiNet-S-Dongle oder den LAN-Port des Wechselrichters bei 502 belassen. Einen anderen Port nur verwenden, wenn die Verbindung über einen Modbus-Proxy läuft (z. B. den modbusproxy von evcc)."
         }
       }
     },
@@ -120,7 +132,7 @@
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen",
       "comms_probe_failed": "Der abschließende Modbus-Kommunikationstest ist fehlgeschlagen. Der Wechselrichter hat nicht geantwortet — prüfen Sie, ob das WiNet-S online ist, und versuchen Sie es erneut.",
-      "host_unreachable": "Der WiNet-S-Host ist auf Port 502 nicht erreichbar. Prüfen Sie die IP-Adresse und stellen Sie sicher, dass das Dongle online ist.",
+      "host_unreachable": "Der Modbus-Host ist auf dem angegebenen Port (502, sofern nicht geändert) nicht erreichbar. Prüfen Sie IP-Adresse und Port und stellen Sie sicher, dass Dongle bzw. Proxy online sind.",
       "serial_mismatch": "Die Modbus-Seriennummer des Wechselrichters hat sich zwischen Erkennung und abschließendem Test geändert. Auf diesem Host antwortet ein anderes Gerät — wählen Sie ein anderes Dongle oder geben Sie dessen Adresse manuell ein.",
       "invalid_auth": "Ungültige Authentifizierung",
       "invalid_auth_code": "iSolarCloud hat den Autorisierungscode abgelehnt — er wurde möglicherweise bereits verwendet oder ist abgelaufen. Öffne den Autorisierungslink oben, um einen neuen Code zu erhalten, und füge ihn hier ein (oder füge die vollständige Weiterleitungs-URL ein).",
@@ -174,7 +186,11 @@
         "description": "Legen Sie fest, wie oft Home Assistant den Wechselrichter direkt über lokales Modbus ausliest. Es gibt kein Cloud-API-Kontingent, sodass Sie häufig abfragen können; das Minimum beträgt 10 Sekunden.",
         "data": {
           "scan_interval": "Abfrageintervall (Sekunden)",
+          "modbus_port": "Modbus-TCP-Port",
           "modbus_debug_daily_yield": "Rohdaten-Dump des Modbus-daily_yield-Registers auf dem Sensor anzeigen (nur Debug)"
+        },
+        "data_description": {
+          "modbus_port": "Für einen WiNet-S-Dongle oder den LAN-Port des Wechselrichters bei 502 belassen. Einen anderen Port nur verwenden, wenn die Verbindung über einen Modbus-Proxy läuft (z. B. den modbusproxy von evcc)."
         }
       }
     }

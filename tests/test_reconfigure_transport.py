@@ -11,6 +11,7 @@ from custom_components.sungrow.const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_PLANT_IDS,
     CONF_SCAN_INTERVAL,
@@ -92,7 +93,7 @@ async def test_reconfigure_modbus_only_shows_host_form(hass: HomeAssistant):
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_modbus"
     keys = {str(m.schema) for m in result["data_schema"].schema}
-    assert keys == {CONF_MODBUS_HOST}
+    assert keys == {CONF_MODBUS_HOST, CONF_MODBUS_PORT}
 
 
 async def test_reconfigure_modbus_pins_host_and_clears_discovery_managed(hass: HomeAssistant):
@@ -121,7 +122,10 @@ async def test_reconfigure_modbus_pins_host_and_clears_discovery_managed(hass: H
     )
     assert result["step_id"] == "reconfigure_modbus"
 
-    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+    with (
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+        patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
+    ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={CONF_MODBUS_HOST: "10.0.0.50"}
         )

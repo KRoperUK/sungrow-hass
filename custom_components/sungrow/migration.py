@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_APP_ID,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
@@ -31,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 _HYBRID_OPTION_KEYS = frozenset(
     {
         CONF_MODBUS_HOST,
-        "modbus_port",
+        CONF_MODBUS_PORT,
         "modbus_unit",
         "modbus_debug_daily_yield",
     }
@@ -235,6 +236,7 @@ def _async_split_legacy_hybrid(hass: HomeAssistant, entry: ConfigEntry) -> None:
         return
 
     debug = bool(entry.options.get("modbus_debug_daily_yield", False))
+    legacy_port = entry.options.get(CONF_MODBUS_PORT) or entry.data.get(CONF_MODBUS_PORT)
     new_options = {k: v for k, v in entry.options.items() if k not in _HYBRID_OPTION_KEYS}
     new_data = {k: v for k, v in entry.data.items() if k not in _HYBRID_OPTION_KEYS}
     if new_options != dict(entry.options) or new_data != dict(entry.data):
@@ -288,6 +290,9 @@ def _async_split_legacy_hybrid(hass: HomeAssistant, entry: ConfigEntry) -> None:
                     CONF_SERIAL: serial,
                     CONF_MODEL: model,
                     CONF_MODBUS_HOST: host,
+                    # Carry a legacy custom port across the split (#485); the import
+                    # step validates it and falls back to 502.
+                    CONF_MODBUS_PORT: legacy_port,
                     CONF_SCAN_INTERVAL: 30,
                     "modbus_debug_daily_yield": debug,
                 },

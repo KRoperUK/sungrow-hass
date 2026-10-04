@@ -31,7 +31,8 @@ the cloud plant in the device registry (`via_device_id`) — a soft “related t
   the more reliable path — it may need to be **enabled from the iSolarCloud app**
   first (see [Troubleshooting → The Ethernet port on the inverter appears dead](TROUBLESHOOTING.md#the-ethernet-port-on-the-inverter-appears-dead)).
 - The device reachable on **TCP port 502** (Modbus TCP) from Home Assistant — the default
-  Modbus port and unit ID (`1`) are used automatically.
+  Modbus port and unit ID (`1`) are used automatically. A different port can be entered
+  when you connect through a Modbus proxy (see [Using a Modbus proxy](#using-a-modbus-proxy-custom-port)).
 - **No iSolarCloud account** for a Modbus-only setup. (A cloud entry is independent and
   still needs credentials for its own sensors and dispatch.)
 - A supported inverter family — **SG string** or **SH hybrid** (see [Model support](model-support.md#cloud-vs-local-modbus)).
@@ -118,8 +119,9 @@ to do as much for you as it can:
 1. **Discovery** — a short mDNS scan runs. Any WiNet-S dongles that answer are listed by
    model + serial + IP; pick one to skip straight past IP entry. If nothing is found (or
    you want a specific host), choose **Enter IP manually**; **Rescan** re-runs the scan.
-2. **Manual IP** *(if used)* — type the WiNet-S IP or hostname. Home Assistant
-   checks that TCP port 502 answers before continuing.
+2. **Manual IP** *(if used)* — type the WiNet-S IP or hostname, and optionally a
+   **Modbus TCP port** (default `502`). Home Assistant checks that the port answers before
+   continuing, and the identify step below reads over the same port.
 3. **Identify** — with a reachable host, Home Assistant reads the inverter model
    (register 4999) and serial (register 4989) directly over Modbus and shows them for
    confirmation. No wiring diagrams or portal spelunking needed for the common case.
@@ -134,12 +136,39 @@ read — you supply the missing pieces and it creates the entry.
 
 ### Reconfigure / IP change
 
-- **Options** on the local entry: poll interval and optional daily-yield register debug.
-- **Reconfigure**: change the host yourself, for example to use the inverter's dedicated
-  RJ45 Modbus TCP port instead of the WiNet-S.
+- **Options** on the local entry: poll interval, Modbus TCP port and optional daily-yield
+  register debug.
+- **Reconfigure**: change the host and/or port yourself, for example to use the inverter's
+  dedicated RJ45 Modbus TCP port instead of the WiNet-S, or to go through a Modbus proxy.
+  The new address must answer on that port before it is saved.
 - **DHCP / IP change**: an entry created from WiNet-S discovery follows the dongle to a
   new address automatically when it is re-discovered. A host **you** set (manual wizard or
   Reconfigure) is never overwritten by discovery — update it with **Reconfigure**.
+
+### Using a Modbus proxy (custom port)
+
+The WiNet-S serves only a limited number of Modbus TCP clients and errors when several
+tools poll it at once. A Modbus proxy holds the single connection to the dongle and lets
+several clients share it — for example
+[evcc's `modbusproxy`](https://docs.evcc.io/en/reference/configuration/modbusproxy/), or
+[`Akulatraxas/ha-modbusproxy`](https://github.com/Akulatraxas/ha-modbusproxy). The proxy
+usually listens on a port other than `502`.
+
+- **New entry**: in the guided setup choose **Enter IP manually**, type the proxy's host
+  and its port.
+- **Existing entry** (including one created from discovery): use **Reconfigure** to set
+  the proxy's host and port. **Options** also offers the port if only the port changes.
+
+Port resolution is: the port set in **Options** (only stored when it differs from the
+entry's own), then the port saved by setup / Reconfigure, then `502`. Saving
+Reconfigure clears an Options override, so the value you last entered is the one used.
+
+Entries remain one per inverter, keyed on its serial, not on host/port: several
+inverters behind one proxy on different ports each get their own entry, while adding
+the same inverter again through a proxy updates the existing entry's host and port
+instead of creating a duplicate. Once an entry points at a proxy (a host you set, or a
+non-standard port), WiNet-S discovery no longer rewrites its host to the dongle's
+address. The Modbus unit ID stays at `1`.
 
 ### MPPT trackers
 

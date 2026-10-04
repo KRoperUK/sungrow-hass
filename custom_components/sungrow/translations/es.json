@@ -40,9 +40,13 @@
       },
       "local_manual_ip": {
         "title": "Introducir la dirección del WiNet-S",
-        "description": "Escriba la dirección IP o el nombre de host de su dongle WiNet-S. Home Assistant comprobará que responde en el puerto Modbus 502 antes de continuar.",
+        "description": "Escriba la dirección IP o el nombre de host de su dongle WiNet-S (o de un proxy Modbus delante de él). Home Assistant comprobará que responde en el puerto Modbus antes de continuar.",
         "data": {
-          "modbus_host": "IP / nombre de host del WiNet-S"
+          "modbus_host": "IP / nombre de host del WiNet-S",
+          "modbus_port": "Puerto Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Déjelo en 502 para un dongle WiNet-S o el puerto LAN del inversor. Use otro puerto solo si se conecta a través de un proxy Modbus (por ejemplo, el modbusproxy de evcc)."
         }
       },
       "local_confirm_identified": {
@@ -54,8 +58,12 @@
         "description": "No se pudo detectar automáticamente el modelo o el número de serie del inversor. Rellene los datos manualmente — lo que se pudo leer ya se ha rellenado por usted.",
         "data": {
           "modbus_host": "IP / nombre de host del WiNet-S",
+          "modbus_port": "Puerto Modbus TCP",
           "serial": "Número de serie del inversor",
           "model": "Modelo del inversor"
+        },
+        "data_description": {
+          "modbus_port": "Déjelo en 502 para un dongle WiNet-S o el puerto LAN del inversor. Use otro puerto solo si se conecta a través de un proxy Modbus (por ejemplo, el modbusproxy de evcc)."
         }
       },
       "cloud_user": {
@@ -108,9 +116,13 @@
       },
       "reconfigure_modbus": {
         "title": "Reconfigurar inversor Sungrow local",
-        "description": "Actualice la dirección IP del WiNet-S si ha cambiado en su red. Esta es una conexión Modbus local — no interviene ninguna cuenta de iSolarCloud.",
+        "description": "Actualice la dirección IP del WiNet-S o el puerto Modbus si han cambiado, o apunte esta entrada a un proxy Modbus. Home Assistant comprueba que la nueva dirección responde antes de guardar. Esta es una conexión Modbus local — no interviene ninguna cuenta de iSolarCloud.",
         "data": {
-          "modbus_host": "Host Modbus local (IP del WiNet-S)"
+          "modbus_host": "Host Modbus local (IP del WiNet-S)",
+          "modbus_port": "Puerto Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Déjelo en 502 para un dongle WiNet-S o el puerto LAN del inversor. Use otro puerto solo si se conecta a través de un proxy Modbus (por ejemplo, el modbusproxy de evcc)."
         }
       }
     },
@@ -120,7 +132,7 @@
     "error": {
       "cannot_connect": "No se pudo conectar",
       "comms_probe_failed": "La prueba final de comunicación Modbus falló. El inversor no respondió — compruebe que el WiNet-S sigue en línea e inténtelo de nuevo.",
-      "host_unreachable": "El host WiNet-S no es accesible en el puerto 502. Compruebe la IP y asegúrese de que el dongle esté en línea.",
+      "host_unreachable": "El host Modbus no es accesible en el puerto indicado (502 salvo que lo haya cambiado). Compruebe la IP y el puerto y asegúrese de que el dongle o el proxy estén en línea.",
       "serial_mismatch": "El número de serie Modbus del inversor cambió entre la detección y la prueba final. Un dispositivo diferente está respondiendo en este host — elija otro dongle o introduzca su dirección manualmente.",
       "invalid_auth": "Autenticación no válida",
       "invalid_auth_code": "iSolarCloud rechazó el código de autorización — puede que ya se haya usado o haya caducado. Abre el enlace de autorización de arriba para obtener un código nuevo y pégalo aquí (o pega la URL completa de redirección).",
@@ -174,7 +186,11 @@
         "description": "Ajuste la frecuencia con la que Home Assistant lee el inversor directamente a través de Modbus local. No hay cuota de API en la nube, por lo que puede sondear con frecuencia; el mínimo es de 10 segundos.",
         "data": {
           "scan_interval": "Intervalo de sondeo (segundos)",
+          "modbus_port": "Puerto Modbus TCP",
           "modbus_debug_daily_yield": "Exponer el volcado crudo del registro daily_yield de Modbus en el sensor (solo depuración)"
+        },
+        "data_description": {
+          "modbus_port": "Déjelo en 502 para un dongle WiNet-S o el puerto LAN del inversor. Use otro puerto solo si se conecta a través de un proxy Modbus (por ejemplo, el modbusproxy de evcc)."
         }
       }
     }

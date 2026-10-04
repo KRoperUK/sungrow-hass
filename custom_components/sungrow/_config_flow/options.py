@@ -23,6 +23,7 @@ from ..const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_SCAN_INTERVAL,
     CONF_SCHEDULE_WINDOWS,
     CONF_TRANSPORT,
@@ -32,7 +33,8 @@ from ..const import (
     MIN_SCAN_INTERVAL,
     TRANSPORT_MODBUS_ONLY,
 )
-from ._helpers import _parse_extra_measure_points
+from ..helpers import resolve_modbus_port
+from ._helpers import MODBUS_PORT_VALIDATOR, _parse_extra_measure_points
 
 # Schedule slots exposed in the options-flow UI (#359/#433). The engine reads an
 # arbitrary list from ``CONF_SCHEDULE_WINDOWS`` and always has, so the only thing that
@@ -151,22 +153,30 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
         )
 
     async def async_step_modbus_options(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Options for a cloud-free Modbus-only entry: just the local poll interval (#159).
+        """Options for a cloud-free Modbus-only entry: poll interval, port, debug dump (#159).
 
         The cloud settings (API quota, extra measure points, per-device fetch, the
         optional-Modbus-host toggle) are all meaningless here, so none are shown. The
-        WiNet-S host is managed by discovery, not the options flow.
+        WiNet-S host is managed by discovery / Reconfigure, not the options flow.
+
+        The Modbus port (#485) is offered here too so pointing an existing entry at a
+        proxy doesn't need a reconfigure. It is stored only as an override — when it
+        differs from the port in entry data — so options never shadow a later
+        Reconfigure with a stale copy of the same value.
         """
+        data_port = resolve_modbus_port({}, self.config_entry.data)
         if user_input is not None:
-            return self.async_create_entry(
-                title="",
-                data={
-                    CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
-                    CONF_MODBUS_DEBUG_DAILY_YIELD: bool(user_input.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False)),
-                },
-            )
+            options: dict[str, Any] = {
+                CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
+                CONF_MODBUS_DEBUG_DAILY_YIELD: bool(user_input.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False)),
+            }
+            port = int(user_input.get(CONF_MODBUS_PORT, data_port))
+            if port != data_port:
+                options[CONF_MODBUS_PORT] = port
+            return self.async_create_entry(title="", data=options)
         current_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_MODBUS_SCAN_INTERVAL)
         current_debug_daily = bool(self.config_entry.options.get(CONF_MODBUS_DEBUG_DAILY_YIELD, False))
+        current_port = resolve_modbus_port(self.config_entry.options, self.config_entry.data)
         return self.async_show_form(
             step_id="modbus_options",
             data_schema=vol.Schema(
@@ -175,6 +185,7 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
                         vol.Coerce(int),
                         vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
                     ),
+                    vol.Optional(CONF_MODBUS_PORT, default=current_port): MODBUS_PORT_VALIDATOR,
                     vol.Optional(CONF_MODBUS_DEBUG_DAILY_YIELD, default=current_debug_daily): bool,
                 }
             ),
