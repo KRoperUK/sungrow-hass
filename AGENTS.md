@@ -19,7 +19,7 @@ inverters via the iSolarCloud API, built on the `sungrow-isolarcloud` library (a
 ## Environment
 
 **Python 3.14** (Home Assistant requires ≥3.14 since 2026.3; the test harness pins
-`homeassistant==2026.9.1`). Ruff line length 120; mypy `strict`.
+`homeassistant==2026.9.3`). Ruff line length 120; mypy `strict`.
 
 ```bash
 uv venv --python 3.14 .venv

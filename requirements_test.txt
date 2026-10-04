@@ -1,4 +1,6 @@
-pytest-homeassistant-custom-component
+# Pinned so a new harness release (which pins a new, possibly beta, homeassistant)
+# arrives as a reviewable Dependabot bump instead of breaking every PR's CI.
+pytest-homeassistant-custom-component==0.13.366
 
 # Additional test utilities
 pytest-cov
