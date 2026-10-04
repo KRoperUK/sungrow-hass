@@ -54,6 +54,7 @@ from .const import (
     STRING_MPPT_POINTS,
     TRANSPORT_MODBUS_ONLY,
 )
+from .counter_hold import LifetimeCounterHold
 from .energy_units import normalize_energy_units, normalize_power_units, tag_source
 from .modbus import SungrowModbusError
 from .modbus_registers import needs_derived_daily_yield
@@ -427,6 +428,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Lifetime counters already warned about as reporting impossible values, so a
         # persistently broken meter or battery link logs once instead of every poll (#471).
         self._counter_glitch_warned: set[str] = set()
+        # Last good value of each server-derived lifetime counter, so a small downward
+        # recompute dip publishes the previous value instead of tripping Home Assistant's
+        # total_increasing check (#487). In memory only: after a restart the first value is
+        # accepted, as there is nothing trustworthy to compare it against.
+        self._counter_hold = LifetimeCounterHold()
 
     async def async_remove_derived_daily_stores(self) -> None:
         """Delete this plant's persisted derivation baselines.
@@ -488,6 +494,18 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             close()
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch data for this plant, holding server-derived counters through small dips."""
+        data = await self._async_fetch_plant_data()
+        # Applied after every transport's fetch so plant and per-device totals get the same
+        # treatment wherever they came from. Re-applying to last-good data served from the
+        # availability grace window is a no-op: it is already at or above the held value.
+        self.device_data = {
+            uuid: self._counter_hold.apply(f"device:{uuid}", points, label=f"{self.plant_name} device {uuid}")
+            for uuid, points in self.device_data.items()
+        }
+        return self._counter_hold.apply("plant", data, label=self.plant_name)
+
+    async def _async_fetch_plant_data(self) -> dict[str, Any]:
         """Fetch data from the API for this plant."""
         # Cloud-free entries have no Plants service: user-account (app/web) or Modbus.
         if self.plants_service is None:
