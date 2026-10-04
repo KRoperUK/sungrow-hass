@@ -64,10 +64,11 @@ DEFAULT_MODBUS_SCAN_INTERVAL = 30
 CONF_PLANT_IDS = "plant_ids"
 
 # Scheduled forced-charge / forced-discharge windows (#359). Stored in
-# ``entry.options`` as a list of window dicts, each with ``start`` ("HH:MM" local
-# time), ``end`` ("HH:MM" local time), and ``mode`` (``force_charge`` or
-# ``force_discharge``). Missing / empty means "no schedule" — the entry serves the
-# user's manual battery-mode picks as before. Wrap-over-midnight is allowed
+# ``entry.options`` as a list of window dicts, each with ``start`` and ``end`` ("HH:MM"
+# local time, or a sun-relative "sunset-00:30" — #482), ``mode`` (``force_charge`` or
+# ``force_discharge``) and an optional ``days`` weekday mask (#433). Missing / empty
+# means "no schedule" — the entry serves the user's manual battery-mode picks as
+# before. Wrap-over-midnight is allowed
 # (``start > end`` means the window spans midnight). Overlapping windows are
 # resolved to the most recently started one.
 CONF_SCHEDULE_WINDOWS = "schedule_windows"

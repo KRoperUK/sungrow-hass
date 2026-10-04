@@ -200,18 +200,22 @@ class SungrowOptionsFlow(config_entries.OptionsFlowWithReload):
 def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any, Any]:
     """Build the ``vol.Optional`` fields for each schedule slot (#359).
 
-    Each slot contributes four fields to the options form: a start-time picker,
-    an end-time picker, a mode dropdown, and a weekday multi-select. Defaults are
+    Each slot contributes four fields to the options form: a start and an end
+    boundary, a mode dropdown, and a weekday multi-select. Defaults are
     pulled from the entry's currently-persisted ``CONF_SCHEDULE_WINDOWS`` (if any)
     so re-opening the options form shows the values the user last submitted. The
     number of slots grows with the configured list (#433).
+
+    The boundaries are text fields rather than time pickers so they can hold a
+    sun-relative boundary such as ``sunset-00:30`` as well as ``HH:MM`` (#482); the
+    collector validates them with the same parser the engine uses.
     """
     from homeassistant.helpers.selector import (
         SelectOptionDict,
         SelectSelector,
         SelectSelectorConfig,
         SelectSelectorMode,
-        TimeSelector,
+        TextSelector,
     )
 
     from ..schedule import SCHEDULE_DAYS
@@ -231,13 +235,13 @@ def _build_schedule_slot_schema(current_options: Mapping[str, Any]) -> dict[Any,
                 f"schedule_{slot}_start",
                 description={"suggested_value": start_default} if start_default else None,
             )
-        ] = TimeSelector()
+        ] = TextSelector()
         fields[
             vol.Optional(
                 f"schedule_{slot}_end",
                 description={"suggested_value": end_default} if end_default else None,
             )
-        ] = TimeSelector()
+        ] = TextSelector()
         fields[
             vol.Optional(
                 f"schedule_{slot}_mode",
@@ -291,8 +295,13 @@ def _collect_schedule_windows(
     A slot with no weekday selected is also an error: the window could never run, and
     silently saving a schedule that never fires is worse than asking again. Selecting
     every day is the same as no mask, so it is stored without a ``days`` key (#433).
+
+    Each boundary must parse as ``HH:MM`` or a sun-relative ``sunset-00:30`` (#482), and
+    the pair must make a window the engine would accept (not zero-length, not a same-anchor
+    window whose end precedes its start). Sun-relative boundaries are stored in their
+    canonical form; fixed times are stored as entered, as they always have been.
     """
-    from ..schedule import SCHEDULE_DAYS
+    from ..schedule import SCHEDULE_DAYS, ScheduleWindow, SunBoundary, parse_boundary
 
     windows: list[dict[str, Any]] = []
     errors: dict[str, str] = {}
@@ -316,6 +325,18 @@ def _collect_schedule_windows(
             errors["base"] = "invalid_schedule_window"
             _LOGGER.warning("Schedule slot %d has no weekdays selected, so it would never run", slot)
             continue
+        try:
+            start_boundary = parse_boundary(start)
+            end_boundary = parse_boundary(end)
+            ScheduleWindow(start=start_boundary, end=end_boundary, mode=mode)
+        except (ValueError, TypeError) as err:
+            errors["base"] = "invalid_schedule_window"
+            _LOGGER.warning("Schedule slot %d is invalid: %s", slot, err)
+            continue
+        if isinstance(start_boundary, SunBoundary):
+            start = str(start_boundary)
+        if isinstance(end_boundary, SunBoundary):
+            end = str(end_boundary)
         row: dict[str, Any] = {"start": start, "end": end, "mode": mode}
         # All seven days (or a legacy field-less submission) is "every day" — omit the
         # mask so the stored row, and the engine's log lines, stay uncluttered.

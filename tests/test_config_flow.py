@@ -1001,6 +1001,74 @@ async def test_options_flow_stores_and_clears_the_weekday_mask(
     assert "days" not in windows[1]
 
 
+async def test_options_flow_saves_sun_relative_boundaries(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Sun-relative boundaries are accepted and stored in canonical form; fixed times as entered (#482)."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": "Sunset - 0:30",
+            "schedule_1_end": "sunset+3:00",
+            "schedule_1_mode": "force_discharge",
+            "schedule_2_start": "22:00",
+            "schedule_2_end": "SUNRISE",
+            "schedule_2_mode": "force_charge",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_SCHEDULE_WINDOWS] == [
+        {"start": "sunset-00:30", "end": "sunset+03:00", "mode": "force_discharge"},
+        {"start": "22:00", "end": "sunrise", "mode": "force_charge"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ("sunset+1:00", "sunset"),  # same anchor, ends before it starts — on every day
+        ("sunset", "sunset"),  # zero length
+        ("sunset+13:00", "23:00"),  # offset beyond ±12:00
+        ("dusk", "23:00"),  # unknown anchor
+        ("25:00", "06:00"),  # not a time
+    ],
+)
+async def test_options_flow_rejects_invalid_boundaries(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service, start, end
+):
+    """A boundary the engine would drop is refused in the form instead (#482)."""
+    from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 30,
+            "schedule_1_start": start,
+            "schedule_1_end": end,
+            "schedule_1_mode": "force_charge",
+        },
+    )
+
+    assert result2["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2["errors"] == {"base": "invalid_schedule_window"}
+    assert CONF_SCHEDULE_WINDOWS not in entry.options
+
+
 async def test_options_flow_rejects_a_slot_with_no_weekdays(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
     """Clearing every weekday is refused rather than saved as a schedule that never runs."""
     from custom_components.sungrow.const import CONF_SCHEDULE_WINDOWS
