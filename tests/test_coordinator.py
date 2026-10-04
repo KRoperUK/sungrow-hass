@@ -171,6 +171,49 @@ async def test_update_data_success(hass: HomeAssistant):
     assert data["total_active_power"]["value"] == "5.23"
 
 
+async def test_update_data_holds_a_small_load_consumption_dip_across_polls(hass: HomeAssistant, monkeypatch):
+    """A server-side recompute dip on total load consumption publishes the last good value (#487).
+
+    Covers the plant payload and an ESS device payload in one coordinator, across polls:
+    first value accepted, small dip held, recovery published, large drop passed through.
+    """
+    plant_readings = iter([8635.66, 8635.56, 8635.70, 12.0])
+    device_readings = iter([500.0, 499.9, 500.2, 500.3])
+
+    def _plant(value):
+        return {
+            "12345": {
+                "total_load_consumption": {
+                    "id": "83124",
+                    "code": "total_load_consumption",
+                    "value": value,
+                    "unit": "kWh",
+                }
+            }
+        }
+
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(side_effect=lambda *a, **k: _plant(next(plant_readings)))
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), plants, "12345", "Test Plant")
+
+    async def _devices():
+        return {"ess-1": {"13130": {"id": "13130", "code": "13130", "value": next(device_readings), "unit": "kWh"}}}
+
+    monkeypatch.setattr(coordinator, "_async_fetch_device_data", _devices)
+
+    published = []
+    for _ in range(4):
+        data = await coordinator._async_update_data()
+        published.append((data["total_load_consumption"]["value"], coordinator.device_data["ess-1"]["13130"]["value"]))
+
+    assert published == [
+        (8635.66, 500.0),  # first values accepted
+        (8635.66, 500.0),  # small dips held
+        (8635.70, 500.2),  # recovery published
+        (12.0, 500.3),  # a >10% drop is a genuine reset and passes through
+    ]
+
+
 async def test_update_data_missing_plant(hass: HomeAssistant):
     """Returns empty dict when the plant_id is not in the response."""
     plants = MagicMock()

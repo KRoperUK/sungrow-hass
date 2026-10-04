@@ -202,6 +202,25 @@ exposed with `device_class: energy` and `state_class: total_increasing`, which t
 Energy dashboard requires. If a specific sensor still isn't selectable, open an
 issue with the sensor's unit and the `code` shown in its attributes.
 
+### "state class total_increasing, but its state is not strictly increasing"
+
+iSolarCloud computes some lifetime totals server-side rather than reading them off a
+meter. **Total Load Consumption** is a balance of PV, grid and battery flows, and when the
+server recomputes it the total can step *down* by a fraction of a kWh (e.g. 8635.66 →
+8635.56). Home Assistant logs that warning, and would read the drop as a meter reset.
+
+The integration holds the server-derived load totals (plant point `83124`, ESS device
+points `13130` and `13137`) at their last good value through a small dip, and publishes
+the real figure again once it climbs back past the held value, so no energy is lost
+([#487](https://github.com/KRoperUK/sungrow-hass/issues/487)). They stay
+`total_increasing`, so they remain Energy-dashboard sources. A drop of more than 10% isn't
+treated as noise: it is passed through, so a genuine counter reset still reads as one.
+Held readings are logged at debug level (see [Enable debug logging](#enable-debug-logging)).
+
+The last good value is kept in memory, so the first reading after a Home Assistant restart
+is accepted as-is. If the server happens to be mid-dip at that moment, the warning can
+appear once.
+
 ---
 
 ## A device (EV charger, meter, etc.) isn't showing up
