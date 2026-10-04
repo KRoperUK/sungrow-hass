@@ -16,6 +16,7 @@ from urllib.parse import unquote
 
 import voluptuous as vol
 
+from ..const import DEFAULT_MODBUS_PORT
 from ..oauth_view import OAUTH_CALLBACK_PATH
 
 if TYPE_CHECKING:
@@ -34,6 +35,11 @@ CALLBACK_WAIT_TIMEOUT = 300
 # HaZeroconf cache to hand us any live dongle without keeping the user on a
 # spinner for longer than necessary.
 DISCOVERY_BROWSE_TIMEOUT = 3.0
+
+# Modbus TCP port field shared by every step that collects a local host (#485). 502 is
+# the WiNet-S / inverter LAN default; anything else is typically a Modbus proxy (e.g.
+# evcc's ``modbusproxy``) multiplexing several clients onto the dongle's single session.
+MODBUS_PORT_VALIDATOR = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
 
 
 def _normalize_redirect_uri(raw: str | None) -> str | None:
@@ -258,10 +264,10 @@ async def async_discover_winet_dongles(
     return results
 
 
-async def async_read_modbus_identity(host: str) -> tuple[str | None, str | None]:
+async def async_read_modbus_identity(host: str, port: int = DEFAULT_MODBUS_PORT) -> tuple[str | None, str | None]:
     """Best-effort read of ``(model_name, serial)`` from a Sungrow inverter over Modbus.
 
-    Opens a short-lived :class:`SungrowModbusClient` against ``host`` and reads the
+    Opens a short-lived :class:`SungrowModbusClient` against ``host:port`` and reads the
     full realtime input-register set once. Pulls the ``inverter_serial`` string (10
     ASCII registers at wire 4989) and the ``device_type_code`` u16 at wire 4999 out
     of the result, mapping the type code to a human-readable model name via the
@@ -277,12 +283,12 @@ async def async_read_modbus_identity(host: str) -> tuple[str | None, str | None]
     from ..measure_points import resolve_enum_value
     from ..modbus import SungrowModbusClient, SungrowModbusError
 
-    client = SungrowModbusClient(host)
+    client = SungrowModbusClient(host, port=port)
     try:
         try:
             data = await client.async_read_realtime()
         except SungrowModbusError as err:
-            _LOGGER.debug("modbus identity read failed for %s: %s", host, err)
+            _LOGGER.debug("modbus identity read failed for %s:%s: %s", host, port, err)
             return None, None
         serial_raw = data.get("inverter_serial", {}).get("value")
         serial = str(serial_raw).strip() if serial_raw else None

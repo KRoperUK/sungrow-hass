@@ -27,6 +27,7 @@ from custom_components.sungrow.const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_PLANT_IDS,
     CONF_REDIRECT_URI,
@@ -795,14 +796,15 @@ async def test_reconfigure_modbus_only_edits_host_not_credentials(hass: HomeAssi
         )
         assert result["type"] == data_entry_flow.FlowResultType.FORM
         assert result["step_id"] == "reconfigure_modbus"
-        # Only the local host — none of the cloud credential fields.
+        # Only the local endpoint — none of the cloud credential fields.
         keys = {str(m.schema) for m in result["data_schema"].schema}
-        assert keys == {CONF_MODBUS_HOST}
+        assert keys == {CONF_MODBUS_HOST, CONF_MODBUS_PORT}
 
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input={CONF_MODBUS_HOST: "192.168.1.55"}
-        )
-        await hass.async_block_till_done()
+        with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True):
+            result2 = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={CONF_MODBUS_HOST: "192.168.1.55"}
+            )
+            await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.ABORT
     assert result2["reason"] == "reconfigure_successful"
@@ -831,10 +833,11 @@ async def test_reconfigure_modbus_only_blank_keeps_current_host(hass: HomeAssist
             DOMAIN,
             context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
         )
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input={CONF_MODBUS_HOST: "   "}
-        )
-        await hass.async_block_till_done()
+        with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True):
+            result2 = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={CONF_MODBUS_HOST: "   "}
+            )
+            await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.ABORT
     assert entry.data[CONF_MODBUS_HOST] == "10.0.0.9"
@@ -1217,7 +1220,7 @@ async def test_options_flow_modbus_only_hides_cloud_settings(hass: HomeAssistant
         from custom_components.sungrow.const import CONF_MODBUS_DEBUG_DAILY_YIELD
 
         keys = {str(m.schema) for m in result["data_schema"].schema}
-        assert keys == {CONF_SCAN_INTERVAL, CONF_MODBUS_DEBUG_DAILY_YIELD}
+        assert keys == {CONF_SCAN_INTERVAL, CONF_MODBUS_PORT, CONF_MODBUS_DEBUG_DAILY_YIELD}
 
         result2 = await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -1304,6 +1307,7 @@ async def test_zeroconf_discovery_creates_modbus_entry(hass: HomeAssistant):
         CONF_SERIAL: "A2340512345",
         CONF_MODEL: "SG3.6RS",
         CONF_MODBUS_HOST: "192.168.1.93",
+        CONF_MODBUS_PORT: 502,
         # The host came from discovery, so a later re-discovery may follow the dongle.
         CONF_DISCOVERY_MANAGED_HOST: True,
     }

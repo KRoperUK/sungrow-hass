@@ -40,9 +40,13 @@
       },
       "local_manual_ip": {
         "title": "Rhowch gyfeiriad eich WiNet-S",
-        "description": "Teipiwch gyfeiriad IP neu enw gwesteiwr eich dyngl WiNet-S. Bydd Home Assistant yn gwirio ei fod yn ymateb ar borth Modbus 502 cyn parhau.",
+        "description": "Teipiwch gyfeiriad IP neu enw gwesteiwr eich dyngl WiNet-S (neu ddirprwy Modbus o'i flaen). Bydd Home Assistant yn gwirio ei fod yn ymateb ar y porth Modbus cyn parhau.",
         "data": {
-          "modbus_host": "IP / enw gwesteiwr WiNet-S"
+          "modbus_host": "IP / enw gwesteiwr WiNet-S",
+          "modbus_port": "Porth Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Gadewch ar 502 ar gyfer dyngl WiNet-S neu borth LAN y gwrthdröydd. Defnyddiwch borth arall dim ond wrth gysylltu drwy ddirprwy Modbus (er enghraifft modbusproxy evcc)."
         }
       },
       "local_confirm_identified": {
@@ -54,8 +58,12 @@
         "description": "Ni allem ganfod model neu rif cyfresol y gwrthdröydd yn awtomatig. Llenwch y manylion â llaw — mae unrhyw beth a ddarllenwyd wedi'i gynnwys eisoes.",
         "data": {
           "modbus_host": "IP / enw gwesteiwr WiNet-S",
+          "modbus_port": "Porth Modbus TCP",
           "serial": "Rhif cyfresol y gwrthdröydd",
           "model": "Model y gwrthdröydd"
+        },
+        "data_description": {
+          "modbus_port": "Gadewch ar 502 ar gyfer dyngl WiNet-S neu borth LAN y gwrthdröydd. Defnyddiwch borth arall dim ond wrth gysylltu drwy ddirprwy Modbus (er enghraifft modbusproxy evcc)."
         }
       },
       "cloud_user": {
@@ -108,9 +116,13 @@
       },
       "reconfigure_modbus": {
         "title": "Ailgyflunio gwrthdröydd Sungrow lleol",
-        "description": "Diweddarwch gyfeiriad IP y WiNet-S os yw wedi newid ar eich rhwydwaith. Cysylltiad Modbus lleol yw hwn — nid oes cyfrif iSolarCloud yn gysylltiedig.",
+        "description": "Diweddarwch gyfeiriad IP y WiNet-S neu'r porth Modbus os ydynt wedi newid, neu pwyntiwch y cofnod hwn at ddirprwy Modbus. Mae Home Assistant yn gwirio bod y cyfeiriad newydd yn ymateb cyn cadw. Cysylltiad Modbus lleol yw hwn — nid oes cyfrif iSolarCloud yn gysylltiedig.",
         "data": {
-          "modbus_host": "Gwesteiwr Modbus lleol (IP WiNet-S)"
+          "modbus_host": "Gwesteiwr Modbus lleol (IP WiNet-S)",
+          "modbus_port": "Porth Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Gadewch ar 502 ar gyfer dyngl WiNet-S neu borth LAN y gwrthdröydd. Defnyddiwch borth arall dim ond wrth gysylltu drwy ddirprwy Modbus (er enghraifft modbusproxy evcc)."
         }
       }
     },
@@ -120,7 +132,7 @@
     "error": {
       "cannot_connect": "Methwyd â chysylltu",
       "comms_probe_failed": "Methodd y prawf cyfathrebu Modbus terfynol. Ni atebodd y gwrthdröydd — gwiriwch fod y WiNet-S ar-lein a rhoi cynnig arall arni.",
-      "host_unreachable": "Ni ellir cyrraedd gwesteiwr WiNet-S ar borth 502. Gwiriwch yr IP a sicrhau bod y dyngl ar-lein.",
+      "host_unreachable": "Ni ellir cyrraedd y gwesteiwr Modbus ar y porth a roddwyd (502 oni bai eich bod wedi'i newid). Gwiriwch yr IP a'r porth a sicrhau bod y dyngl neu'r dirprwy ar-lein.",
       "serial_mismatch": "Newidiodd rhif cyfresol Modbus y gwrthdröydd rhwng canfod a'r prawf terfynol. Mae dyfais wahanol yn ateb ar y gwesteiwr hwn — dewiswch ddyngl arall neu rhowch ei gyfeiriad â llaw.",
       "invalid_auth": "Dilysiad annilys",
       "invalid_auth_code": "Gwrthododd iSolarCloud y cod awdurdodi — efallai ei fod eisoes wedi'i ddefnyddio neu wedi dod i ben. Agor y ddolen awdurdodi uchod i gael cod newydd, yna gludwch ef yma (neu gludwch yr URL ailgyfeirio llawn).",
@@ -174,7 +186,11 @@
         "description": "Addaswch pa mor aml y mae Home Assistant yn darllen y gwrthdröydd yn uniongyrchol dros Modbus lleol. Nid oes cwota API cwmwl, felly gallwch holi'n aml; yr isafswm yw 10 eiliad.",
         "data": {
           "scan_interval": "Cyfwng holi (eiliadau)",
+          "modbus_port": "Porth Modbus TCP",
           "modbus_debug_daily_yield": "Datgelu dump cofrestr daily_yield Modbus crai ar y synhwyrydd (debug yn unig)"
+        },
+        "data_description": {
+          "modbus_port": "Gadewch ar 502 ar gyfer dyngl WiNet-S neu borth LAN y gwrthdröydd. Defnyddiwch borth arall dim ond wrth gysylltu drwy ddirprwy Modbus (er enghraifft modbusproxy evcc)."
         }
       }
     }

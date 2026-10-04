@@ -91,6 +91,9 @@ class _SungrowFlowBase(config_entries.ConfigFlow):
         self._local_wizard_host: str | None = None
         self._local_wizard_serial: str | None = None
         self._local_wizard_model: str | None = None
+        # Modbus TCP port typed alongside the host (#485). ``None`` means the 502 default,
+        # which is what a dongle picked from the discovery list always uses.
+        self._local_wizard_port: int | None = None
         self._discovered_winet_dongles: list[WinetDongle] | None = None
 
     @callback

@@ -35,12 +35,10 @@ from .const import (
     CONF_EXTRA_MEASURE_POINTS,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
     CONF_MODBUS_HOST,
-    CONF_MODBUS_PORT,
     CONF_MODBUS_UNIT,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_TRANSPORT,
-    DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_UNIT,
     DEFAULT_SCAN_INTERVAL,
     DEVICE_REFRESH_INTERVAL,
@@ -56,6 +54,7 @@ from .const import (
 )
 from .counter_hold import LifetimeCounterHold
 from .energy_units import normalize_energy_units, normalize_power_units, tag_source
+from .helpers import resolve_modbus_port
 from .modbus import SungrowModbusError
 from .modbus_registers import needs_derived_daily_yield
 from .model_capabilities import mppt_points_for_model, resolve_capabilities
@@ -453,7 +452,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return a SungrowModbusClient for a Modbus-only entry, else None.
 
         Cloud entries never get a Modbus client (no hybrid overlay). The WiNet-S host
-        lives in entry data for discovery/import-created local entries (#159).
+        lives in entry data for discovery/import-created local entries (#159). The port
+        resolves options → data → 502 so a Modbus proxy on a custom port works (#485).
         """
         if config_entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY:
             return None
@@ -472,7 +472,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return SungrowModbusClient(
             str(host),
-            port=int(config_entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)),
+            port=resolve_modbus_port(config_entry.options, config_entry.data),
             unit=int(config_entry.options.get(CONF_MODBUS_UNIT, DEFAULT_MODBUS_UNIT)),
             model=model,
             model_code=str(model_code) if model_code else None,

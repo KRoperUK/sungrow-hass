@@ -40,9 +40,13 @@
       },
       "local_manual_ip": {
         "title": "Saisir l'adresse de votre WiNet-S",
-        "description": "Saisissez l'adresse IP ou le nom d'hôte de votre dongle WiNet-S. Home Assistant vérifiera qu'il répond sur le port Modbus 502 avant de continuer.",
+        "description": "Saisissez l'adresse IP ou le nom d'hôte de votre dongle WiNet-S (ou d'un proxy Modbus placé devant). Home Assistant vérifiera qu'il répond sur le port Modbus avant de continuer.",
         "data": {
-          "modbus_host": "IP / nom d'hôte du WiNet-S"
+          "modbus_host": "IP / nom d'hôte du WiNet-S",
+          "modbus_port": "Port Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Laissez 502 pour un dongle WiNet-S ou le port LAN de l'onduleur. N'utilisez un autre port que si vous passez par un proxy Modbus (par exemple le modbusproxy d'evcc)."
         }
       },
       "local_confirm_identified": {
@@ -54,8 +58,12 @@
         "description": "Le modèle ou le numéro de série de l'onduleur n'a pas pu être détecté automatiquement. Renseignez les détails manuellement — tout ce qui a pu être lu est déjà prérempli.",
         "data": {
           "modbus_host": "IP / nom d'hôte du WiNet-S",
+          "modbus_port": "Port Modbus TCP",
           "serial": "Numéro de série de l'onduleur",
           "model": "Modèle de l'onduleur"
+        },
+        "data_description": {
+          "modbus_port": "Laissez 502 pour un dongle WiNet-S ou le port LAN de l'onduleur. N'utilisez un autre port que si vous passez par un proxy Modbus (par exemple le modbusproxy d'evcc)."
         }
       },
       "cloud_user": {
@@ -108,9 +116,13 @@
       },
       "reconfigure_modbus": {
         "title": "Reconfigurer l'onduleur Sungrow local",
-        "description": "Mettez à jour l'adresse IP du WiNet-S si elle a changé sur votre réseau. Il s'agit d'une connexion Modbus locale — aucun compte iSolarCloud n'est impliqué.",
+        "description": "Mettez à jour l'adresse IP du WiNet-S ou le port Modbus s'ils ont changé, ou faites pointer cette entrée vers un proxy Modbus. Home Assistant vérifie que la nouvelle adresse répond avant d'enregistrer. Il s'agit d'une connexion Modbus locale — aucun compte iSolarCloud n'est impliqué.",
         "data": {
-          "modbus_host": "Hôte Modbus local (IP du WiNet-S)"
+          "modbus_host": "Hôte Modbus local (IP du WiNet-S)",
+          "modbus_port": "Port Modbus TCP"
+        },
+        "data_description": {
+          "modbus_port": "Laissez 502 pour un dongle WiNet-S ou le port LAN de l'onduleur. N'utilisez un autre port que si vous passez par un proxy Modbus (par exemple le modbusproxy d'evcc)."
         }
       }
     },
@@ -120,7 +132,7 @@
     "error": {
       "cannot_connect": "Échec de la connexion",
       "comms_probe_failed": "Le test de communication Modbus final a échoué. L'onduleur n'a pas répondu — vérifiez que le WiNet-S est toujours en ligne et réessayez.",
-      "host_unreachable": "L'hôte WiNet-S est injoignable sur le port 502. Vérifiez l'IP et assurez-vous que le dongle est en ligne.",
+      "host_unreachable": "L'hôte Modbus est injoignable sur le port indiqué (502 sauf si vous l'avez modifié). Vérifiez l'IP et le port et assurez-vous que le dongle ou le proxy est en ligne.",
       "serial_mismatch": "Le numéro de série Modbus de l'onduleur a changé entre la découverte et le test final. Un autre appareil répond sur cet hôte — choisissez un autre dongle ou saisissez son adresse manuellement.",
       "invalid_auth": "Authentification non valide",
       "invalid_auth_code": "iSolarCloud a rejeté le code d'autorisation — il a peut-être déjà été utilisé ou expiré. Ouvrez le lien d'autorisation ci-dessus pour obtenir un nouveau code, puis collez-le ici (ou collez l'URL de redirection complète).",
@@ -174,7 +186,11 @@
         "description": "Ajustez la fréquence à laquelle Home Assistant lit l'onduleur directement via Modbus local. Il n'y a pas de quota d'API cloud, vous pouvez donc interroger fréquemment ; le minimum est de 10 secondes.",
         "data": {
           "scan_interval": "Intervalle d'interrogation (secondes)",
+          "modbus_port": "Port Modbus TCP",
           "modbus_debug_daily_yield": "Exposer le dump brut du registre daily_yield Modbus sur le capteur (débogage uniquement)"
+        },
+        "data_description": {
+          "modbus_port": "Laissez 502 pour un dongle WiNet-S ou le port LAN de l'onduleur. N'utilisez un autre port que si vous passez par un proxy Modbus (par exemple le modbusproxy d'evcc)."
         }
       }
     }

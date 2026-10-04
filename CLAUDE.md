@@ -59,7 +59,7 @@ Grouped by subsystem; every file under `custom_components/sungrow/`.
 | `modbus.py` | `SungrowModbusClient` — async Modbus TCP reads against the per-family register maps, family auto-detection from register 5000, block partitioning/skipping, and `modbus_diagnostics` bookkeeping. Model-gates MPPT points via `_points_for_model` (only trackers the model has; zero readings kept for those, so an idle tracker still yields an entity — #398), recording dropped codes for triage. |
 | `modbus_registers.py` | The register maps themselves (`SG_RS_INPUT_POINTS`, `SH_RT_INPUT_POINTS`, `REGISTER_MAPS`), decoders, enum tables, `needs_derived_daily_yield()`, absent-meter suppression (`suppress_absent_meter_points`), and the opt-in `daily_yield` diagnostic dump (#223). |
 | `modbus_control.py` / `modbus_control_probe.py` | Local dispatch over holding registers (`ModbusControl`, duck-typing `Control`) and the one-shot probe used to decide whether writes are supported. |
-| `helpers.py` | Small shared helpers, e.g. `async_test_modbus_host()` TCP reachability used by the local wizard. |
+| `helpers.py` | Small shared helpers: `async_test_modbus_host()` TCP reachability used by the local wizard/reconfigure, and `resolve_modbus_port()` (options → data → 502, #485). |
 
 **Entities**
 

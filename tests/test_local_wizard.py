@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.sungrow._config_flow._helpers import WinetDongle
 from custom_components.sungrow.const import (
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
@@ -133,6 +134,7 @@ async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
     assert created["data"] == {
         CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY,
         CONF_MODBUS_HOST: "10.1.2.3",
+        CONF_MODBUS_PORT: 502,
         CONF_SERIAL: "SN-HAPPY",
         CONF_MODEL: "SG3.6RS",
     }

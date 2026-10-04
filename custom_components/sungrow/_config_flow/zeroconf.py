@@ -15,14 +15,17 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from ..const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_HOST,
+    CONF_MODBUS_PORT,
     CONF_MODEL,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_TRANSPORT,
+    DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_SCAN_INTERVAL,
     DOMAIN,
     TRANSPORT_MODBUS_ONLY,
 )
+from ..helpers import resolve_modbus_port
 from ._base import _SungrowFlowBase
 from ._helpers import _parse_winet_properties
 
@@ -47,11 +50,15 @@ class ZeroconfMixin(_SungrowFlowBase):
         # discovery and the user never changed it (the dongle may have moved to a new
         # DHCP lease). A host the user chose explicitly, e.g. the inverter's dedicated
         # RJ45 Modbus TCP port, must never be overwritten by the WiNet-S address we
-        # happened to discover (#402).
+        # happened to discover (#402). Likewise an entry pointed at a non-standard port
+        # (set in options) is talking to a Modbus proxy, so the dongle's own address
+        # would be wrong for it (#485).
         existing = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, unique_id)
         updates = (
             {CONF_MODBUS_HOST: host}
-            if existing is not None and existing.data.get(CONF_DISCOVERY_MANAGED_HOST)
+            if existing is not None
+            and existing.data.get(CONF_DISCOVERY_MANAGED_HOST)
+            and resolve_modbus_port(existing.options, existing.data) == DEFAULT_MODBUS_PORT
             else None
         )
         self._abort_if_unique_id_configured(updates=updates)
@@ -74,6 +81,9 @@ class ZeroconfMixin(_SungrowFlowBase):
                     CONF_SERIAL: self.init_info[CONF_SERIAL],
                     CONF_MODEL: model,
                     CONF_MODBUS_HOST: self._discovered_modbus_host,
+                    # A WiNet-S announcing itself always serves Modbus on the standard
+                    # port; Reconfigure / Options can point it at a proxy later (#485).
+                    CONF_MODBUS_PORT: DEFAULT_MODBUS_PORT,
                     # The host came from discovery, so a later re-discovery may follow a
                     # moved dongle — until the user sets the host explicitly (#402).
                     CONF_DISCOVERY_MANAGED_HOST: True,
