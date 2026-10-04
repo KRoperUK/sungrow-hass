@@ -413,18 +413,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._daily_yield_baseline_loaded = False
         # Imported lazily-typed to avoid a circular import at module load; set on first use.
         self._daily_yield_state: Any = None
-        # Persisted baselines for deriving daily grid import/export from the lifetime
-        # counters when the device's own daily register is absent or stuck at 0 (#471).
-        # Separate from the yield baseline so one counter rolling over can't clobber the
-        # other's stored payload.
-        self._grid_daily_store: Store[dict[str, Any]] | None = (
+        # Persisted baselines for deriving daily grid import/export and battery
+        # charge/discharge from their lifetime counters (#471/#486). Separate from the
+        # yield baseline so one counter rolling over can't clobber the other's stored
+        # payload. The Store key keeps its original ``grid_daily_baseline`` name: it is
+        # keyed per lifetime code, so renaming it would only discard the persisted grid
+        # baselines and restart today's derived figures from 0.
+        self._energy_daily_store: Store[dict[str, Any]] | None = (
             Store(hass, 1, f"{DOMAIN}.grid_daily_baseline_{self.plant_id}") if self._modbus_client is not None else None
         )
-        self._grid_daily_baseline_loaded = False
-        self._grid_daily_state: Any = None
+        self._energy_daily_baseline_loaded = False
+        self._energy_daily_state: Any = None
         # Lifetime counters already warned about as reporting impossible values, so a
-        # persistently broken meter logs once instead of every poll (#471).
-        self._grid_glitch_warned: set[str] = set()
+        # persistently broken meter or battery link logs once instead of every poll (#471).
+        self._counter_glitch_warned: set[str] = set()
 
     async def async_remove_derived_daily_stores(self) -> None:
         """Delete this plant's persisted derivation baselines.
@@ -436,7 +438,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         reload (options change, HA restart), and dropping the baselines there would restart
         the day's derived figures from 0 (#471).
         """
-        for store in (self._daily_yield_store, self._grid_daily_store):
+        for store in (self._daily_yield_store, self._energy_daily_store):
             if store is not None:
                 await store.async_remove()
 
@@ -567,7 +569,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.data
             raise UpdateFailed(f"Local Modbus read failed: {err}") from err
         # Time since the previous successful poll, used to judge whether a lifetime
-        # counter's latest step is physically possible (see the grid derivation).
+        # counter's latest step is physically possible (see the derived daily counters).
         previous_update = self._last_successful_update
         self._last_successful_update = self.hass.loop.time()
         elapsed_seconds = None if previous_update is None else self._last_successful_update - previous_update
@@ -780,17 +782,18 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         * ``daily_yield`` from ``total_yield`` — only for families whose raw register is
           known-broken: the SH hybrids reset wire 13001 correctly, and overriding it would
           under-report until the first midnight after install (#382).
-        * ``daily_imported_energy`` / ``daily_exported_energy`` from the lifetime grid
-          counters when the device's own daily register is absent or stuck at 0 (#471).
-          Deliberately not family-gated: the daily grid registers are firmware-dependent
-          on SG and SH alike (#401), and a live non-zero register is still kept.
+        * ``daily_imported_energy`` / ``daily_exported_energy`` and
+          ``daily_battery_charge`` / ``daily_battery_discharge`` from their lifetime
+          counters, replacing the device register whenever the lifetime counter is present
+          (#471/#486). Deliberately not family-gated: those daily registers are
+          firmware-dependent (#401/#431), and a family without the counter skips it.
 
         Baselines are persisted so a restart mid-day keeps counting from the same day start.
         """
         from .derived_daily import (
             DerivedDailyBaseline,
             DerivedDailyEnergyState,
-            apply_derived_daily_grid_energy,
+            apply_derived_daily_energy,
             apply_derived_daily_yield,
         )
 
@@ -813,61 +816,65 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._daily_yield_store.async_save(new_state.to_store())
             self._daily_yield_state = new_state
 
-        if self._grid_daily_store is None:
+        if self._energy_daily_store is None:
             return data
-        if not self._grid_daily_baseline_loaded:
-            self._grid_daily_state = DerivedDailyEnergyState.from_store(await self._grid_daily_store.async_load())
-            self._grid_daily_baseline_loaded = True
-        if self._grid_daily_state is None:
-            self._grid_daily_state = DerivedDailyEnergyState()
+        if not self._energy_daily_baseline_loaded:
+            self._energy_daily_state = DerivedDailyEnergyState.from_store(await self._energy_daily_store.async_load())
+            self._energy_daily_baseline_loaded = True
+        if self._energy_daily_state is None:
+            self._energy_daily_state = DerivedDailyEnergyState()
 
-        data, new_grid_state, _derived = apply_derived_daily_grid_energy(
+        data, new_energy_state, _derived = apply_derived_daily_energy(
             data,
             local_date=local_date,
-            state=self._grid_daily_state,
-            untrusted=self._untrusted_grid_counters(data, elapsed_seconds),
+            state=self._energy_daily_state,
+            untrusted=self._untrusted_lifetime_counters(data, elapsed_seconds),
         )
-        if new_grid_state.to_store() != self._grid_daily_state.to_store():
-            await self._grid_daily_store.async_save(new_grid_state.to_store())
-        self._grid_daily_state = new_grid_state
+        if new_energy_state.to_store() != self._energy_daily_state.to_store():
+            await self._energy_daily_store.async_save(new_energy_state.to_store())
+        self._energy_daily_state = new_energy_state
         return data
 
-    def _untrusted_grid_counters(self, data: dict[str, Any], elapsed_seconds: float | None) -> frozenset[str]:
+    def _untrusted_lifetime_counters(self, data: dict[str, Any], elapsed_seconds: float | None) -> frozenset[str]:
         """Lifetime counters whose latest sample we refuse to derive from.
 
-        A disconnected or failing smart meter makes the inverter answer these registers
+        A disconnected or failing smart meter makes the inverter answer the grid registers
         with garbage (mkaiser#692), and a step upwards has no other guard — the baseline
         logic only re-anchors on a decrease. Holding the counter back leaves the entity
         showing whatever the device itself reported rather than a spike that would land in
-        the Energy dashboard.
+        the Energy dashboard. Each counter is judged against its own physical ceiling
+        (grid connection or battery, see ``DERIVED_DAILY_COUNTERS``).
 
         Warned once per counter so a persistently broken meter cannot flood the log
         (the same pattern as ``_device_refresh_warned``); the flag clears when the counter
         reads sanely again, so a later recurrence is reported too.
         """
-        from .derived_daily import DERIVED_DAILY_COUNTER_PAIRS, implausible_counter_jump
+        from .derived_daily import DERIVED_DAILY_COUNTERS, implausible_counter_jump
 
         untrusted: set[str] = set()
-        for total_code, _ in DERIVED_DAILY_COUNTER_PAIRS:
+        for counter in DERIVED_DAILY_COUNTERS:
+            total_code = counter.total_code
             point = data.get(total_code)
             total = None if not isinstance(point, dict) else point.get("value")
-            baseline = self._grid_daily_state.baselines.get(total_code) if self._grid_daily_state else None
+            baseline = self._energy_daily_state.baselines.get(total_code) if self._energy_daily_state else None
             previous = baseline.last_total if baseline else None
-            if isinstance(total, (int, float)) and implausible_counter_jump(previous, float(total), elapsed_seconds):
+            if isinstance(total, (int, float)) and implausible_counter_jump(
+                previous, float(total), elapsed_seconds, max_power_w=counter.max_power_w
+            ):
                 untrusted.add(total_code)
-                if total_code not in self._grid_glitch_warned:
-                    self._grid_glitch_warned.add(total_code)
+                if total_code not in self._counter_glitch_warned:
+                    self._counter_glitch_warned.add(total_code)
                     _LOGGER.warning(
-                        "Ignoring %s on %s: it jumped to %s from %s, which no grid connection "
-                        "could supply. Check the smart meter wiring; the derived daily figure "
-                        "is held until it reads sanely again (#471)",
+                        "Ignoring %s on %s: it jumped to %s from %s, which %s; the derived "
+                        "daily figure is held until it reads sanely again (#471)",
                         total_code,
                         self.plant_name,
                         total,
                         previous,
+                        counter.glitch_hint,
                     )
             else:
-                self._grid_glitch_warned.discard(total_code)
+                self._counter_glitch_warned.discard(total_code)
         return frozenset(untrusted)
 
     async def _async_capture_daily_yield_diagnostic(self) -> None:

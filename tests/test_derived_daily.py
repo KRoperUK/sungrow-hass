@@ -1,13 +1,16 @@
-"""Tests for software-derived daily energy from a lifetime counter (#223, #471)."""
+"""Tests for software-derived daily energy from a lifetime counter (#223, #471, #486)."""
 
 from datetime import date
 
 import pytest
 
 from custom_components.sungrow.derived_daily import (
+    DERIVED_DAILY_COUNTERS,
+    MAX_BATTERY_POWER_W,
+    MAX_GRID_POWER_W,
     DerivedDailyBaseline,
     DerivedDailyEnergyState,
-    apply_derived_daily_grid_energy,
+    apply_derived_daily_energy,
     apply_derived_daily_yield,
     implausible_counter_jump,
     step_derived_daily,
@@ -162,7 +165,7 @@ def test_grid_daily_derived_when_register_absent():
     """No daily register at all → today's import is total − start-of-day (#471)."""
     data = {"total_imported_energy": _point(6470.0)}
 
-    out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=_seeded())
+    out, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=_seeded())
 
     assert derived == {"daily_imported_energy": 8.0}
     assert out["daily_imported_energy"]["value"] == 8.0
@@ -177,7 +180,7 @@ def test_grid_daily_replaces_flat_zero_register():
     """The SH flat-0 daily register (#401) is filled in from the lifetime counter."""
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(0.0)}
 
-    out, _, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=_seeded())
+    out, _, derived = apply_derived_daily_energy(data, local_date=_DAY, state=_seeded())
 
     assert derived == {"daily_imported_energy": 8.0}
     assert out["daily_imported_energy"]["value"] == 8.0
@@ -193,7 +196,7 @@ def test_grid_daily_replaces_live_register_and_advances_baseline():
     """
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(3.5)}
 
-    out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=_seeded())
+    out, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=_seeded())
 
     assert derived == {"daily_imported_energy": 8.0}
     assert out["daily_imported_energy"]["value"] == 8.0
@@ -205,9 +208,7 @@ def test_grid_daily_replaces_live_register_and_advances_baseline():
 
 def test_grid_daily_omits_raw_attribute_when_the_register_was_absent():
     """Nothing to compare against → no ``raw_register_value`` attribute."""
-    out, _, _ = apply_derived_daily_grid_energy(
-        {"total_imported_energy": _point(6470.0)}, local_date=_DAY, state=_seeded()
-    )
+    out, _, _ = apply_derived_daily_energy({"total_imported_energy": _point(6470.0)}, local_date=_DAY, state=_seeded())
 
     assert "raw_register_value" not in out["daily_imported_energy"]
 
@@ -220,7 +221,7 @@ def test_grid_daily_first_sample_seed_ignored_when_the_day_is_the_whole_counter(
     """
     data = {"total_imported_energy": _point(12.4), "daily_imported_energy": _point(12.4)}
 
-    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+    _, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
 
     assert derived == {"daily_imported_energy": 0.0}
     assert state.baselines["total_imported_energy"].baseline == 12.4
@@ -231,7 +232,7 @@ def test_grid_daily_seeds_when_the_stored_entry_carries_no_history():
     state = DerivedDailyEnergyState(baselines={"total_imported_energy": DerivedDailyBaseline()})
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(12.4)}
 
-    _, new_state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=state)
+    _, new_state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=state)
 
     assert derived == {"daily_imported_energy": 12.4}
     assert round(new_state.baselines["total_imported_energy"].baseline, 3) == 6457.6
@@ -245,7 +246,7 @@ def test_grid_daily_first_sample_is_seeded_from_the_live_register():
     """
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(12.4)}
 
-    out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+    out, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
 
     assert derived == {"daily_imported_energy": 12.4}
     # 6470 − 12.4: the implied start-of-day total.
@@ -257,7 +258,7 @@ def test_grid_daily_first_sample_seed_is_ignored_when_implausible():
     """A reading above the lifetime counter tells us nothing; fall back to a 0 day."""
     data = {"total_imported_energy": _point(100.0), "daily_imported_energy": _point(500.0)}
 
-    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+    _, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
 
     assert derived == {"daily_imported_energy": 0.0}
     assert state.baselines["total_imported_energy"].baseline == 100.0
@@ -267,7 +268,7 @@ def test_grid_daily_first_sample_flat_zero_register_starts_the_day_at_zero():
     """A flat-0 register carries no start-of-day information (#401), so the day starts at 0."""
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(0.0)}
 
-    _, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
+    _, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=DerivedDailyEnergyState())
 
     assert derived == {"daily_imported_energy": 0.0}
     assert state.baselines["total_imported_energy"].baseline == 6470.0
@@ -284,7 +285,7 @@ def test_grid_daily_seed_is_not_reused_once_there_is_history():
     )
     data = {"total_imported_energy": _point(6470.0), "daily_imported_energy": _point(99.0)}
 
-    _, new_state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=state)
+    _, new_state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=state)
 
     # Anchored on yesterday's last total (6462), not on the bogus 99 the register reports.
     assert derived == {"daily_imported_energy": 8.0}
@@ -293,7 +294,7 @@ def test_grid_daily_seed_is_not_reused_once_there_is_history():
 
 def test_grid_daily_silent_without_lifetime_total():
     """A meterless plant publishes nothing rather than a fabricated 0 (#387 contract)."""
-    out, state, derived = apply_derived_daily_grid_energy({}, local_date=_DAY, state=DerivedDailyEnergyState())
+    out, state, derived = apply_derived_daily_energy({}, local_date=_DAY, state=DerivedDailyEnergyState())
 
     assert out == {}
     assert derived == {}
@@ -310,7 +311,7 @@ def test_grid_daily_midnight_rollover_anchors_on_yesterdays_last_total():
         }
     )
 
-    _, new_state, derived = apply_derived_daily_grid_energy(
+    _, new_state, derived = apply_derived_daily_energy(
         {"total_imported_energy": _point(6465.0)}, local_date=_DAY, state=state
     )
 
@@ -323,7 +324,7 @@ def test_grid_daily_counters_track_independent_baselines():
     """Import and export cross midnight independently, so each keeps its own baseline."""
     data = {"total_imported_energy": _point(6470.0), "total_exported_energy": _point(2005.0)}
 
-    out, state, derived = apply_derived_daily_grid_energy(data, local_date=_DAY, state=_seeded())
+    out, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=_seeded())
 
     assert derived == {"daily_imported_energy": 8.0, "daily_exported_energy": 0.0}
     assert out["daily_imported_energy"]["value"] == 8.0
@@ -360,7 +361,7 @@ def test_grid_daily_holds_an_untrusted_counter_without_moving_its_baseline():
     """
     data = {"total_imported_energy": _point(4_294_967.0), "daily_imported_energy": _point(1.5)}
 
-    out, state, derived = apply_derived_daily_grid_energy(
+    out, state, derived = apply_derived_daily_energy(
         data, local_date=_DAY, state=_seeded(), untrusted=frozenset({"total_imported_energy"})
     )
 
@@ -372,7 +373,7 @@ def test_grid_daily_holds_an_untrusted_counter_without_moving_its_baseline():
 
 def test_grid_daily_untrusted_counter_leaves_the_code_absent_when_there_is_no_register():
     """No register to fall back on → the entity reads unknown rather than a spike."""
-    out, _, derived = apply_derived_daily_grid_energy(
+    out, _, derived = apply_derived_daily_energy(
         {"total_imported_energy": _point(4_294_967.0)},
         local_date=_DAY,
         state=_seeded(),
@@ -383,7 +384,7 @@ def test_grid_daily_untrusted_counter_leaves_the_code_absent_when_there_is_no_re
     assert "daily_imported_energy" not in out
 
 
-def test_grid_daily_state_store_roundtrip():
+def test_energy_daily_state_store_roundtrip():
     """Per-counter baselines survive serialize → deserialize."""
     state = DerivedDailyEnergyState(
         baselines={
@@ -394,3 +395,75 @@ def test_grid_daily_state_store_roundtrip():
     assert DerivedDailyEnergyState.from_store(state.to_store()) == state
     assert DerivedDailyEnergyState.from_store(None).baselines == {}
     assert DerivedDailyEnergyState.from_store({"total_imported_energy": "nope"}).baselines == {}
+
+
+# ---------------------------------------------------------------------------
+# Software-derived daily battery charge/discharge (#486)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("total_code", "daily_code"),
+    [("total_battery_charge", "daily_battery_charge"), ("total_battery_discharge", "daily_battery_discharge")],
+)
+def test_battery_daily_derived_from_the_lifetime_counter(total_code, daily_code):
+    """The daily battery figure is today's share of the lifetime counter, not the raw register.
+
+    Some SH firmware never resets 13039/13025 at midnight (#431), so the raw value can be a
+    multi-day total; the derivation replaces it and keeps it alongside for comparison.
+    """
+    data = {total_code: _point(1250.4), daily_code: _point(87.3)}
+
+    out, state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=_seeded(total_code, 1240.0))
+
+    assert derived == {daily_code: 10.4}
+    assert out[daily_code]["value"] == 10.4
+    assert out[daily_code]["source"] == "modbus_derived"
+    assert out[daily_code]["raw_register_value"] == 87.3
+    assert state.baselines[total_code].last_total == 1250.4
+
+
+def test_battery_daily_resets_at_local_midnight():
+    """The first sample of a new day anchors on yesterday's last total, so the day restarts."""
+    out, state, _ = apply_derived_daily_energy(
+        {"total_battery_charge": _point(1251.0)},
+        local_date=date(2026, 9, 21),
+        state=DerivedDailyEnergyState(
+            baselines={
+                "total_battery_charge": DerivedDailyBaseline(baseline=1240.0, baseline_date=_DAY, last_total=1250.4)
+            }
+        ),
+    )
+
+    assert out["daily_battery_charge"]["value"] == 0.6
+    assert state.baselines["total_battery_charge"].baseline == 1250.4
+
+
+def test_battery_and_grid_counters_derive_side_by_side():
+    """Battery pairs share the per-counter state without disturbing the grid baselines."""
+    data = {"total_imported_energy": _point(6470.0), "total_battery_discharge": _point(900.0)}
+    state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DerivedDailyBaseline(baseline=6462.0, baseline_date=_DAY, last_total=6462.0),
+            "total_battery_discharge": DerivedDailyBaseline(baseline=895.5, baseline_date=_DAY, last_total=895.5),
+        }
+    )
+
+    _, new_state, derived = apply_derived_daily_energy(data, local_date=_DAY, state=state)
+
+    assert derived == {"daily_imported_energy": 8.0, "daily_battery_discharge": 4.5}
+    assert set(new_state.baselines) == {"total_imported_energy", "total_battery_discharge"}
+
+
+def test_each_counter_is_judged_against_its_own_ceiling():
+    """Grid counters use the grid ceiling, battery counters the (lower) battery ceiling."""
+    ceilings = {counter.total_code: counter.max_power_w for counter in DERIVED_DAILY_COUNTERS}
+    assert ceilings == {
+        "total_imported_energy": MAX_GRID_POWER_W,
+        "total_exported_energy": MAX_GRID_POWER_W,
+        "total_battery_charge": MAX_BATTERY_POWER_W,
+        "total_battery_discharge": MAX_BATTERY_POWER_W,
+    }
+    # 0.6 kWh in 30 s is 72 kW: possible over a grid connection, not into a battery.
+    assert implausible_counter_jump(100.0, 100.6, 30.0) is False
+    assert implausible_counter_jump(100.0, 100.6, 30.0, max_power_w=MAX_BATTERY_POWER_W) is True

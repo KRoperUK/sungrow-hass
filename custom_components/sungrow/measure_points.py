@@ -381,9 +381,9 @@ _CUMULATIVE_ENERGY_POINT_IDS = frozenset(
 # ``daily_yield`` is deliberately excluded from this list: the coordinator overwrites it
 # with the derived-daily value (derived_daily.py), which *does* reset at local midnight, so
 # it stays a genuine ENERGY / TOTAL_INCREASING sensor. Cloud daily points are also left
-# untouched — iSolarCloud computes them server-side and resets them reliably. The two grid
-# codes below have a derived counterpart that *is* an Energy-dashboard source — see
-# ``_DERIVED_ENERGY_CODES``.
+# untouched — iSolarCloud computes them server-side and resets them reliably. The grid and
+# battery charge/discharge codes below have a derived counterpart that *is* an
+# Energy-dashboard source — see ``_DERIVED_ENERGY_CODES`` (#471/#486).
 _RESETTING_ENERGY_CODES = frozenset(
     {
         "daily_pv_gen_battery_discharge",
@@ -397,7 +397,7 @@ _RESETTING_ENERGY_CODES = frozenset(
     }
 )
 
-# --- Locally derived daily energy (issue #471) --------------------------------
+# --- Locally derived daily energy (issues #471 / #486) -------------------------
 # The daily codes the coordinator computes from their lifetime counter instead of
 # trusting the device register (``source: modbus_derived``). The raw registers stay
 # plain measurements above — we don't know what a given firmware puts in them — but our
