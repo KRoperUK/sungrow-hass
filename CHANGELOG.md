@@ -34,6 +34,21 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.5.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.4.0...v6.5.0) (2026-10-07)
+
+
+### Features
+
+* **modbus:** configurable Modbus TCP port for local entries ([#492](https://github.com/KRoperUK/sungrow-hass/issues/492)) ([2a35e41](https://github.com/KRoperUK/sungrow-hass/commit/2a35e413cbdf4237f0b648c36238238406b51bfa)), closes [#485](https://github.com/KRoperUK/sungrow-hass/issues/485)
+* **schedule:** sunrise/sunset-relative window boundaries ([#493](https://github.com/KRoperUK/sungrow-hass/issues/493)) ([bd6feda](https://github.com/KRoperUK/sungrow-hass/commit/bd6fedaaef2bafb5285343dcf4772803b1bcf233))
+
+
+### Bug Fixes
+
+* **modbus:** derive daily battery charge/discharge so the Energy dashboard accepts them ([#491](https://github.com/KRoperUK/sungrow-hass/issues/491)) ([c7f2c85](https://github.com/KRoperUK/sungrow-hass/commit/c7f2c85a619ae879c192d4be886d8f0c06e57a3c)), closes [#486](https://github.com/KRoperUK/sungrow-hass/issues/486)
+* **sensor:** hold server-derived load totals through small recompute dips ([#494](https://github.com/KRoperUK/sungrow-hass/issues/494)) ([b833e78](https://github.com/KRoperUK/sungrow-hass/commit/b833e78879b43e34ce2c03f1b82d84a424cbe687)), closes [#487](https://github.com/KRoperUK/sungrow-hass/issues/487)
+* set unit_class on backfilled statistics for Home Assistant 2026.11 ([#502](https://github.com/KRoperUK/sungrow-hass/issues/502)) ([a800533](https://github.com/KRoperUK/sungrow-hass/commit/a8005335655c347e086b28af37f029c7fb862f91))
+
 ## [6.4.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.3.0...v6.4.0) (2026-09-20)
 
 
