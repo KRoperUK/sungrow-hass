@@ -92,6 +92,7 @@ def test_build_series_target_energy_metadata_shape():
             "name": None,
             "source": "recorder",
             "statistic_id": "sensor.plant_total_yield",
+            "unit_class": "energy",
             "unit_of_measurement": "kWh",
         },
     )
@@ -111,6 +112,7 @@ def test_build_series_target_power_metadata_shape():
     assert target.metadata["has_mean"] is True
     assert target.metadata["mean_type"] == StatisticMeanType.ARITHMETIC
     assert target.metadata["has_sum"] is False
+    assert target.metadata["unit_class"] == "power"
     assert target.unit == "W"
     assert target.metadata["unit_of_measurement"] == "W"
     assert target.is_external is False

@@ -425,17 +425,22 @@ def build_series_target(
     # mean at all (they use ``has_sum``). Both fields are set for backward compatibility
     # with older HA that still consults ``has_mean``.
     from homeassistant.components.recorder.models.statistics import StatisticMeanType
+    from homeassistant.util.unit_conversion import EnergyConverter, PowerConverter
 
     mean_type = StatisticMeanType.ARITHMETIC if kind == "power" else StatisticMeanType.NONE
+    # ``unit_class`` is required from HA 2026.11 onwards too: it tells the recorder which
+    # unit converter applies to the series.
+    unit_class = PowerConverter.UNIT_CLASS if kind == "power" else EnergyConverter.UNIT_CLASS
 
     resolved_unit = unit if unit else _DEFAULT_UNIT[kind]
-    metadata: StatisticMetaData = {  # type: ignore[typeddict-item]
+    metadata: StatisticMetaData = {
         "has_mean": kind == "power",
         "mean_type": mean_type,
         "has_sum": kind == "energy",
         "name": None,
         "source": source,
         "statistic_id": statistic_id,
+        "unit_class": unit_class,
         "unit_of_measurement": resolved_unit,
     }
     return SeriesTarget(
