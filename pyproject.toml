@@ -74,3 +74,23 @@ ignore_missing_imports = true
 check_untyped_defs = true
 # Scope to our own package; Home Assistant is imported for types only.
 files = ["custom_components/sungrow"]
+
+# Home Assistant 2026.10 swapped its config-validation backend from voluptuous to
+# ``probatio`` (an API-compatible fork) and types its own APIs — ``async_show_form``,
+# ``ServiceRegistry.async_register``, ``async_register_admin_service`` — against
+# ``probatio.schema.Schema``. The integration keeps ``import voluptuous as vol`` so it
+# still runs on the supported HA floor (HACS ``2025.11.0``, pre-probatio); at runtime on
+# new HA those are the *same object* (HA's ``install_as_voluptuous`` aliases
+# ``sys.modules['voluptuous']`` to probatio), but mypy statically resolves our import to
+# the real ``voluptuous`` package and reports a nominal type mismatch at every
+# ``vol.Schema`` passed into an HA API. The ``arg-type`` relaxation below is scoped to the
+# exact modules that build HA schemas, so it accommodates that one benign cross-type
+# without loosening type checking anywhere else. Revisit if the floor rises past the
+# probatio switch (then ``import probatio as vol`` is the clean fix).
+[[tool.mypy.overrides]]
+module = [
+    "sungrow.config_flow",
+    "sungrow.services",
+    "sungrow._config_flow.*",
+]
+disable_error_code = ["arg-type"]
