@@ -54,3 +54,44 @@ refresh_tokens:
       selector:
         config_entry:
           integration: sungrow
+read_registers:
+  fields:
+    config_entry:
+      required: true
+      selector:
+        config_entry:
+          integration: sungrow
+    register_type:
+      required: false
+      example: input
+      default: input
+      selector:
+        select:
+          options:
+            - input
+            - holding
+    start:
+      required: true
+      example: 4999
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
+    count:
+      required: false
+      example: 2
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 125
+          mode: box
+    unit:
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 247
+          mode: box

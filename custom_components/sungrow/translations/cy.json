@@ -368,6 +368,32 @@
           "description": "Cofnod OAuth Sungrow i'w adnewyddu. Gadewch yn wag i adnewyddu pob cofnod cwmwl wedi'i lwytho."
         }
       }
+    },
+    "read_registers": {
+      "name": "Darllen cofrestrau Modbus",
+      "description": "Darllen bloc cofrestr Modbus crai o gofnod Modbus lleol a dychwelyd y geiriau 16-did ynghyd â dadgodiadau u16/s16/u32/s32 fel ymateb. Darllen yn unig — nid yw byth yn ysgrifennu. Defnyddiwch ef i wirio cyfeiriad, lled, graddfa neu amgodiad cofrestr yn erbyn eich caledwedd a gludo'r canlyniad i mewn i fater.",
+      "fields": {
+        "config_entry": {
+          "name": "Integreiddio",
+          "description": "Y cofnod Sungrow Modbus lleol i ddarllen ohono."
+        },
+        "register_type": {
+          "name": "Math o gofrestr",
+          "description": "Cofrestrau mewnbwn (FC4, mesuriadau darllen yn unig) neu gofrestrau dal (FC3, ffurfweddu/rheoli). Rhagosodiad yw input."
+        },
+        "start": {
+          "name": "Cyfeiriad cychwyn",
+          "description": "Cyfeiriad cychwyn ar-y-wifren (rhif y gofrestr a ddogfennwyd llai un, e.e. 5000 a ddogfennwyd → 4999)."
+        },
+        "count": {
+          "name": "Cyfrif",
+          "description": "Nifer y cofrestrau i'w darllen (1–125)."
+        },
+        "unit": {
+          "name": "ID Slave",
+          "description": "Uned / id slave Modbus dewisol i'w brofi (e.e. batri SBR ar 200). Rhagosodiad yw uned ffurfweddedig y cofnod."
+        }
+      }
     }
   },
   "selector": {

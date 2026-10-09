@@ -368,6 +368,32 @@
           "description": "Sungrow OAuth config entry to refresh. Leave empty to refresh every loaded cloud entry."
         }
       }
+    },
+    "read_registers": {
+      "name": "Read Modbus registers",
+      "description": "Read a raw Modbus register block from a local Modbus entry and return the 16-bit words plus u16/s16/u32/s32 decodings as a response. Read-only — never writes. Use it to verify a register address, width, scale or encoding against your hardware and paste the result into an issue.",
+      "fields": {
+        "config_entry": {
+          "name": "Integration",
+          "description": "The local Modbus Sungrow entry to read from."
+        },
+        "register_type": {
+          "name": "Register type",
+          "description": "Input registers (FC4, read-only measurements) or holding registers (FC3, config/control). Defaults to input."
+        },
+        "start": {
+          "name": "Start address",
+          "description": "On-the-wire start address (the documented register number minus one, e.g. documented 5000 → 4999)."
+        },
+        "count": {
+          "name": "Count",
+          "description": "Number of registers to read (1–125)."
+        },
+        "unit": {
+          "name": "Slave ID",
+          "description": "Optional Modbus unit / slave id to probe (e.g. an SBR battery at 200). Defaults to the entry's configured unit."
+        }
+      }
     }
   },
   "selector": {

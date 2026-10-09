@@ -227,6 +227,43 @@ unavailable-after-reboot problem.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer setup and guidelines.
 By participating, you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+### Helping verify a Modbus register
+
+Several Modbus features are blocked only on confirming a register's address,
+width, scale or encoding against real hardware (for example
+[#483](https://github.com/KRoperUK/sungrow-hass/issues/483),
+[#453](https://github.com/KRoperUK/sungrow-hass/issues/453) and
+[#334](https://github.com/KRoperUK/sungrow-hass/issues/334)). If you run a
+**local Modbus** entry you can help without a code change, using the read-only
+`sungrow.read_registers` service.
+
+In **Developer Tools → Actions**, pick *Sungrow: Read Modbus registers*, choose
+your local Modbus integration entry, and set:
+
+- **Register type** — `input` (FC4, measurements) or `holding` (FC3,
+  config/control). Defaults to `input`.
+- **Start address** — the **on-the-wire** address, which is the *documented*
+  register number minus one (documented `5000` → `4999`).
+- **Count** — how many registers to read (1–125).
+- **Slave ID** — optional; only needed to probe a non-default unit, e.g. an SBR
+  battery at `200` ([#334](https://github.com/KRoperUK/sungrow-hass/issues/334)).
+
+The service is **read-only** — it never writes — and it reuses the entry's
+existing WiNet-S connection and lock, so it cannot collide with the normal poll.
+It returns the raw 16-bit `registers` plus `decoded` convenience values
+(`u16`/`s16`/`u32`/`s32`, decoded exactly as the register maps are: signed
+two's-complement, 32-bit low-word-first). Paste that whole response into the
+relevant issue so the mapping can be verified before it is added.
+
+```yaml
+action: sungrow.read_registers
+data:
+  config_entry: <your local Modbus entry>
+  register_type: input
+  start: 4999   # documented 5000
+  count: 4
+```
+
 ### Running Tests
 
 ```bash

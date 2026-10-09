@@ -3,6 +3,8 @@
 * ``sungrow.backfill`` — on-demand historical statistics import (admin).
 * ``sungrow.set_battery_mode`` — set the unified battery mode for tariff/automation
   dispatch (#255).
+* ``sungrow.read_registers`` — read-only Modbus register probe for community register
+  verification against real hardware (#488).
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import voluptuous as vol
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -30,10 +32,22 @@ _LOGGER = logging.getLogger(__name__)
 SERVICE_BACKFILL = "backfill"
 SERVICE_SET_BATTERY_MODE = "set_battery_mode"
 SERVICE_REFRESH_TOKENS = "refresh_tokens"
+SERVICE_READ_REGISTERS = "read_registers"
 ATTR_CONFIG_ENTRY = "config_entry"
 ATTR_START_DATE = "start_date"
 ATTR_MODE = "mode"
 ATTR_DURATION_MINUTES = "duration_minutes"
+ATTR_REGISTER_TYPE = "register_type"
+ATTR_START = "start"
+ATTR_COUNT = "count"
+ATTR_UNIT = "unit"
+
+# Modbus application protocol limits. A single read response PDU holds at most 125
+# 16-bit registers (253-byte PDU), and the register address space is 16-bit.
+_MAX_REGISTER_COUNT = 125
+_MAX_REGISTER_ADDRESS = 0xFFFF
+_REGISTER_TYPE_INPUT = "input"
+_REGISTER_TYPE_HOLDING = "holding"
 
 # Keep in sync with select.BATTERY_MODE_SERVICE_KEYS (avoid circular import with select).
 _BATTERY_MODE_KEYS = ("self_consumption", "force_charge", "force_discharge", "stop")
@@ -59,6 +73,18 @@ _SET_BATTERY_MODE_SCHEMA = vol.Schema(
 _REFRESH_TOKENS_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
+    }
+)
+
+_READ_REGISTERS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_CONFIG_ENTRY): cv.string,
+        vol.Optional(ATTR_REGISTER_TYPE, default=_REGISTER_TYPE_INPUT): vol.In(
+            (_REGISTER_TYPE_INPUT, _REGISTER_TYPE_HOLDING)
+        ),
+        vol.Required(ATTR_START): vol.All(vol.Coerce(int), vol.Range(min=0, max=_MAX_REGISTER_ADDRESS)),
+        vol.Optional(ATTR_COUNT, default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=_MAX_REGISTER_COUNT)),
+        vol.Optional(ATTR_UNIT): vol.All(vol.Coerce(int), vol.Range(min=0, max=247)),
     }
 )
 
@@ -125,6 +151,50 @@ def _resolve_oauth_entries(hass: HomeAssistant, entry_id: str | None) -> list[An
             f"Config entry '{entry_id}' uses user-account login; there is no OAuth refresh token to force"
         )
     return [entry]
+
+
+def _resolve_modbus_client(hass: HomeAssistant, entry_id: str) -> Any:
+    """Resolve the live Modbus client for a local entry (#488 register probe).
+
+    The probe only makes sense on a loaded local-Modbus entry: it reuses that
+    entry's single WiNet-S connection and its serialising lock. Cloud and
+    user-account entries have no Modbus client and are rejected with a clear
+    :class:`ServiceValidationError`.
+    """
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN:
+        raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
+    if entry.state is not ConfigEntryState.LOADED:
+        raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
+    if entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY:
+        raise ServiceValidationError(
+            f"Config entry '{entry_id}' is not a local Modbus entry; the register probe is Modbus-only"
+        )
+    data = getattr(entry, "runtime_data", None)
+    for coordinator in getattr(data, "coordinators", None) or []:
+        client = getattr(coordinator, "_modbus_client", None)
+        if client is not None:
+            return client
+    raise ServiceValidationError(f"Config entry '{entry_id}' has no live Modbus client (not fully loaded?)")
+
+
+def _decode_words(words: list[int]) -> dict[str, Any]:
+    """Decode raw 16-bit words into the integration's u16/s16/u32/s32 conventions.
+
+    Reuses :func:`modbus_registers._combine` so the probe's convenience decodings
+    match exactly how the register maps are decoded (signed two's-complement,
+    32-bit low-word-first). The 32-bit decodings pair word ``n`` with ``n+1`` and are
+    only present where a following word exists, so a trailing word yields 16-bit
+    decodings only.
+    """
+    from .modbus_registers import _combine  # noqa: PLC0415
+
+    return {
+        "u16": [_combine([w], 0, "u16") for w in words],
+        "s16": [_combine([w], 0, "s16") for w in words],
+        "u32": [_combine(words, i, "u32") for i in range(len(words) - 1)],
+        "s32": [_combine(words, i, "s32") for i in range(len(words) - 1)],
+    }
 
 
 def _battery_mode_registry(hass: HomeAssistant) -> dict[str, Any]:
@@ -298,3 +368,62 @@ def async_setup_services(hass: HomeAssistant) -> None:
             schema=_REFRESH_TOKENS_SCHEMA,
         )
         _LOGGER.debug("Registered %s.%s service", DOMAIN, SERVICE_REFRESH_TOKENS)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_READ_REGISTERS):
+
+        async def _handle_read_registers(call: ServiceCall) -> ServiceResponse:
+            """Read a raw Modbus register block from a local entry and return it (#488).
+
+            Read-only diagnostics path: a user with real hardware can read any input
+            or holding register block from Developer Tools and paste the response into
+            an issue to verify an address / width / scale before it is added to a map.
+            It reuses the coordinator's existing WiNet-S client and its lock, so it
+            cannot open a second connection or collide with the poll.
+            """
+            # Imported lazily to avoid importing the Modbus transport at module load
+            # for cloud-only installations.
+            from .modbus import SungrowModbusError  # noqa: PLC0415
+
+            client = _resolve_modbus_client(hass, call.data[ATTR_CONFIG_ENTRY])
+            register_type = call.data[ATTR_REGISTER_TYPE]
+            start = call.data[ATTR_START]
+            count = call.data[ATTR_COUNT]
+            unit_override = call.data.get(ATTR_UNIT)
+
+            # The address space is 16-bit; a block must not run past its end.
+            if start + count - 1 > _MAX_REGISTER_ADDRESS:
+                raise ServiceValidationError(
+                    f"Register block {start}..{start + count - 1} runs past the 16-bit address space "
+                    f"(max {_MAX_REGISTER_ADDRESS})"
+                )
+
+            # Optionally probe a different slave id (e.g. an SBR battery at unit 200,
+            # #334) without touching the configured poll unit. The override is applied
+            # inside the client lock, so a concurrent poll never observes it.
+            try:
+                if register_type == _REGISTER_TYPE_HOLDING:
+                    words = await client.async_read_holding(start, count, unit=unit_override)
+                else:
+                    words = await client.async_read_input(start, count, unit=unit_override)
+            except SungrowModbusError as err:
+                raise HomeAssistantError(
+                    f"Modbus {register_type} read at {start} (count {count}) failed: {err}"
+                ) from err
+
+            return {
+                "register_type": register_type,
+                "start": start,
+                "count": count,
+                "unit": unit_override if unit_override is not None else client.unit,
+                "registers": list(words),
+                "decoded": _decode_words(list(words)),
+            }
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            _handle_read_registers,
+            schema=_READ_REGISTERS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+        _LOGGER.debug("Registered %s.%s service", DOMAIN, SERVICE_READ_REGISTERS)

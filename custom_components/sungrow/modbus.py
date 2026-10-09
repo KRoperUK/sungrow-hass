@@ -256,14 +256,40 @@ class SungrowModbusClient:
             lambda: self._client.read_input_registers(address, count=count, device_id=self.unit),
         )
 
-    async def async_read_holding(self, address: int, count: int = 1) -> list[int]:
-        """Read holding registers (FC3) for config/control probes and future #220 writes."""
+    async def async_read_input(self, address: int, count: int = 1, *, unit: int | None = None) -> list[int]:
+        """Read input registers (FC4) under the connection lock.
+
+        Public counterpart to the internal :meth:`_read_input` (which assumes the
+        caller already holds ``_lock`` inside a batched poll). Used by the
+        ``sungrow.read_registers`` diagnostics service so an ad-hoc probe serialises
+        against the coordinator's poll on the single WiNet-S connection (#488).
+
+        ``unit`` overrides the configured slave id for this read only (e.g. an SBR
+        battery at unit 200, #334). The override is applied and restored inside the
+        lock, so a concurrent poll never observes a changed unit.
+        """
         async with self._lock:
+            device_id = self.unit if unit is None else unit
+            return await self._transact_read(
+                "input",
+                address,
+                count,
+                lambda: self._client.read_input_registers(address, count=count, device_id=device_id),
+            )
+
+    async def async_read_holding(self, address: int, count: int = 1, *, unit: int | None = None) -> list[int]:
+        """Read holding registers (FC3) for config/control probes and future #220 writes.
+
+        ``unit`` overrides the configured slave id for this read only (#488/#334),
+        applied inside the lock so a concurrent poll is unaffected.
+        """
+        async with self._lock:
+            device_id = self.unit if unit is None else unit
             return await self._transact_read(
                 "holding",
                 address,
                 count,
-                lambda: self._client.read_holding_registers(address, count=count, device_id=self.unit),
+                lambda: self._client.read_holding_registers(address, count=count, device_id=device_id),
             )
 
     async def async_write_holding(self, address: int, value: int) -> None:

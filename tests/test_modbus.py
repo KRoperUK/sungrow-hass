@@ -1327,3 +1327,60 @@ def test_sh_map_decodes_canonical_yield_codes():
     assert out["total_yield"]["value"] == 1492.0
     assert "daily_pv_generation" not in out
     assert "total_pv_generation" not in out
+
+
+# ---------------------------------------------------------------------------
+# Public probe reads (async_read_input / async_read_holding) — #488
+# ---------------------------------------------------------------------------
+
+
+async def test_async_read_input_returns_raw_words():
+    """async_read_input returns the raw 16-bit words under the lock, no decoding."""
+    cls, inner = _mock_client_cls([111, 222, 333])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1)
+        _skip_family_detect(client)
+        words = await client.async_read_input(4999, 3)
+    assert words == [111, 222, 333]
+    inner.read_input_registers.assert_awaited_once_with(4999, count=3, device_id=1)
+
+
+async def test_async_read_input_unit_override_does_not_mutate_configured_unit():
+    """A per-call unit override is passed through but the client's unit is unchanged."""
+    cls, inner = _mock_client_cls([7])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1)
+        _skip_family_detect(client)
+        await client.async_read_input(13000, 1, unit=200)
+    inner.read_input_registers.assert_awaited_once_with(13000, count=1, device_id=200)
+    assert client.unit == 1  # the configured poll unit is untouched
+
+
+async def test_async_read_holding_returns_raw_words():
+    """async_read_holding reads FC3 registers and returns the raw words."""
+    cls, inner = _mock_client_cls([42])
+    inner.read_holding_registers = AsyncMock(return_value=inner.read_input_registers.return_value)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1)
+        _skip_family_detect(client)
+        words = await client.async_read_holding(13049, 1, unit=5)
+    assert words == [42]
+    inner.read_holding_registers.assert_awaited_once_with(13049, count=1, device_id=5)
+
+
+async def test_async_read_input_serialises_against_a_held_lock():
+    """A probe read waits on the client lock, so it can't collide with the poll."""
+    import asyncio
+
+    cls, inner = _mock_client_cls([1])
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1)
+        _skip_family_detect(client)
+        await client._lock.acquire()  # noqa: SLF001 - simulate an in-flight poll
+        task = asyncio.ensure_future(client.async_read_input(4999, 1))
+        await asyncio.sleep(0)  # let the task reach the lock
+        assert not task.done()  # blocked while the "poll" holds the lock
+        inner.read_input_registers.assert_not_awaited()
+        client._lock.release()  # noqa: SLF001
+        words = await task
+    assert words == [1]
