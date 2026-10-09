@@ -368,6 +368,32 @@
           "description": "Entrée OAuth Sungrow à actualiser. Laisser vide pour actualiser toutes les entrées cloud chargées."
         }
       }
+    },
+    "read_registers": {
+      "name": "Lire les registres Modbus",
+      "description": "Lit un bloc de registres Modbus bruts depuis une entrée Modbus locale et renvoie les mots 16 bits ainsi que les décodages u16/s16/u32/s32 en réponse. Lecture seule — n'écrit jamais. Utilisez-le pour vérifier l'adresse, la largeur, l'échelle ou l'encodage d'un registre par rapport à votre matériel et coller le résultat dans un ticket.",
+      "fields": {
+        "config_entry": {
+          "name": "Intégration",
+          "description": "L'entrée Sungrow Modbus locale à lire."
+        },
+        "register_type": {
+          "name": "Type de registre",
+          "description": "Registres d'entrée (FC4, mesures en lecture seule) ou registres de maintien (FC3, configuration/contrôle). Par défaut : input."
+        },
+        "start": {
+          "name": "Adresse de départ",
+          "description": "Adresse de départ sur le fil (le numéro de registre documenté moins un, p. ex. documenté 5000 → 4999)."
+        },
+        "count": {
+          "name": "Nombre",
+          "description": "Nombre de registres à lire (1–125)."
+        },
+        "unit": {
+          "name": "ID esclave",
+          "description": "Unité Modbus / id esclave facultatif à interroger (p. ex. une batterie SBR à 200). Par défaut : l'unité configurée de l'entrée."
+        }
+      }
     }
   },
   "selector": {

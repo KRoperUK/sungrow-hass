@@ -6,9 +6,10 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from custom_components.sungrow.const import CONF_TRANSPORT, DOMAIN, TRANSPORT_MODBUS_ONLY
 from custom_components.sungrow.services import (
@@ -271,3 +272,209 @@ async def test_refresh_tokens_service_no_entries_raises(hass: HomeAssistant):
         pytest.raises(ServiceValidationError, match="No loaded OAuth"),
     ):
         await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {}, blocking=True)
+
+
+# ---------------------------------------------------------------------------
+# read_registers service (#488)
+# ---------------------------------------------------------------------------
+
+
+def _make_modbus_entry(hass, *, entry_id="mb_entry", words=None, read_error=None):
+    """A loaded local-Modbus entry whose coordinator exposes a stub Modbus client."""
+    from unittest.mock import MagicMock as _MagicMock
+
+    client = _MagicMock()
+    client.unit = 1
+
+    async def _read_input(address, count=1, *, unit=None):
+        if read_error is not None:
+            raise read_error
+        return list(words if words is not None else [0] * count)
+
+    async def _read_holding(address, count=1, *, unit=None):
+        if read_error is not None:
+            raise read_error
+        return list(words if words is not None else [0] * count)
+
+    client.async_read_input = AsyncMock(side_effect=_read_input)
+    client.async_read_holding = AsyncMock(side_effect=_read_holding)
+
+    coordinator = _MagicMock()
+    coordinator._modbus_client = client
+
+    entry = _MagicMock()
+    entry.entry_id = entry_id
+    entry.domain = DOMAIN
+    entry.state = ConfigEntryState.LOADED
+    entry.data = {**MOCK_CONFIG_DATA, CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY}
+    entry.runtime_data = _MagicMock()
+    entry.runtime_data.coordinators = [coordinator]
+    return entry, client
+
+
+def test_decode_words_matches_register_map_convention():
+    """_decode_words mirrors modbus_registers._combine (signed, 32-bit low-word-first)."""
+    from custom_components.sungrow.services import _decode_words
+
+    # 0xFFFF -> s16 -1; low word 0x0001 high word 0x0000 -> u32 1 (low-word-first).
+    decoded = _decode_words([0xFFFF, 0x0001, 0x0000])
+    assert decoded["u16"] == [0xFFFF, 1, 0]
+    assert decoded["s16"] == [-1, 1, 0]
+    # u32 pairs (n, n+1) low-word-first: (0xFFFF + (1<<16)) then (1 + 0).
+    assert decoded["u32"] == [0xFFFF + (1 << 16), 1]
+    assert decoded["s32"] == [0xFFFF + (1 << 16), 1]
+
+
+def test_decode_words_single_word_has_no_32bit_decoding():
+    """A lone word yields only 16-bit decodings (no n+1 to pair with)."""
+    from custom_components.sungrow.services import _decode_words
+
+    decoded = _decode_words([0x1234])
+    assert decoded["u16"] == [0x1234]
+    assert decoded["u32"] == []
+    assert decoded["s32"] == []
+
+
+async def test_read_registers_rejects_non_modbus_entry(hass: HomeAssistant):
+    """A cloud entry has no Modbus client; the probe refuses it."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    cloud = _make_entry(hass, entry_id="cloud1")  # cloud_only transport
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=cloud),
+        pytest.raises(ServiceValidationError, match="not a local Modbus entry"),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": "cloud1", "start": 4999},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_read_registers_returns_words_and_decoding(hass: HomeAssistant):
+    """A successful input read returns raw words plus the convenience decodings."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, client = _make_modbus_entry(hass, words=[0x0005, 0x0000])
+    async_setup_services(hass)
+
+    with patch.object(hass.config_entries, "async_get_entry", return_value=entry):
+        resp = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "register_type": "input", "start": 5002, "count": 2},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert resp["registers"] == [5, 0]
+    assert resp["decoded"]["u16"] == [5, 0]
+    assert resp["decoded"]["u32"] == [5]
+    assert resp["register_type"] == "input"
+    assert resp["start"] == 5002
+    client.async_read_input.assert_awaited_once_with(5002, 2, unit=None)
+
+
+async def test_read_registers_holding_type_uses_holding_read(hass: HomeAssistant):
+    """register_type=holding routes to async_read_holding."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, client = _make_modbus_entry(hass, words=[9])
+    async_setup_services(hass)
+
+    with patch.object(hass.config_entries, "async_get_entry", return_value=entry):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "register_type": "holding", "start": 13049, "count": 1},
+            blocking=True,
+            return_response=True,
+        )
+
+    client.async_read_holding.assert_awaited_once_with(13049, 1, unit=None)
+    client.async_read_input.assert_not_awaited()
+
+
+async def test_read_registers_passes_unit_override(hass: HomeAssistant):
+    """An explicit unit is forwarded to the client read (e.g. SBR at 200, #334)."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, client = _make_modbus_entry(hass, words=[1])
+    async_setup_services(hass)
+
+    with patch.object(hass.config_entries, "async_get_entry", return_value=entry):
+        resp = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "start": 13000, "count": 1, "unit": 200},
+            blocking=True,
+            return_response=True,
+        )
+
+    client.async_read_input.assert_awaited_once_with(13000, 1, unit=200)
+    assert resp["unit"] == 200
+
+
+async def test_read_registers_count_out_of_range_rejected(hass: HomeAssistant):
+    """count above the 125-register PDU cap fails schema validation."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, _ = _make_modbus_entry(hass)
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(vol.Invalid),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "start": 0, "count": 126},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_read_registers_block_past_address_space_rejected(hass: HomeAssistant):
+    """A block whose end runs past the 16-bit address space is rejected."""
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, _ = _make_modbus_entry(hass)
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(ServiceValidationError, match="past the 16-bit address space"),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "start": 65535, "count": 2},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_read_registers_modbus_error_surfaces_as_home_assistant_error(hass: HomeAssistant):
+    """A SungrowModbusError from the client is re-raised as HomeAssistantError."""
+    from custom_components.sungrow.modbus import SungrowModbusError
+    from custom_components.sungrow.services import SERVICE_READ_REGISTERS
+
+    entry, _ = _make_modbus_entry(hass, read_error=SungrowModbusError("Illegal Data Address"))
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(HomeAssistantError, match="Illegal Data Address"),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_READ_REGISTERS,
+            {"config_entry": entry.entry_id, "start": 9999, "count": 1},
+            blocking=True,
+            return_response=True,
+        )

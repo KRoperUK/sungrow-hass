@@ -368,6 +368,32 @@
           "description": "Entrada OAuth de Sungrow a actualizar. Dejar vacío para actualizar todas las entradas de nube cargadas."
         }
       }
+    },
+    "read_registers": {
+      "name": "Leer registros Modbus",
+      "description": "Lee un bloque de registros Modbus en bruto de una entrada Modbus local y devuelve las palabras de 16 bits más las decodificaciones u16/s16/u32/s32 como respuesta. Solo lectura — nunca escribe. Úsalo para verificar una dirección, anchura, escala o codificación de registro contra tu hardware y pegar el resultado en una incidencia.",
+      "fields": {
+        "config_entry": {
+          "name": "Integración",
+          "description": "La entrada Sungrow Modbus local desde la que leer."
+        },
+        "register_type": {
+          "name": "Tipo de registro",
+          "description": "Registros de entrada (FC4, mediciones de solo lectura) o registros holding (FC3, configuración/control). Predeterminado: input."
+        },
+        "start": {
+          "name": "Dirección inicial",
+          "description": "Dirección inicial en el cable (el número de registro documentado menos uno, p. ej. documentado 5000 → 4999)."
+        },
+        "count": {
+          "name": "Cantidad",
+          "description": "Número de registros a leer (1–125)."
+        },
+        "unit": {
+          "name": "ID de esclavo",
+          "description": "Unidad Modbus / id de esclavo opcional a consultar (p. ej. una batería SBR en 200). Predeterminado: la unidad configurada de la entrada."
+        }
+      }
     }
   },
   "selector": {

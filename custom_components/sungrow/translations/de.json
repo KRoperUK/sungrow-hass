@@ -368,6 +368,32 @@
           "description": "Sungrow-OAuth-Konfigurationseintrag zum Aktualisieren. Leer lassen, um alle geladenen Cloud-Einträge zu aktualisieren."
         }
       }
+    },
+    "read_registers": {
+      "name": "Modbus-Register lesen",
+      "description": "Liest einen rohen Modbus-Registerblock aus einem lokalen Modbus-Eintrag und gibt die 16-Bit-Wörter sowie u16/s16/u32/s32-Dekodierungen als Antwort zurück. Nur-Lesen — schreibt nie. Verwenden Sie es, um eine Registeradresse, -breite, -skalierung oder -kodierung gegen Ihre Hardware zu prüfen und das Ergebnis in ein Issue einzufügen.",
+      "fields": {
+        "config_entry": {
+          "name": "Integration",
+          "description": "Der lokale Modbus-Sungrow-Eintrag, aus dem gelesen wird."
+        },
+        "register_type": {
+          "name": "Registertyp",
+          "description": "Eingangsregister (FC4, schreibgeschützte Messwerte) oder Holding-Register (FC3, Konfiguration/Steuerung). Standard ist input."
+        },
+        "start": {
+          "name": "Startadresse",
+          "description": "On-the-wire-Startadresse (die dokumentierte Registernummer minus eins, z. B. dokumentiert 5000 → 4999)."
+        },
+        "count": {
+          "name": "Anzahl",
+          "description": "Anzahl der zu lesenden Register (1–125)."
+        },
+        "unit": {
+          "name": "Slave-ID",
+          "description": "Optionale Modbus-Einheit / Slave-ID zum Abfragen (z. B. eine SBR-Batterie bei 200). Standard ist die konfigurierte Einheit des Eintrags."
+        }
+      }
     }
   },
   "selector": {
