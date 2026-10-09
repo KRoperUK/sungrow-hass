@@ -676,10 +676,55 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # gets its sensors at runtime.
             self.devices[:] = list(devices)
         mapped = map_device_list_to_points(self.devices)
+        # In some regions the device-list response carries only device *metadata*
+        # (``uuid``/``ps_key``/name) and omits the embedded ``point_data`` array, so the
+        # mapper above produces nothing for that device and its battery/meter never
+        # appears — the #405 symptom (device visible in the app and in ``devices``, but no
+        # entity, no error). The readings for those devices live behind the separate
+        # per-device realtime endpoint keyed by ``ps_key`` (the same call the OAuth path
+        # uses), so fetch them for any device the list did not already carry points for.
+        await self._async_fill_user_device_realtime(mapped)
         self.device_data = {
             uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud_user")))
             for uuid, points in mapped.items()
         }
+
+    async def _async_fill_user_device_realtime(self, mapped: dict[str, dict[str, Any]]) -> None:
+        """Backfill ``mapped`` with per-device realtime for devices the list left empty (#405).
+
+        Mutates ``mapped`` in place. For every device in ``self.devices`` that has a
+        ``ps_key`` but produced no points from its embedded ``point_data``, fetch the
+        app's per-device realtime (``queryDeviceRealTimeDataByPsKeys``) in a single
+        batched call and merge the returned ``{uuid: {point_id: {...}}}`` in. Best-effort
+        and non-fatal: a failure leaves the embedded-mapping result (and any last-known
+        values) untouched, matching the rest of this transport's degrade-don't-vanish
+        contract.
+        """
+        assert self._user_auth is not None
+        ps_key_by_uuid: dict[str, str] = {}
+        for device in self.devices:
+            if not isinstance(device, dict):
+                continue
+            uuid = device.get("uuid")
+            ps_key = device.get("ps_key")
+            # Only devices the list did not already carry readings for, and only when a
+            # ps_key is present to drive the realtime call.
+            if uuid is None or not ps_key or mapped.get(str(uuid)):
+                continue
+            ps_key_by_uuid[str(uuid)] = str(ps_key)
+        if not ps_key_by_uuid:
+            return
+        try:
+            async with asyncio.timeout(self._poll_timeout):
+                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
+                realtime = await self._user_auth.async_get_device_realtime(list(ps_key_by_uuid.values()))
+        except (PySolarCloudException, ClientError, TimeoutError) as err:
+            _LOGGER.debug("Per-device realtime backfill failed for plant %s: %s", self.plant_id, err)
+            return
+        for uuid in ps_key_by_uuid:
+            points = realtime.get(uuid)
+            if isinstance(points, dict) and points:
+                mapped[uuid] = points
 
     async def _async_refresh_faults(self) -> None:
         """Best-effort refresh of the plant fault detail from the app fault API (#457).
