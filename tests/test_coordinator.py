@@ -2129,6 +2129,86 @@ async def test_user_update_device_fetch_failure_is_non_fatal(hass: HomeAssistant
     assert coordinator.device_data == {}
 
 
+async def test_user_update_backfills_realtime_when_list_omits_point_data(hass: HomeAssistant):
+    """A device whose list entry carries no embedded point_data is backfilled by ps_key (#405).
+
+    In some regions ``async_get_devices`` returns only device metadata (uuid/ps_key/name)
+    with no ``point_data`` array, so the embedded mapper produces nothing and the battery
+    never appears — even though the readings exist behind the per-device realtime call.
+    This maps those readings in via ``async_get_device_realtime(ps_key)``.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    metadata_only = {
+        "uuid": "dev-battery-1",
+        "ps_key": "KEY-BATTERY-1",
+        "device_type": 43,
+        "device_name": "SBR096",
+        # No ``point_data`` — the #405 region shape.
+    }
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[metadata_only])
+    client.async_get_device_realtime = AsyncMock(
+        return_value={"dev-battery-1": {"58604": {"id": "58604", "value": "49.2", "unit": "%", "name": "Battery SOC"}}}
+    )
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_device_realtime.assert_awaited_once_with(["KEY-BATTERY-1"])
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "49.2"
+    assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
+
+
+async def test_user_update_embedded_point_data_skips_realtime_backfill(hass: HomeAssistant):
+    """When the list already embeds point_data, the extra realtime call is not spent (#405)."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    # The embedded fixture also carries a ps_key, to prove the skip keys off "already has
+    # points", not off "has no ps_key".
+    device = {**_user_battery_device(), "ps_key": "KEY-BATTERY-1"}
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[device])
+    client.async_get_device_realtime = AsyncMock(return_value={})
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    client.async_get_device_realtime.assert_not_awaited()
+    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+
+
+async def test_user_update_realtime_backfill_failure_is_non_fatal(hass: HomeAssistant):
+    """A failed realtime backfill leaves the poll (and plant points) intact (#405)."""
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    metadata_only = {"uuid": "dev-battery-1", "ps_key": "KEY-BATTERY-1", "device_type": 43, "device_name": "SBR096"}
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    client.async_get_devices = AsyncMock(return_value=[metadata_only])
+    client.async_get_device_realtime = AsyncMock(side_effect=PySolarCloudException("boom"))
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["current_power"]["value"] == 490.0
+    assert coordinator.device_data == {}
+
+
 async def test_user_update_refreshes_the_live_device_list(hass: HomeAssistant):
     """A device that appears after setup is picked up, so its sensors arrive at runtime.
 
