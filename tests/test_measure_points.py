@@ -361,6 +361,7 @@ _CUMULATIVE_CLOUD_IDS = (
     "13175",  # total feed-in (PV)
     "83123",  # total feed-in (PV) user-cloud
     "83075",  # feed-in energy total (open API)
+    "83105",  # total purchased energy (plant lifetime import, #507)
     "13134",  # total PV yield
 )
 _CUMULATIVE_LOCAL_CODES = (

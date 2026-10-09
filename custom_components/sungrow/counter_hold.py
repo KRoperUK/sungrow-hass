@@ -99,6 +99,7 @@ HELD_LIFETIME_COUNTERS: dict[str, CounterDipRule] = {
     "13175": _METERED_TOTAL,  # Total Feed-in Energy (PV) — OAuth
     "83123": _METERED_TOTAL,  # Total Feed-in Energy (PV) — user-cloud getPsDetail
     "83075": _METERED_TOTAL,  # Feed-in Energy Total — open API
+    "83105": _METERED_TOTAL,  # Total Purchased Energy (plant lifetime import, #507)
     "total_imported_energy": _METERED_TOTAL,  # Local Modbus
     "total_exported_energy": _METERED_TOTAL,  # Local Modbus
     "total_exported_energy_from_pv": _METERED_TOTAL,  # Local Modbus
