@@ -122,4 +122,90 @@ def test_unlisted_counters_and_odd_values_are_left_alone():
 
 
 def test_table_covers_the_server_derived_load_totals():
-    assert set(HELD_LIFETIME_COUNTERS) == {"83124", "13130", "13137"}
+    # The three server-derived load totals keep the 10% rule.
+    from custom_components.sungrow.counter_hold import _SERVER_DERIVED_TOTAL
+
+    for pid in ("83124", "13130", "13137"):
+        assert HELD_LIFETIME_COUNTERS[pid] is _SERVER_DERIVED_TOTAL
+
+
+def test_table_covers_metered_grid_battery_pv_totals():
+    """#490: grid, battery and PV lifetime totals opt in, on the tighter metered rule."""
+    from custom_components.sungrow.counter_hold import _METERED_TOTAL
+
+    metered = {
+        # battery
+        "58606",
+        "58607",
+        "13034",
+        "13035",
+        "13176",
+        "24622",
+        "24623",
+        "total_battery_charge",
+        "total_battery_discharge",
+        "total_battery_charge_from_pv",
+        # grid
+        "8030",
+        "8031",
+        "13125",
+        "13148",
+        "13175",
+        "83123",
+        "83075",
+        "total_imported_energy",
+        "total_exported_energy",
+        "total_exported_energy_from_pv",
+        # pv yield
+        "13134",
+        "total_yield",
+        "total_pv_gen_battery_discharge",
+        "total_direct_energy_consumption",
+    }
+    for pid in metered:
+        assert HELD_LIFETIME_COUNTERS[pid] is _METERED_TOTAL
+
+
+def test_held_table_is_a_subset_of_the_cumulative_total_set():
+    """Every held counter is one the integration already treats as a lifetime total (#490).
+
+    Guards against the hold table drifting onto a non-monotonic / resetting point, which
+    would wrongly suppress a legitimate decrease.
+    """
+    from custom_components.sungrow.measure_points import _CUMULATIVE_ENERGY_POINT_IDS
+
+    # The server-derived load totals are cumulative-but-not in that frozenset (they are
+    # held, not derivation sources); every *other* held id must be a known lifetime total.
+    load_totals = {"83124", "13130", "13137"}
+    assert set(HELD_LIFETIME_COUNTERS) - load_totals <= _CUMULATIVE_ENERGY_POINT_IDS
+
+
+def _battery(value, *, key="total_battery_charge", point_id="total_battery_charge"):
+    return {key: {"id": point_id, "code": key, "value": value, "unit": "kWh", "source": "modbus"}}
+
+
+def test_metered_small_dip_is_held(caplog):
+    """A sub-1% wobble on a metered total (grid/battery/PV) is held at the last good value."""
+    hold = LifetimeCounterHold()
+    hold.apply("plant", _battery(2000.0))
+    with caplog.at_level(logging.DEBUG, logger="custom_components.sungrow.counter_hold"):
+        out = hold.apply("plant", _battery(1999.9), label="Plant")
+    assert out["total_battery_charge"]["value"] == 2000.0
+    assert "Holding total_battery_charge" in caplog.text
+
+
+def test_metered_threshold_is_tighter_than_server_derived():
+    """Metered counters hold a 1% dip but pass a 2% one — unlike the 10% server-derived rule."""
+    hold = LifetimeCounterHold()
+    hold.apply("plant", _battery(1000.0))
+    # Exactly 1% is still noise -> held.
+    assert hold.apply("plant", _battery(990.0))["total_battery_charge"]["value"] == 1000.0
+    # 2% is beyond the metered band -> passed through (a server-derived counter would hold this).
+    assert hold.apply("plant", _battery(980.0))["total_battery_charge"]["value"] == 980.0
+
+
+def test_metered_real_reset_passes_through():
+    """A genuine reset (fall to near zero) on a metered counter is published, not held."""
+    hold = LifetimeCounterHold()
+    hold.apply("plant", _battery(5000.0))
+    assert hold.apply("plant", _battery(1.2))["total_battery_charge"]["value"] == 1.2
