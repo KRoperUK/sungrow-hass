@@ -6,7 +6,7 @@ from pysolarcloud import Server
 from pysolarcloud.plants import DeviceType
 
 DOMAIN = "sungrow"
-VERSION = "6.5.0"  # x-release-please-version
+VERSION = "6.6.0"  # x-release-please-version
 CONF_APP_KEY = "app_key"
 CONF_APP_SECRET = "app_secret"
 CONF_APP_ID = "app_id"

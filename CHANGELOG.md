@@ -34,6 +34,25 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.6.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.5.0...v6.6.0) (2026-10-09)
+
+
+### Features
+
+* **battery:** expose BMS cell-balancing status (point 58649) ([#504](https://github.com/KRoperUK/sungrow-hass/issues/504)) ([f3f42f1](https://github.com/KRoperUK/sungrow-hass/commit/f3f42f14714cd115cdc8b2f14b0eece1fe39746e)), closes [#501](https://github.com/KRoperUK/sungrow-hass/issues/501)
+* **modbus:** add read-only register probe service ([#488](https://github.com/KRoperUK/sungrow-hass/issues/488)) ([13e91f5](https://github.com/KRoperUK/sungrow-hass/commit/13e91f550a0464385c9156ea1ea916a3bf47474e))
+* **modbus:** read-only register probe service ([#488](https://github.com/KRoperUK/sungrow-hass/issues/488)) ([d2f5e74](https://github.com/KRoperUK/sungrow-hass/commit/d2f5e7430d680ead13383f21b22707bb052a389f))
+* **sensor:** generalise the lifetime-counter dip-hold to grid/battery/PV ([#506](https://github.com/KRoperUK/sungrow-hass/issues/506)) ([e0cc582](https://github.com/KRoperUK/sungrow-hass/commit/e0cc582f6305b2209ce935eff13e1e028eb549fa)), closes [#490](https://github.com/KRoperUK/sungrow-hass/issues/490)
+
+
+### Bug Fixes
+
+* **cloud_user:** backfill per-device realtime when the device list omits point_data ([df7a258](https://github.com/KRoperUK/sungrow-hass/commit/df7a258721348d066249c107319cbdea28767d2f))
+* **cloud_user:** backfill per-device realtime when the device list omits point_data ([e8d5c9a](https://github.com/KRoperUK/sungrow-hass/commit/e8d5c9af44d0bb4c9e9c2c3e687ddd3d36ec457c)), closes [#405](https://github.com/KRoperUK/sungrow-hass/issues/405)
+* **cloud:** recognise plant lifetime import total 83105 as cumulative ([#507](https://github.com/KRoperUK/sungrow-hass/issues/507)) ([caa84d9](https://github.com/KRoperUK/sungrow-hass/commit/caa84d93a3b81fff77278f106d0b03efed335e9e))
+* **cloud:** recognise plant lifetime import total 83105 as cumulative ([#507](https://github.com/KRoperUK/sungrow-hass/issues/507)) ([ee6cef1](https://github.com/KRoperUK/sungrow-hass/commit/ee6cef161bcf3625230d2e191eaac6721a047107))
+* **types:** accommodate HA 2026.10 probatio migration under the dep bump ([33b91d2](https://github.com/KRoperUK/sungrow-hass/commit/33b91d232279cf32f0d170c2c572fbbb90c16db5))
+
 ## [6.5.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.4.0...v6.5.0) (2026-10-07)
 
 
