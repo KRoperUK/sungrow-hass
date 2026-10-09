@@ -66,6 +66,7 @@ _CODE_ICON_OVERRIDES = {
     "afci_fault_count": "mdi:flash-alert",
     "battery_operation_status": "mdi:battery-sync",
     "battery_fault_module_id": "mdi:alert-circle",
+    "battery_balancing_status": "mdi:scale-balance",
 }
 
 # Dimensionless integer tallies displayed without a fractional part (issue-driven:

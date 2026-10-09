@@ -246,6 +246,9 @@ BATTERY_DEVICE_POINTS: dict[str, str] = {
     "58616": "battery_min_module_temperature",
     "58635": "battery_dc_contactor_status",
     "58636": "battery_fault_module_id",
+    # BMS cell-balancing status (#501). Reverse-engineered point (not in the
+    # published catalog); enum sensor via ENUM_MAPS — 0 idle, 2 balancing.
+    "58649": "battery_balancing_status",
 }
 
 # The technical/health subset of the battery points shown as diagnostics; the rest
@@ -263,6 +266,7 @@ BATTERY_DIAGNOSTIC_CODES = frozenset(
         "battery_min_module_temperature",
         "battery_dc_contactor_status",
         "battery_fault_module_id",
+        "battery_balancing_status",
         # Derived spreads between the two above (#430) — the trend that actually
         # flags a weak cell or a thermal problem, so they belong with the health set.
         "cell_imbalance",
