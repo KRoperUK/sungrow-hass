@@ -211,3 +211,12 @@ def test_battery_points_include_cell_health():
     # The pre-existing primary points (SOC, energy) remain and stay primary.
     assert P["58604"] == "battery_level"
     assert "battery_level" not in D
+
+
+def test_battery_points_include_balancing_status():
+    """BMS cell-balancing status (#501) is a diagnostic battery device point."""
+    from custom_components.sungrow.const import BATTERY_DEVICE_POINTS as P
+    from custom_components.sungrow.const import BATTERY_DIAGNOSTIC_CODES as D
+
+    assert P["58649"] == "battery_balancing_status"
+    assert "battery_balancing_status" in D

@@ -457,6 +457,7 @@ def test_acronym_display_names(code, point_id, expected_name):
         ("afci_fault_count", "120", "", "mdi:flash-alert"),
         ("battery_operation_status", "58608", "", "mdi:battery-sync"),
         ("battery_fault_module_id", "58636", "", "mdi:alert-circle"),
+        ("battery_balancing_status", "58649", "", "mdi:scale-balance"),
     ],
 )
 def test_diagnostic_icon_overrides(code, point_id, unit, expected_icon):
@@ -693,6 +694,21 @@ class TestSungrowSensor:
         sensor = SungrowSensor(coordinator, "ev_charger_status", "123", "Plant", data["ev_charger_status"])
 
         assert sensor._attr_device_class == SensorDeviceClass.ENUM
+        assert sensor.native_value is None
+
+    def test_native_value_battery_balancing_status_enum(self):
+        """Balancing status (#501) is an enum sensor: raw 2 -> "Balancing"; unseen 1 -> unknown."""
+        data = {"battery_balancing_status": {"id": "58649", "code": "battery_balancing_status", "value": 2, "unit": ""}}
+        coordinator = self._make_coordinator(data)
+        sensor = SungrowSensor(
+            coordinator, "battery_balancing_status", "123", "Plant", data["battery_balancing_status"]
+        )
+
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM
+        assert sensor._attr_options == ["Idle", "Balancing"]
+        assert sensor.native_value == "Balancing"
+
+        data["battery_balancing_status"]["value"] = 1
         assert sensor.native_value is None
 
     def test_native_value_classified_non_numeric_returns_none(self):

@@ -76,6 +76,17 @@ def test_enum_value_unmapped_code_returns_none():
     assert not isinstance(result, str)
 
 
+def test_enum_battery_balancing_status():
+    # BMS cell-balancing status (#501): 0 idle, 2 balancing. Code 1 is unverified
+    # and deliberately absent, so it maps to None (-> "unknown") like any unlisted code.
+    opts = mp.resolve_enum_options("58649")
+    assert opts == ("Idle", "Balancing")
+    assert mp.resolve_enum_value("58649", 0) == "Idle"
+    assert mp.resolve_enum_value("58649", 2) == "Balancing"
+    assert mp.resolve_enum_value("58649", "2") == "Balancing"
+    assert mp.resolve_enum_value("58649", 1) is None
+
+
 def test_enum_value_unparseable_returns_none():
     assert mp.resolve_enum_value("33716", "not-a-number") is None
 

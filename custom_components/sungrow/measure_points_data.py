@@ -78,11 +78,26 @@ _MICROINVERTER_STATUS: dict[int, str] = {
     37120: "Warn run",
 }
 
+# SBR battery BMS cell-balancing status (point 58649, #501). Reverse-engineered:
+# the point is NOT in the published measuring-point catalog — it was found by
+# enumerating getDeviceRealTimeData IDs with is_get_point_dict=1 (getOpenPointInfo
+# returns E900 for a developer app), and the raw name is 均衡状态 ("balancing status").
+# 0=idle and 2=balancing are VERIFIED against the iSolarCloud portal
+# (Maintenance → Curve → Device comparison) over several days on an SH6.0RT + SBR.
+# Code 1 has never been observed and its meaning is UNVERIFIED, so it is deliberately
+# left out of the table: resolve_enum_value maps any unlisted code to "unknown"
+# rather than inventing a label (#113).
+_BATTERY_BALANCING_STATUS: dict[int, str] = {
+    0: "Idle",
+    2: "Balancing",
+}
+
 ENUM_MAPS: dict[str, dict[int, str]] = {
     "33716": _CHARGER_STATUS,
     "29": _OPERATING_STATUS,
     "13146": _OPERATING_STATUS,
     "51301": _MICROINVERTER_STATUS,
+    "58649": _BATTERY_BALANCING_STATUS,
     # Local-Modbus point-code enum tables (running_state_raw, device_type_code)
     # merged in from ``modbus_registers`` so the existing enum sensor pipeline
     # (options, resolve_enum_value) handles cloud and Modbus points uniformly (#322).
@@ -130,6 +145,7 @@ RAW_POINTS: list[tuple[str, str, str]] = [
     ("58633", "Min. Cell Voltage of Module 8", "mV"),
     ("58635", "DC Contactor Status", ""),
     ("58636", "Fault Module ID", ""),
+    ("58649", "Balancing Status", ""),
     # --- EV charger (common-charger-measuring-points) ---
     ("33708", "Charging Power", "kW"),
     ("33722", "Min. Charge Power", "kW"),
@@ -852,6 +868,7 @@ CODE_ALIASES: dict[str, str] = {
     "wlan_signal_strength": "WLAN Signal Strength",
     "battery_dc_contactor_status": "Battery DC Contactor Status",
     "battery_fault_module_id": "Battery Fault Module ID",
+    "battery_balancing_status": "Battery Balancing Status",
     # Named fields from getPsDetail (cloud_user transport, #292).
     "current_power": "Current Power",
     "today_energy": "Energy Today",
