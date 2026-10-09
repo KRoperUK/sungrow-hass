@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+# BinarySensorDeviceClass is a valid runtime export; HA 2026.10 dropped it from the
+# module's __all__, so mypy's no-implicit-reexport flags it. Ignore scoped to this import.
+from homeassistant.components.binary_sensor import (  # type: ignore[attr-defined]
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
