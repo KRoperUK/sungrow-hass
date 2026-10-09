@@ -69,6 +69,7 @@ _EXPECTED_LIFETIME_IDS = {
     "13175",
     "83123",
     "83075",
+    "83105",
     "total_imported_energy",
     "total_exported_energy",
     "total_exported_energy_from_pv",

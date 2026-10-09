@@ -153,6 +153,7 @@ def test_table_covers_metered_grid_battery_pv_totals():
         "13175",
         "83123",
         "83075",
+        "83105",
         "total_imported_energy",
         "total_exported_energy",
         "total_exported_energy_from_pv",

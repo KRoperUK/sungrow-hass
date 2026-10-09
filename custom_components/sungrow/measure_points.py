@@ -353,6 +353,8 @@ _CUMULATIVE_ENERGY_POINT_IDS = frozenset(
         "13175",  # Total Feed-in Energy (PV) — OAuth
         "83123",  # Total Feed-in Energy (PV) — user-cloud getPsDetail (#281)
         "83075",  # Feed-in Energy Total — open API
+        "83105",  # Total Purchased Energy (plant lifetime import) — the import
+        #          counterpart to the 83123/83075 plant export totals above (#507)
         # Cloud — plant lifetime yield.
         "13134",  # Total PV Yield
         # Local Modbus — lifetime totals (code == point_id on the Modbus path).
