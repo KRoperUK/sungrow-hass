@@ -1,6 +1,6 @@
 # Pinned so a new harness release (which pins a new, possibly beta, homeassistant)
 # arrives as a reviewable Dependabot bump instead of breaking every PR's CI.
-pytest-homeassistant-custom-component==0.13.370
+pytest-homeassistant-custom-component==0.13.372
 
 # Additional test utilities
 pytest-cov
@@ -9,9 +9,9 @@ python-dotenv
 hypothesis
 
 # Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
-ruff==0.16.10
+ruff==0.17.0
 mypy==2.4.0
 
 # Component dependencies
 sungrow-isolarcloud==0.19.0
-pymodbus==3.15.0
+pymodbus==3.16.1
