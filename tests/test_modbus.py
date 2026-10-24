@@ -1237,6 +1237,94 @@ def test_meter_presence_tolerates_unparseable_values():
     assert meter_appears_present({"meter_phase_a_voltage": _pt("n/a", "V")}) is True
 
 
+def test_live_meter_power_signals_presence_despite_zero_voltage():
+    """Non-zero meter power proves a meter is fitted even when 5740-5745 read 0 (#519).
+
+    Some SH firmware populates the aggregate meter power registers over local Modbus
+    but leaves the per-phase voltage/current registers at a plain 0 rather than the
+    not-available sentinel. The DTSU666 reporting live power is unambiguous presence.
+    """
+    assert (
+        meter_appears_present(
+            {
+                "meter_active_power": _pt(1301, "W"),
+                "meter_phase_a_voltage": _pt(0.0, "V"),
+                "meter_phase_b_voltage": _pt(0.0, "V"),
+                "meter_phase_c_voltage": _pt(0.0, "V"),
+            }
+        )
+        is True
+    )
+
+
+def test_zero_meter_power_alone_is_not_a_presence_signal():
+    """A meter at exactly 0 W is indistinguishable from no meter, so power=0 proves nothing."""
+    assert (
+        meter_appears_present(
+            {
+                "meter_active_power": _pt(0, "W"),
+                "meter_phase_a_voltage": _pt(0.0, "V"),
+            }
+        )
+        is False
+    )
+
+
+def test_live_meter_via_power_drops_dead_phase_vi_but_keeps_counters():
+    """#519: meter present via power, per-phase V/I read a plain 0.
+
+    The meter is present (power and energy counters are kept), but the per-phase
+    voltage/current registers that read a plain 0 are dropped — a live grid phase is
+    never genuinely 0 V/0 A, so surfacing ``0 V`` would be a misleading reading rather
+    than an honest ``unavailable``.
+    """
+    payload = {
+        "meter_active_power": _pt(1301, "W"),
+        "meter_phase_a_active_power": _pt(316, "W"),
+        "meter_phase_a_voltage": _pt(0.0, "V"),
+        "meter_phase_b_voltage": _pt(0.0, "V"),
+        "meter_phase_c_voltage": _pt(0.0, "V"),
+        "meter_phase_a_current": _pt(0.0, "A"),
+        "meter_phase_b_current": _pt(0.0, "A"),
+        "meter_phase_c_current": _pt(0.0, "A"),
+        "total_imported_energy": _pt(16.3, "kWh"),
+        "daily_imported_energy": _pt(0.0, "kWh"),
+    }
+
+    out, meter_present = suppress_absent_meter_points(dict(payload))
+
+    assert meter_present is True
+    # Live aggregate power survives; so do the energy counters (a genuine 0 today kept).
+    assert out["meter_active_power"]["value"] == 1301
+    assert out["meter_phase_a_active_power"]["value"] == 316
+    assert out["total_imported_energy"]["value"] == 16.3
+    assert out["daily_imported_energy"]["value"] == 0.0
+    # The dead per-phase voltage/current registers are dropped, not published as 0.
+    for code in (
+        "meter_phase_a_voltage",
+        "meter_phase_b_voltage",
+        "meter_phase_c_voltage",
+        "meter_phase_a_current",
+        "meter_phase_b_current",
+        "meter_phase_c_current",
+    ):
+        assert code not in out
+
+
+def test_live_meter_via_power_keeps_real_phase_voltage():
+    """When the per-phase registers do carry live values, they are kept alongside power."""
+    payload = {
+        "meter_active_power": _pt(1301, "W"),
+        "meter_phase_a_voltage": _pt(232.5, "V"),
+        "meter_phase_a_current": _pt(1.36, "A"),
+    }
+
+    out, meter_present = suppress_absent_meter_points(dict(payload))
+
+    assert meter_present is True
+    assert out == payload
+
+
 async def test_read_realtime_records_meter_presence_diagnostic():
     """``modbus_diagnostics["meter_present"]`` exposes the decision for triage."""
     client = SungrowModbusClient("10.0.0.9", model="sh_rt")

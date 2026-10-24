@@ -822,7 +822,7 @@ METER_DEPENDENT_CODES: frozenset[str] = frozenset(
 )
 
 # A wired meter always reads a live grid voltage, even at zero power flow, so these are
-# the presence signal. Deliberately not the power/energy codes: those are legitimately
+# the primary presence signal. Deliberately not the energy codes: those are legitimately
 # zero at balanced flow or at the start of a day.
 _METER_PRESENCE_CODES: tuple[str, ...] = (
     "meter_phase_a_voltage",
@@ -830,46 +830,93 @@ _METER_PRESENCE_CODES: tuple[str, ...] = (
     "meter_phase_c_voltage",
 )
 
+# Some SH firmware/meter combinations populate the aggregate meter power registers
+# (5600-5606) over local Modbus but leave the per-phase voltage/current registers
+# (5740-5745) reading a plain 0 rather than the 0x7FFF/0xFFFF "not available"
+# sentinel (#519). A meter reporting a non-zero power flow is unambiguously fitted, so
+# a live power reading is an additional positive presence signal. Power is only ever a
+# *positive* signal: a meter at exactly 0 W (balanced flow) is indistinguishable from
+# no meter, so a zero here proves nothing and voltage remains the primary check.
+_METER_POWER_PRESENCE_CODES: tuple[str, ...] = (
+    "meter_active_power",
+    "meter_phase_a_active_power",
+    "meter_phase_b_active_power",
+    "meter_phase_c_active_power",
+)
+
+# Per-phase meter voltage and current registers. Unlike the power/energy counters these
+# are never legitimately 0 on a fitted meter (a live grid phase always carries a voltage),
+# so a plain 0 here is an unpopulated register and is dropped even when the meter is
+# otherwise present via its power registers (#519).
+_METER_PHASE_VI_CODES: frozenset[str] = frozenset(
+    {
+        "meter_phase_a_voltage",
+        "meter_phase_b_voltage",
+        "meter_phase_c_voltage",
+        "meter_phase_a_current",
+        "meter_phase_b_current",
+        "meter_phase_c_current",
+    }
+)
+
+
+def _point_value_is_nonzero(point: dict[str, Any]) -> bool:
+    """Return whether a decoded point carries a usable non-zero numeric value."""
+    try:
+        return float(point.get("value") or 0) != 0
+    except TypeError, ValueError:
+        # A non-numeric value is still *a* reading, so treat it as present rather than
+        # risk suppressing a live meter on a parse quirk.
+        return True
+
 
 def meter_appears_present(decoded: dict[str, dict[str, Any]]) -> bool:
     """Return whether the decoded block shows a live external grid meter.
 
-    ``True`` when any meter phase reports a non-zero voltage. Also ``True`` when none
-    of the presence registers were decoded at all, so a family or firmware that simply
-    does not expose them is never mistaken for "no meter".
+    ``True`` when any meter phase reports a non-zero voltage, or when any aggregate
+    meter power register reports a non-zero flow (#519 — some firmware leaves the
+    per-phase voltage registers at 0 while still reporting live meter power). Also
+    ``True`` when none of the presence registers were decoded at all, so a family or
+    firmware that simply does not expose them is never mistaken for "no meter".
     """
-    seen = [decoded[code] for code in _METER_PRESENCE_CODES if code in decoded]
-    if not seen:
+    voltage_seen = [decoded[code] for code in _METER_PRESENCE_CODES if code in decoded]
+    power_seen = [decoded[code] for code in _METER_POWER_PRESENCE_CODES if code in decoded]
+    if not voltage_seen and not power_seen:
         return True
-    for point in seen:
-        try:
-            if float(point.get("value") or 0) != 0:
-                return True
-        except TypeError, ValueError:
-            return True
-    return False
+    return any(_point_value_is_nonzero(point) for point in voltage_seen + power_seen)
 
 
 def suppress_absent_meter_points(decoded: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], bool]:
     """Drop meter-derived points that are zero only because no meter is fitted (#387).
 
-    Returns ``(points, meter_present)``. Only *zero* values are dropped, so a firmware
-    that leaves the presence registers unimplemented while still counting import/export
-    keeps its working counters — the conservative choice, since hiding real data would
-    be a worse failure than surfacing a zero.
+    Returns ``(points, meter_present)``.
+
+    Two cases are handled:
+
+    * **No meter fitted** (#387): neither a live meter voltage nor a live meter power
+      is seen, so every zero-valued meter-derived point is dropped — otherwise the
+      Energy dashboard is fed a permanent, plausible 0 kWh of import/export. Only
+      *zero* values are dropped, so a firmware that leaves the presence registers
+      unimplemented while still counting import/export keeps its working counters.
+
+    * **Meter fitted but per-phase voltage/current not populated** (#519): some SH
+      firmware reports live aggregate meter power yet leaves 5740-5745 reading a plain
+      0 instead of the not-available sentinel. The meter is present (power proves it),
+      so the power/energy counters are kept, but a per-phase voltage or current that
+      reads a plain 0 is still dropped — a live grid phase is never genuinely 0 V/0 A,
+      so that 0 is an unpopulated register, and surfacing it as ``0 V`` would be a
+      misleading reading rather than an honest ``unavailable``.
     """
-    if meter_appears_present(decoded):
-        return decoded, True
+    present = meter_appears_present(decoded)
     out: dict[str, dict[str, Any]] = {}
     for code, point in decoded.items():
-        if code in METER_DEPENDENT_CODES:
-            try:
-                if float(point.get("value") or 0) == 0:
-                    continue
-            except TypeError, ValueError:
-                pass
+        # Per-phase voltage/current that reads a plain 0 is always an unpopulated
+        # register, whether or not the meter is otherwise present.
+        drop_when_zero = code in METER_DEPENDENT_CODES if not present else code in _METER_PHASE_VI_CODES
+        if drop_when_zero and not _point_value_is_nonzero(point):
+            continue
         out[code] = point
-    return out, False
+    return out, present
 
 
 def _combine(registers: list[int], offset: int, data_type: str) -> int:
