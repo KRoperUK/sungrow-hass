@@ -1213,7 +1213,8 @@ async def test_modbus_derives_daily_yield_from_total(hass: HomeAssistant):
     assert data["daily_yield"]["value"] == 5.0
     assert data["daily_yield"]["source"] == "modbus_derived"
     assert data["total_yield"]["value"] == 6467.0
-    coordinator._daily_yield_store.async_save.assert_awaited()
+    # Only last_total moved (the baseline is unchanged), so nothing is written (#527).
+    coordinator._daily_yield_store.async_save.assert_not_awaited()
 
 
 async def test_modbus_sh_keeps_raw_daily_yield(hass: HomeAssistant):
@@ -1303,7 +1304,8 @@ async def test_modbus_derives_daily_import_from_lifetime_total(hass: HomeAssista
     assert data["daily_imported_energy"]["value"] == 8.0
     assert data["daily_imported_energy"]["source"] == "modbus_derived"
     assert data["total_imported_energy"]["value"] == 6470.0
-    coordinator._energy_daily_store.async_save.assert_awaited()
+    # Only last_total moved (the baseline is unchanged), so nothing is written (#527).
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
 
 
 async def test_modbus_takes_over_a_live_daily_import_register_without_losing_the_day(hass: HomeAssistant):
@@ -1496,7 +1498,8 @@ async def test_modbus_derives_daily_battery_energy_from_the_lifetime_counters(ha
     assert data["daily_battery_charge"]["raw_register_value"] == 87.3
     assert data["daily_battery_discharge"]["value"] == 6.5
     assert data["daily_battery_discharge"]["source"] == "modbus_derived"
-    coordinator._energy_daily_store.async_save.assert_awaited()
+    # Only last_total moved (the baselines are unchanged), so nothing is written (#527).
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
 
 
 async def test_modbus_holds_a_battery_counter_against_the_battery_ceiling(hass: HomeAssistant):
@@ -2695,3 +2698,139 @@ async def test_cloud_user_per_device_realtime_quota_rejection_backs_off(hass: Ho
     client.async_get_device_realtime.assert_awaited_once()
     assert coordinator.update_interval == base * 2
     assert ir.async_get(hass).async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+
+# ---------------------------------------------------------------------------
+# Baseline persistence is written on change, not on every poll (#527)
+# ---------------------------------------------------------------------------
+
+
+def _baseline_coordinator(hass: HomeAssistant, *, stored=None, state=None, loaded=True):
+    """An SH-family local coordinator with a mocked energy-baseline Store."""
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline
+
+    entry = _make_entry(data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "SN-BASE", "SH")
+    coordinator._modbus_client = MagicMock()
+    coordinator._modbus_client.model = "sh_rt"
+    coordinator._modbus_client.async_read_daily_yield_diagnostic = AsyncMock(return_value=None)
+    coordinator._daily_yield_baseline_loaded = True
+    coordinator._daily_yield_state = DerivedDailyBaseline()
+    coordinator._daily_yield_store = MagicMock()
+    coordinator._daily_yield_store.async_save = AsyncMock()
+    coordinator._energy_daily_baseline_loaded = loaded
+    coordinator._energy_daily_state = state
+    coordinator._energy_daily_store = MagicMock()
+    coordinator._energy_daily_store.async_save = AsyncMock()
+    coordinator._energy_daily_store.async_load = AsyncMock(return_value=stored)
+    return coordinator
+
+
+async def _poll_import(coordinator, *, on, total, daily_register=0.0):
+    from datetime import date
+
+    # A realistic gap since the last poll, so the lifetime-counter glitch guard has an allowance.
+    coordinator._last_successful_update = coordinator.hass.loop.time() - 600
+
+    coordinator._modbus_client.async_read_realtime = AsyncMock(
+        return_value={
+            "total_imported_energy": {"code": "total_imported_energy", "value": total, "unit": "kWh", "source": "m"},
+            "daily_imported_energy": {
+                "code": "daily_imported_energy",
+                "value": daily_register,
+                "unit": "kWh",
+                "source": "m",
+            },
+        }
+    )
+    with patch("custom_components.sungrow.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value = date(*on)
+        return await coordinator._async_modbus_only_update()
+
+
+async def test_repeated_polls_with_an_unchanged_baseline_do_not_write(hass: HomeAssistant):
+    """The counter ticking over (last_total moves) must not rewrite the baseline file (#527)."""
+    from datetime import date
+
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
+
+    state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DerivedDailyBaseline(
+                baseline=6462.0, baseline_date=date(2026, 9, 20), last_total=6462.0
+            )
+        }
+    )
+    coordinator = _baseline_coordinator(hass, state=state)
+
+    values = []
+    for total in (6463.0, 6465.5, 6470.0):
+        data = await _poll_import(coordinator, on=(2026, 9, 20), total=total)
+        values.append(data["daily_imported_energy"]["value"])
+
+    assert values == [1.0, 3.5, 8.0]
+    assert coordinator._energy_daily_state.baselines["total_imported_energy"].last_total == 6470.0
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
+
+
+async def test_midnight_rollover_persists_the_new_baseline(hass: HomeAssistant):
+    """A new local day moves the baseline, which is written exactly once (#527)."""
+    from datetime import date
+
+    from custom_components.sungrow.derived_daily import DerivedDailyBaseline, DerivedDailyEnergyState
+
+    state = DerivedDailyEnergyState(
+        baselines={
+            "total_imported_energy": DerivedDailyBaseline(
+                baseline=6400.0, baseline_date=date(2026, 9, 20), last_total=6480.0
+            )
+        }
+    )
+    coordinator = _baseline_coordinator(hass, state=state)
+
+    data = await _poll_import(coordinator, on=(2026, 9, 21), total=6480.5)
+    await _poll_import(coordinator, on=(2026, 9, 21), total=6481.0)
+
+    assert data["daily_imported_energy"]["value"] == 0.5
+    coordinator._energy_daily_store.async_save.assert_awaited_once()
+    saved = coordinator._energy_daily_store.async_save.await_args.args[0]["total_imported_energy"]
+    assert saved["baseline"] == 6480.0
+    assert saved["baseline_date"] == "2026-09-21"
+
+
+async def test_mid_day_restart_recovers_the_stored_baseline_without_writing(hass: HomeAssistant):
+    """After a restart the day's figure carries on from the stored baseline (#527)."""
+    coordinator = _baseline_coordinator(
+        hass,
+        loaded=False,
+        stored={
+            "total_imported_energy": {"baseline": 6462.0, "baseline_date": "2026-09-20", "last_total": 6462.0},
+        },
+    )
+
+    data = await _poll_import(coordinator, on=(2026, 9, 20), total=6470.0)
+
+    assert data["daily_imported_energy"]["value"] == 8.0
+    assert data["daily_imported_energy"]["source"] == "modbus_derived"
+    coordinator._energy_daily_store.async_save.assert_not_awaited()
+
+
+async def test_restart_across_midnight_does_not_report_yesterdays_total_as_today(hass: HomeAssistant):
+    """The stored last_total is no longer kept fresh, so a restart spanning midnight must not use it (#527).
+
+    Anchoring on it would make the new day's baseline the *previous* day's start-of-day
+    total and report a whole day of import as "today". The first sample re-anchors instead
+    (the day restarts from 0, as on a mid-day install) and the new baseline is persisted.
+    """
+    coordinator = _baseline_coordinator(
+        hass,
+        loaded=False,
+        stored={
+            "total_imported_energy": {"baseline": 6400.0, "baseline_date": "2026-09-20", "last_total": 6400.0},
+        },
+    )
+
+    data = await _poll_import(coordinator, on=(2026, 9, 21), total=6470.0, daily_register=3.0)
+
+    assert data["daily_imported_energy"]["value"] == 0.0  # not 70.0
+    coordinator._energy_daily_store.async_save.assert_awaited_once()
