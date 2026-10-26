@@ -685,7 +685,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # uses), so fetch them for any device the list did not already carry points for.
         await self._async_fill_user_device_realtime(mapped)
         self.device_data = {
-            uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud_user")))
+            uuid: add_pack_health_points(
+                normalize_power_units(normalize_energy_units(tag_source(points, "cloud_user")))
+            )
             for uuid, points in mapped.items()
         }
 
