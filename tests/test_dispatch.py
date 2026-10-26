@@ -1,5 +1,6 @@
 """Tests for the Sungrow dispatch (number/select) platforms."""
 
+import asyncio
 import json
 import math
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -701,6 +702,39 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
         "dev-uuid-1",
         {"charge_discharge_command": "204", "energy_management_mode": "0"},
     )
+
+
+async def test_select_stop_with_poisoned_heartbeat_still_writes_safe_mode(hass: HomeAssistant):
+    """Stop writes the safe mode and succeeds even though the heartbeat loop died on a bug (#525)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    # Use the real entry so the genuine heartbeat stop helpers run (not a patched stub).
+    entry_data.coordinators[0].config_entry = entry
+
+    async def _dies() -> None:
+        raise RuntimeError("heartbeat died")
+
+    task = entry.async_create_background_task(hass, _dies(), name="poisoned-heartbeat")
+    entry_data.heartbeats["12345"] = (asyncio.Event(), task)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert task.done()
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "battery_mode")
+    command.hass = hass
+
+    await command.async_select_option("Stop")  # must not raise the heartbeat's stored error
+
+    entry_data.control.async_update_parameters.assert_awaited_once_with(
+        "dev-uuid-1",
+        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+    )
+    assert "12345" not in entry_data.heartbeats
+    assert command.current_option == "Stop"
 
 
 async def test_select_discharge_switches_to_compulsory_mode(hass: HomeAssistant):
