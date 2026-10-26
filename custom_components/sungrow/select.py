@@ -25,7 +25,7 @@ from . import (
     build_device_info_for,
     select_dispatch_device,
 )
-from .api_rate import CALL_TYPE_CONTROL
+from .api_rate import CALL_TYPE_CONTROL, CALL_TYPE_DISPATCH_READBACK
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
@@ -520,6 +520,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         )
         safe_option = BATTERY_MODE_SELF_CONSUMPTION
         try:
+            self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(
                 self.device_uuid,
                 self._command_payload(safe_option, self.options_map[safe_option]),
@@ -598,6 +599,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         flaky/limited read-back never drives a false verdict on a battery-control path.
         """
         try:
+            self.coordinator.record_api_call(CALL_TYPE_DISPATCH_READBACK)
             params = await self.control.async_read_parameters(self.device_uuid, [_EMS_MODE_PARAM])
         except DISPATCH_WRITE_ERRORS as err:
             # Best-effort verification: cloud, user-account, and Modbus dispatch all
@@ -630,6 +632,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         assert option is not None
         _LOGGER.debug("Dispatch %s for %s not actuated; re-issuing forced mode", option, self.device_uuid)
         try:
+            self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(
                 self.device_uuid, self._command_payload(option, self.options_map[option])
             )

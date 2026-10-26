@@ -23,6 +23,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .api_rate import CALL_TYPE_BACKFILL
 from .const import (
     BACKFILL_CHUNK_WINDOW,
     BACKFILL_INTERVAL,
@@ -708,6 +709,8 @@ class BackfillEngine:
                 await self._throttle.acquire()
                 try:
                     assert self._coordinator.plants_service is not None
+                    # Every history request spends hourly budget, retries included (#524).
+                    self._coordinator.record_api_call(CALL_TYPE_BACKFILL)
                     raw = await self._coordinator.plants_service.async_get_historical_data(
                         plant_id,
                         start,

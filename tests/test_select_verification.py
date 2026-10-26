@@ -286,3 +286,57 @@ async def test_verify_actuation_handles_modbus_error_on_retry(hass: HomeAssistan
         await select._verify_actuation()
 
     raise_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Rate-tracker accounting (#524)
+# ---------------------------------------------------------------------------
+
+
+def _recorded(select: SungrowDispatchSelect) -> list[str]:
+    return [call.args[0] for call in select.coordinator.record_api_call.call_args_list]
+
+
+async def test_verify_read_and_retry_write_are_counted(hass: HomeAssistant):
+    """The actuation check counts its two reads and its retry write against the budget (#524)."""
+    from custom_components.sungrow.api_rate import CALL_TYPE_CONTROL, CALL_TYPE_DISPATCH_READBACK
+
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select.control.async_read_parameters = AsyncMock(
+        return_value=[{"id": "10003", "code": "energy_management_mode", "value": 0}]
+    )
+
+    with patch.object(select, "_raise_not_actuated_issue"):
+        await select._verify_actuation()
+
+    assert _recorded(select) == [CALL_TYPE_DISPATCH_READBACK, CALL_TYPE_CONTROL, CALL_TYPE_DISPATCH_READBACK]
+
+
+async def test_periodic_readback_is_counted(hass: HomeAssistant):
+    """The periodic EMS-mode read-back counts as a dispatch read-back call (#524)."""
+    from custom_components.sungrow.api_rate import CALL_TYPE_DISPATCH_READBACK
+
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select.control.async_read_parameters = AsyncMock(
+        return_value=[{"id": "10003", "code": "energy_management_mode", "value": 2}]
+    )
+
+    await select._async_dispatch_readback()
+
+    assert _recorded(select) == [CALL_TYPE_DISPATCH_READBACK]
+
+
+async def test_auto_revert_write_is_counted(hass: HomeAssistant):
+    """The auto-revert's Self-consumption write counts as a control write (#524)."""
+    from custom_components.sungrow.api_rate import CALL_TYPE_CONTROL
+
+    select = _make_select(hass)
+    select.async_write_ha_state = MagicMock()
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()):
+        await select._do_revert()
+
+    assert _recorded(select) == [CALL_TYPE_CONTROL]

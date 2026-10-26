@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from pysolarcloud import PySolarCloudException
 
+from .api_rate import CALL_TYPE_HEARTBEAT
 from .const import DOMAIN
 from .modbus_control import ModbusControlError
 
@@ -74,6 +76,39 @@ async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -
         _LOGGER.exception("Heartbeat loop raised while stopping")
 
 
+def _no_record(_call_type: str) -> None:
+    """Default recorder: count nothing (no tracker, e.g. direct use in tests)."""
+
+
+def _api_recorder(entry: SungrowConfigEntry, plant_id: str) -> Callable[[str], None]:
+    """Return the plant coordinator's ``record_api_call`` so heartbeat calls count (#524)."""
+    data = getattr(entry, "runtime_data", None)
+    for coordinator in getattr(data, "coordinators", []) or []:
+        if coordinator.plant_id == plant_id:
+            return cast("Callable[[str], None]", coordinator.record_api_call)
+    return _no_record
+
+
+def _count_keepalives(control: Any, record: Callable[[str], None]) -> None:
+    """Make every ``control.async_heartbeat`` call report to ``record`` (#524).
+
+    pysolarcloud's ``Control.heartbeat_loop`` lives in the library and calls
+    ``self.async_heartbeat`` once per keepalive, so the only seam to count each one without
+    re-implementing the loop is the instance attribute that call resolves. Idempotent: the
+    control is shared by every heartbeat restart, and wrapping the wrapper would double-count.
+    """
+    original = getattr(control, "async_heartbeat", None)
+    if not callable(original) or getattr(original, "_sungrow_counted", False):
+        return
+
+    async def _counted(*args: Any, **kwargs: Any) -> Any:
+        record(CALL_TYPE_HEARTBEAT)
+        return await original(*args, **kwargs)
+
+    _counted._sungrow_counted = True  # type: ignore[attr-defined]
+    control.async_heartbeat = _counted
+
+
 def _plant_name(entry: SungrowConfigEntry, plant_id: str) -> str:
     """Return the plant's display name for a Repair message, falling back to its id."""
     data = getattr(entry, "runtime_data", None)
@@ -124,14 +159,23 @@ def _on_heartbeat_done(
     )
 
 
-async def _heartbeat_loop(control: object, device_uuid: str, interval: int, stop_event: asyncio.Event) -> None:
+async def _heartbeat_loop(
+    control: Any,
+    device_uuid: str,
+    interval: int,
+    stop_event: asyncio.Event,
+    record: Callable[[str], None] = _no_record,
+) -> None:
     """Run an EMS heartbeat loop on either OAuth ``Control`` or user ``UserControl``.
 
     OAuth ``Control`` exposes ``heartbeat_loop``; ``UserControl`` (0.14+) shares the same
     param write surface, so we drive param 10017 via ``async_update_parameters`` (#271).
+    Every keepalive is reported to ``record`` so it counts against the hourly API budget
+    (#524).
     """
     loop = getattr(control, "heartbeat_loop", None)
     if callable(loop):
+        _count_keepalives(control, record)
         await loop(device_uuid, interval, stop_event)
         return
 
@@ -147,6 +191,7 @@ async def _heartbeat_loop(control: object, device_uuid: str, interval: int, stop
     wire = Control.encode_parameter("external_ems_heartbeat", interval)
     while not stop_event.is_set():
         try:
+            record(CALL_TYPE_HEARTBEAT)
             await update(device_uuid, {"external_ems_heartbeat": wire})
         except (PySolarCloudException, ClientError, ModbusControlError, TimeoutError) as err:
             _LOGGER.warning("EMS heartbeat failed for %s: %s", device_uuid, err)
@@ -173,7 +218,7 @@ async def async_start_heartbeat(
     # Tracked by the config entry so HA cancels it automatically on unload.
     task = entry.async_create_background_task(
         hass,
-        _heartbeat_loop(control, device_uuid, interval, stop_event),
+        _heartbeat_loop(control, device_uuid, interval, stop_event, _api_recorder(entry, plant_id)),
         name=f"sungrow-heartbeat-{plant_id}",
     )
     # Surface an unexpected exit (the #231 silent-death bug) as a Repair. A requested
