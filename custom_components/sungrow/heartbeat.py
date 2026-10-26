@@ -32,6 +32,24 @@ HEARTBEAT_STOP_TIMEOUT = 10
 _HEARTBEAT_STOPPED_ISSUE = "heartbeat_stopped"
 _REPAIR_LEARN_MORE = "https://github.com/KRoperUK/sungrow-hass/blob/main/docs/TROUBLESHOOTING.md"
 
+# Everything a dispatch write or read-back can raise short of a programming error, so
+# callers can turn it into one translated ``dispatch_write_failed`` message instead of a
+# raw traceback (#522): the typed API errors, the local Modbus control error, transport
+# failures (``ClientError`` covers a dropped connection and HTTP status / content-type
+# errors; ``TimeoutError`` a stalled request) and a malformed server reply (undecodable
+# JSON is a ``ValueError``; a missing envelope key is a ``LookupError``/``TypeError``/
+# ``AttributeError``).
+DISPATCH_WRITE_ERRORS: tuple[type[Exception], ...] = (
+    PySolarCloudException,
+    ModbusControlError,
+    ClientError,
+    TimeoutError,
+    ValueError,
+    LookupError,
+    TypeError,
+    AttributeError,
+)
+
 
 async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -> None:
     """Signal a heartbeat loop to stop and wait for it to actually exit."""
@@ -45,12 +63,14 @@ async def _stop_heartbeat(heartbeat: tuple[asyncio.Event, asyncio.Task[None]]) -
         task.cancel()
     except asyncio.CancelledError:
         pass
-    except PySolarCloudException, ClientError, ModbusControlError:
-        # ``await task`` re-raises the loop's stored exception; the done_callback
-        # (``_on_heartbeat_done``) is what raises the Repair, so at the stop path
-        # we just log the failure so it never propagates back out of unload (#350).
-        # ``TimeoutError`` is caught above as the ``asyncio.timeout`` firing on the
-        # stop wait itself, so no need to list it here.
+    except Exception:  # noqa: BLE001 - the stop path must never raise, however the loop died
+        # ``await task`` re-raises whatever stored exception killed the loop — not only
+        # the typed API/Modbus errors but a bug-class error too (KeyError, RuntimeError…,
+        # the #231 silent death). The done_callback (``_on_heartbeat_done``) is what raises
+        # the Repair; here we just log it so Stop, auto-revert, unload and reload always
+        # complete and the safe mode is never left unwritten behind a poisoned heartbeat
+        # (#350, #525). ``TimeoutError`` is caught above as the ``asyncio.timeout`` firing
+        # on the stop wait itself.
         _LOGGER.exception("Heartbeat loop raised while stopping")
 
 

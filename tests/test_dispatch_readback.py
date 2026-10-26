@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.core import HomeAssistant
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
@@ -158,3 +160,70 @@ async def test_readback_skipped_when_removed(hass: HomeAssistant):
     await hass.async_block_till_done()
 
     select.control.async_read_parameters.assert_not_awaited()
+
+
+async def test_slow_readback_suppresses_the_next_one_until_it_finishes(hass: HomeAssistant):
+    """While a read-back is still running, a due one is held rather than overlapping it (#531)."""
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    release = asyncio.Event()
+
+    async def _slow_read(*_args, **_kwargs):
+        await release.wait()
+        return [{"id": "10003", "code": "energy_management_mode", "value": 2}]
+
+    select.control.async_read_parameters = AsyncMock(side_effect=_slow_read)
+
+    _trigger_readback(select)  # 3rd update: starts a read that blocks
+    await asyncio.sleep(0)
+    assert select.control.async_read_parameters.await_count == 1
+
+    _trigger_readback(select)  # another 3 updates while the first is still in flight
+    _trigger_readback(select)
+    await asyncio.sleep(0)
+    assert select.control.async_read_parameters.await_count == 1
+
+    release.set()
+    await hass.async_block_till_done()
+    assert select.control.async_read_parameters.await_count == 1
+
+    # Once it has finished, the held read-back runs on the next update.
+    with patch.object(select, "async_write_ha_state"):
+        select._handle_coordinator_update()
+    await hass.async_block_till_done()
+    assert select.control.async_read_parameters.await_count == 2
+
+
+async def test_readback_in_flight_guard_released_when_the_read_raises(hass: HomeAssistant):
+    """A read-back that blows up must not wedge the guard and block every later one (#531)."""
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select._readback_in_flight = True
+
+    # Run the wrapper directly: through a hass task the error would be an unretrieved task
+    # exception, which the test harness (rightly) fails on.
+    with (
+        patch.object(select, "_async_dispatch_readback", new=AsyncMock(side_effect=RuntimeError("boom"))),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await select._async_run_readback()
+
+    assert select._readback_in_flight is False
+
+
+async def test_no_readback_when_last_update_failed(hass: HomeAssistant):
+    """No read-back runs while the last coordinator update failed; it resumes on recovery (#531)."""
+    select = _make_select(hass)
+    select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select.coordinator.last_update_success = False
+
+    _trigger_readback(select)
+    _trigger_readback(select)
+    await hass.async_block_till_done()
+    select.control.async_read_parameters.assert_not_awaited()
+
+    select.coordinator.last_update_success = True
+    with patch.object(select, "async_write_ha_state"):
+        select._handle_coordinator_update()
+    await hass.async_block_till_done()
+    select.control.async_read_parameters.assert_awaited_once()

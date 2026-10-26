@@ -6,6 +6,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pysolarcloud
+import pytest
 from aiohttp.test_utils import make_mocked_request
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
@@ -630,6 +631,69 @@ async def test_heartbeat_normal_stop_no_repair(hass: HomeAssistant):
     await _drain_until_done(task)
 
     assert (DOMAIN, "heartbeat_stopped_12345") not in ir.async_get(hass).issues
+
+
+# Not only the typed API/Modbus errors: any exception can poison the stored task result.
+_POISONS = [RuntimeError("heartbeat died"), KeyError("result_data"), ValueError("bad payload"), OSError("boom")]
+
+
+@pytest.mark.parametrize("poison", _POISONS, ids=lambda exc: type(exc).__name__)
+async def test_stop_heartbeat_after_unexpected_death_does_not_raise(hass: HomeAssistant, poison, caplog):
+    """Stopping a heartbeat whose loop already died on an unexpected error just logs it (#525)."""
+    entry = _entry_with_heartbeats(hass)
+
+    async def _boom(uuid, interval, stop_event):
+        raise poison
+
+    entry.runtime_data.control.heartbeat_loop = _boom
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    _, task = entry.runtime_data.heartbeats["12345"]
+    await _drain_until_done(task)
+    assert (DOMAIN, "heartbeat_stopped_12345") in ir.async_get(hass).issues
+
+    await async_stop_heartbeat(hass, entry, "12345")  # must not re-raise the stored error
+
+    assert "12345" not in entry.runtime_data.heartbeats
+    assert "Heartbeat loop raised while stopping" in caplog.text
+    # An intentional stop retires the "heartbeat stopped" Repair.
+    assert (DOMAIN, "heartbeat_stopped_12345") not in ir.async_get(hass).issues
+
+
+async def test_stop_heartbeat_loop_dying_during_stop_does_not_raise(hass: HomeAssistant):
+    """A loop that raises while observing its stop event also stops cleanly (#525)."""
+    entry = _entry_with_heartbeats(hass)
+
+    async def _dies_on_stop(uuid, interval, stop_event):
+        await stop_event.wait()
+        raise RuntimeError("cleanup failed")
+
+    entry.runtime_data.control.heartbeat_loop = _dies_on_stop
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+
+    await async_stop_heartbeat(hass, entry, "12345")
+
+    assert "12345" not in entry.runtime_data.heartbeats
+
+
+async def test_unload_and_reload_with_poisoned_heartbeat(hass: HomeAssistant, mock_setup_auth, mock_plants_service):
+    """Unloading, then reloading, an entry whose heartbeat loop died unexpectedly succeeds (#525)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    async def _dies() -> None:
+        raise RuntimeError("heartbeat died")
+
+    task = entry.async_create_background_task(hass, _dies(), name="test-heartbeat")
+    entry.runtime_data.heartbeats["12345"] = (asyncio.Event(), task)
+    await _drain_until_done(task)
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.heartbeats == {}
 
 
 async def test_start_heartbeat_clears_stale_repair(hass: HomeAssistant):

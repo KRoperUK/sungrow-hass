@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.event import async_track_point_in_time, async_track_time_change
+from homeassistant.helpers.event import async_call_later, async_track_point_in_time, async_track_time_change
 from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
@@ -111,6 +111,13 @@ _SUN_BOUNDARY_RE = re.compile(r"^(sunrise|sunset)\s*(?:([+-])\s*(\d{1,2}):(\d{2}
 # days of look-ahead means a skipped or late midnight run (DST, a busy event loop) can
 # never leave a boundary unarmed.
 _SOLAR_ARM_HORIZON = timedelta(hours=48)
+
+# The startup catch-up write can run before the battery-mode select has registered itself
+# (the select is added by a platform / coordinator listener, which can land after the
+# scheduler starts). Re-try on this cadence, giving up — loudly — after the attempt cap
+# (~5 minutes in total); the window then takes effect at its next boundary (#526).
+_CATCHUP_RETRY_INTERVAL = timedelta(seconds=30)
+_CATCHUP_MAX_ATTEMPTS = 10
 
 type SunEventResolver = Callable[[date, str], datetime | None]
 
@@ -366,6 +373,9 @@ class SungrowScheduler:
     _sun_cache: dict[tuple[date, str], datetime | None] = field(default_factory=dict, init=False, repr=False)
     # (window index, day) skips already logged, so a polar winter warns once per day.
     _reported_skips: set[tuple[int, date]] = field(default_factory=set, init=False, repr=False)
+    # Pending retry of the startup catch-up write while the battery-mode controls are not
+    # registered yet (#526).
+    _catchup_cancel: CALLBACK_TYPE | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def from_entry(cls, hass: HomeAssistant, entry: SungrowConfigEntry) -> SungrowScheduler:
@@ -456,15 +466,21 @@ class SungrowScheduler:
         # Apply the mode active *right now* so an HA restart mid-window doesn't
         # leave the inverter drifting outside the intended mode.
         now_local = dt_util.now()
-        self._current_window = self.active_window(now_local)
-        if self._current_window is not None:
+        window = self.active_window(now_local)
+        if window is not None:
             _LOGGER.info(
                 "Entry %s: applying scheduled mode %s (window %s) on setup",
                 self.entry.title,
-                self._current_window.mode,
-                self._current_window.label,
+                window.mode,
+                window.label,
             )
-            await self._apply_mode(self._current_window.mode)
+            if await self._apply_mode(window.mode):
+                self._current_window = window
+            elif not self._entry_selects():
+                # The controls are not registered yet (restart: the select can be added
+                # after the scheduler starts) — retry shortly instead of skipping the
+                # catch-up write (#526).
+                self._schedule_catchup(1)
         else:
             _LOGGER.debug("Entry %s: no schedule window active at %s", self.entry.title, now_local.time())
 
@@ -516,6 +532,9 @@ class SungrowScheduler:
         for task in list(self._tasks):
             task.cancel()
         self._tasks.clear()
+        if self._catchup_cancel is not None:
+            self._catchup_cancel()
+            self._catchup_cancel = None
         self._sun_cache.clear()
         self._reported_skips.clear()
         self._current_window = None
@@ -659,9 +678,10 @@ class SungrowScheduler:
             return
 
         if entering:
-            self._current_window = window
             _LOGGER.info("Entry %s: entering scheduled window %s (%s)", self.entry.title, window.label, window.mode)
-            await self._apply_mode(window.mode)
+            # Only record the window as current once its mode is really on the inverter.
+            if await self._apply_mode(window.mode):
+                self._current_window = window
             return
 
         # Leaving: if an enclosing (later-starting) window still applies at
@@ -673,8 +693,8 @@ class SungrowScheduler:
                 self.entry.title,
                 window.label,
             )
-            self._current_window = None
-            await self._apply_mode(_MODE_AFTER_WINDOW)
+            if await self._apply_mode(_MODE_AFTER_WINDOW):
+                self._current_window = None
         else:
             # The inner window overrode an enclosing one (latest start wins); when it
             # ends we must put the enclosing window's mode back, or the inverter keeps
@@ -686,11 +706,71 @@ class SungrowScheduler:
                 still_active.label,
                 still_active.mode,
             )
-            self._current_window = still_active
-            if still_active.mode != window.mode:
-                await self._apply_mode(still_active.mode)
+            if still_active.mode == window.mode or await self._apply_mode(still_active.mode):
+                self._current_window = still_active
 
-    async def _apply_mode(self, mode_key: str) -> None:
+    def _entry_selects(self) -> list[Any]:
+        """Return the registered battery-mode selects that belong to *this* entry.
+
+        Only touch selects that belong to this entry's coordinators, not every entry's.
+        The select's ``registry_entry`` (set on HA entity registration) is the cheapest
+        way to tell; an unregistered select is assumed to be ours.
+        """
+        registry = self.hass.data.get(DOMAIN, {}).get("battery_mode_selects")
+        if not isinstance(registry, dict):
+            return []
+        selects = []
+        for select in registry.values():
+            entity_entry = getattr(select, "registry_entry", None)
+            if entity_entry is not None and entity_entry.config_entry_id != self.entry.entry_id:
+                continue
+            selects.append(select)
+        return selects
+
+    def _schedule_catchup(self, attempt: int) -> None:
+        """Arm retry number ``attempt`` of the startup catch-up write (#526)."""
+
+        @callback
+        def _fire(_now: datetime) -> None:
+            self._catchup_cancel = None
+            self._spawn(self._async_catchup(attempt))
+
+        self._catchup_cancel = async_call_later(self.hass, _CATCHUP_RETRY_INTERVAL.total_seconds(), _fire)
+
+    async def _async_catchup(self, attempt: int) -> None:
+        """Re-try applying the currently-active window's mode once the controls exist (#526).
+
+        Re-evaluates the active window each time, so a window that ended while we were
+        waiting (or one a boundary callback already applied) is never actuated late.
+        """
+        window = self.active_window(dt_util.now())
+        if window is None or window is self._current_window:
+            return
+        if await self._apply_mode(window.mode):
+            self._current_window = window
+            _LOGGER.info(
+                "Entry %s: applied scheduled mode %s (window %s) once the battery controls registered (attempt %d)",
+                self.entry.title,
+                window.mode,
+                window.label,
+                attempt,
+            )
+            return
+        if self._entry_selects():
+            return  # Controls exist but the write failed; ``_apply_mode`` already logged why.
+        if attempt >= _CATCHUP_MAX_ATTEMPTS:
+            _LOGGER.warning(
+                "Entry %s: scheduled mode %s (window %s) was NOT applied after a restart — no battery-mode "
+                "controls registered within %d attempts; it will take effect at the window's next boundary",
+                self.entry.title,
+                window.mode,
+                window.label,
+                attempt,
+            )
+            return
+        self._schedule_catchup(attempt + 1)
+
+    async def _apply_mode(self, mode_key: str) -> bool:
         """Set the battery mode on every battery-mode select owned by this entry.
 
         Mirrors ``sungrow.set_battery_mode`` (#255) but scoped to this entry's
@@ -698,6 +778,10 @@ class SungrowScheduler:
         are logged and swallowed — a transient cloud hiccup shouldn't tear
         down the schedule; the next boundary or a manual invocation will
         retry.
+
+        Returns ``True`` only when the mode was actually written to at least one select
+        and no write failed, so callers never record a window as applied on the strength
+        of a write that did not happen (#522).
         """
         from .select import BATTERY_MODE_PARAM, BATTERY_MODE_SERVICE_KEYS
 
@@ -705,35 +789,38 @@ class SungrowScheduler:
             option = BATTERY_MODE_SERVICE_KEYS[mode_key]
         except KeyError:
             _LOGGER.warning("Scheduler received unknown mode key %r; skipping", mode_key)
-            return
+            return False
 
-        registry = self.hass.data.get(DOMAIN, {}).get("battery_mode_selects")
-        if not isinstance(registry, dict) or not registry:
+        selects = self._entry_selects()
+        if not selects:
             _LOGGER.debug(
                 "Scheduler for entry %s: no battery-mode selects registered yet; skipping",
                 self.entry.title,
             )
-            return
+            return False
 
-        # Only touch selects that belong to *this* entry's coordinators, not
-        # every entry's. The select's ``config_entry`` attribute (set on HA
-        # entity registration) is the cheapest way to tell.
-        for select in list(registry.values()):
-            entity_entry = getattr(select, "registry_entry", None)
-            if entity_entry is not None and entity_entry.config_entry_id != self.entry.entry_id:
-                continue
+        applied = False
+        failed = False
+        for select in selects:
             try:
                 await select.async_select_option(option)
                 if select.hass is not None and getattr(select, "platform", None) is not None:
                     select.async_write_ha_state()
             except HomeAssistantError as err:
-                _LOGGER.warning(
-                    "Scheduler for entry %s: failed to set %s on %s: %s",
+                failed = True
+                # Error, not warning: the battery is now NOT in the scheduled mode, so
+                # this has to be findable when a user asks why a tariff window did nothing.
+                _LOGGER.error(
+                    "Scheduler for entry %s: failed to set %s to %s on %s; the scheduled mode was not applied: %s",
                     self.entry.title,
                     BATTERY_MODE_PARAM,
+                    option,
                     getattr(select, "entity_id", "<unknown>"),
                     err,
                 )
+            else:
+                applied = True
+        return applied and not failed
 
 
 def _parse_window(row: Any) -> ScheduleWindow:
