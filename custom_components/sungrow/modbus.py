@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
@@ -42,6 +43,11 @@ DEFAULT_UNIT = 1
 CONNECT_TIMEOUT = 5
 # One reconnect+retry after a dropped WiNet-S socket (common after options reload).
 _READ_ATTEMPTS = 2
+
+_REDACTED_HOST = "<host>"
+# ``('192.168.1.5', 502)`` / ``('fe80::1', 502, 0, 0)`` — asyncio's socket-address tuple.
+_SOCKET_ADDRESS_TUPLE = re.compile(r"\(\s*'[^']*'\s*,\s*\d+(?:\s*,\s*\d+)*\s*\)")
+_IPV4_ENDPOINT = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b")
 
 
 def _points_for_model(
@@ -114,6 +120,19 @@ class SungrowModbusClient:
     def _new_tcp_client(self) -> AsyncModbusTcpClient:
         return AsyncModbusTcpClient(self.host, port=self.port, timeout=CONNECT_TIMEOUT)
 
+    def _redact_endpoint(self, message: str) -> str:
+        """Strip the LAN host/port from an error message bound for diagnostics (#533).
+
+        ``last_error`` is shown in the downloadable diagnostics bundle and on the status
+        sensor, both of which users paste into public issues. Connection failures embed the
+        endpoint in several shapes (``host:port``, ``('host', port)`` from asyncio, an
+        ``AsyncModbusTcpClient(host:port)`` repr, a bare IPv4), so scrub all of them while
+        leaving the failure text (``Connect call failed``, ``Connection refused``, …) intact.
+        """
+        message = _SOCKET_ADDRESS_TUPLE.sub(_REDACTED_HOST, message)
+        message = re.sub(rf"{re.escape(self.host)}(?::\d+)?", _REDACTED_HOST, message)
+        return _IPV4_ENDPOINT.sub(_REDACTED_HOST, message)
+
     async def async_read_realtime(self) -> dict[str, dict[str, Any]]:
         """Read and decode the model's realtime input registers.
 
@@ -150,7 +169,7 @@ class SungrowModbusClient:
                 try:
                     registers = await self._read_input(start, count)
                 except SungrowModbusError as err:
-                    self.modbus_diagnostics["last_error"] = str(err)
+                    self.modbus_diagnostics["last_error"] = self._redact_endpoint(str(err))
                     # Exception code 2 = Illegal Data Address: the inverter firmware
                     # does not implement any register in this block (e.g. high energy
                     # registers on a string inverter). Skip the block rather than fail
