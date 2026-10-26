@@ -2054,6 +2054,37 @@ async def test_user_update_populates_device_data_from_device_list(hass: HomeAssi
     assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
 
 
+async def test_user_update_normalizes_device_kw_power_to_w(hass: HomeAssistant):
+    """A kW per-device power point is converted to W, like the plant-level points (#536).
+
+    The device list auto-scales its display value: 857 W arrives as ``857``/``W`` but
+    2489 W as ``2.489``/``kW``. A sensor's unit is fixed when it is created, so without
+    normalising, the same battery power sensor read 2.489 W (or 857000 W) depending on
+    which magnitude it was first built with.
+    """
+    from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
+
+    device = _user_battery_device()
+    device["point_data"] = [
+        {"point_id": 13150, "point_name": "Battery Discharging Power", "unit": "kW", "value": "2.489"},
+        {"point_id": 13126, "point_name": "Battery Charging Power", "unit": "W", "value": "857"},
+    ]
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[device])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+
+    await coordinator._async_update_data()
+
+    points = coordinator.device_data["dev-battery-1"]
+    assert (points["13150"]["value"], points["13150"]["unit"]) == (2489.0, "W")
+    assert (points["13126"]["value"], points["13126"]["unit"]) == ("857", "W")
+
+
 async def test_user_update_keeps_last_known_device_data_when_refresh_fails(hass: HomeAssistant, caplog):
     """A failed per-poll device refresh must not wipe out the per-device sensors (#439).
 
