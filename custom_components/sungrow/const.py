@@ -47,8 +47,10 @@ TRANSPORT_MODBUS_ONLY = "modbus_only"
 # Cloud via a normal iSolarCloud user account (email/password) using the unofficial
 # app/web API (pysolarcloud.UserAuth), instead of the developer OAuth app (#268).
 TRANSPORT_CLOUD_USER = "cloud_user"
-# Config-entry keys for the user-account transport. The password is stored in the
-# (HA-encrypted) config entry and never logged.
+# Config-entry keys for the user-account transport. The password is stored as plaintext
+# JSON in the config entry (``.storage/core.config_entries``), protected only by the
+# filesystem permissions of the HA config directory — Home Assistant does not encrypt
+# config entries. It is never logged and is redacted from diagnostics.
 CONF_USER_ACCOUNT = "user_account"
 CONF_USER_PASSWORD = "user_password"
 # Discovered WiNet-S identity stored on a Modbus-only entry.

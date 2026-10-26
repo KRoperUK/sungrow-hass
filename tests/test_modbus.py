@@ -605,6 +605,43 @@ async def test_connect_failure_raises():
         await SungrowModbusClient("10.0.0.1").async_read_realtime()
 
 
+@pytest.mark.parametrize(
+    ("host", "failure", "expected"),
+    [
+        ("10.0.0.1", None, "Could not connect"),
+        (
+            "192.168.7.42",
+            ConnectionRefusedError("[Errno 111] Connect call failed ('192.168.7.42', 502)"),
+            "Connect call failed",
+        ),
+        (
+            "winet-s.lan",
+            ConnectionRefusedError("[Errno 111] Connect call failed ('172.16.4.9', 502)"),
+            "Connect call failed",
+        ),
+        ("10.0.0.1", ConnectionError("Not connected[AsyncModbusTcpClient(10.0.0.1:502)]"), "Not connected"),
+    ],
+)
+async def test_last_error_in_diagnostics_has_no_host_or_port(host, failure, expected):
+    """Recorded errors omit the LAN host/port but stay identifiable (#533)."""
+    if failure is None:
+        cls, _ = _mock_client_cls([], connected=False, connect_ok=False)
+    else:
+        cls, inner = _mock_client_cls([])
+        inner.read_input_registers = AsyncMock(side_effect=failure)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient(host)
+        _skip_family_detect(client)
+        with pytest.raises(SungrowModbusError):
+            await client.async_read_realtime()
+    last_error = client.modbus_diagnostics["last_error"]
+    for leaked in (host, "192.168.7.42", "172.16.4.9", "502"):
+        assert leaked not in last_error
+    assert "<host>" in last_error
+    # The underlying failure is still recognisable from the message.
+    assert expected in last_error
+
+
 async def test_connect_failure_recreates_and_succeeds():
     """When the first connect() fails, a fresh client is opened and the read continues."""
     low_points = tuple(p for p in SG_RS_INPUT_POINTS if p.address < 6000)

@@ -478,3 +478,25 @@ async def test_read_registers_modbus_error_surfaces_as_home_assistant_error(hass
             blocking=True,
             return_response=True,
         )
+
+
+async def test_refresh_tokens_service_fails_loudly_when_expiry_key_missing(hass: HomeAssistant):
+    """A renamed/missing token-expiry key is a loud failure, not a fake success (#532)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.sungrow.services import SERVICE_REFRESH_TOKENS
+
+    entry, auth = _make_oauth_entry_with_auth(hass)
+    # Simulate the library renaming ``expires_at``.
+    auth.tokens = {"access_token": "old", "refresh_token": "r", "expiry": 999999999999}
+    async_setup_services(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(HomeAssistantError, match="expires_at"),
+    ):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH_TOKENS, {"config_entry": entry.entry_id}, blocking=True)
+
+    # No refresh was attempted and no stray key was written.
+    auth.async_get_access_token.assert_not_awaited()
+    assert "expires_at" not in auth.tokens
