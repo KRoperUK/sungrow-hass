@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -495,6 +495,11 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         if last is not None and last.native_value is not None:
             self._attr_native_value = self._clamp_to_bounds(last.native_value)
 
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Opt in to in-place entity_id renames (#515); nothing here is keyed on entity_id."""
+        super().async_entity_id_changed(old_entity_id)  # type: ignore[misc]
+
     def _clamp_to_bounds(self, value: float) -> float:
         """Clamp a restored value to the current slider bounds.
 
@@ -608,6 +613,11 @@ class SungrowForcedDispatchDurationNumber(CoordinatorEntity[SungrowPlantCoordina
         if last is not None and last.native_value is not None:
             self._attr_native_value = last.native_value
         self.coordinator.forced_dispatch_duration_minutes = self._attr_native_value or 0
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Opt in to in-place entity_id renames (#515); nothing here is keyed on entity_id."""
+        super().async_entity_id_changed(old_entity_id)  # type: ignore[misc]
 
     async def async_set_native_value(self, value: float) -> None:
         """Store the new duration locally and publish it to the coordinator."""
