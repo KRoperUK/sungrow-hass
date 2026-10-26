@@ -451,6 +451,152 @@ async def test_failed_startup_write_leaves_window_unapplied(hass: HomeAssistant)
 
 
 # ---------------------------------------------------------------------------
+# Startup catch-up with late-registering controls (#526)
+# ---------------------------------------------------------------------------
+
+
+def _catchup_harness(hass: HomeAssistant, windows: list[dict]):
+    """Return ``(scheduler, window, armed)`` where ``armed`` collects (delay, callback, cancel) retries."""
+    scheduler = SungrowScheduler.from_entry(hass, _entry_with_windows(hass, windows))
+    armed: list[tuple[float, object, MagicMock]] = []
+
+    def _fake_call_later(_hass, delay, action):
+        cancel = MagicMock()
+        armed.append((delay, action, cancel))
+        return cancel
+
+    return scheduler, scheduler.windows[0], armed, _fake_call_later
+
+
+async def _start_at(scheduler: SungrowScheduler, fake_call_later, moment: datetime) -> None:
+    with (
+        patch("custom_components.sungrow.schedule.async_track_time_change", return_value=MagicMock()),
+        patch("custom_components.sungrow.schedule.async_call_later", side_effect=fake_call_later),
+        patch("homeassistant.util.dt.now", return_value=moment),
+    ):
+        await scheduler.async_start()
+
+
+async def test_mid_window_restart_applies_mode_once_controls_register(hass: HomeAssistant):
+    """The catch-up write runs once the battery controls register, not silently skipped (#526)."""
+    scheduler, window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+
+    # Restart at 03:00: the scheduler starts before the select has registered itself.
+    await _start_at(scheduler, fake_call_later, _at(time(3, 0)))
+    assert len(armed) == 1
+    assert scheduler._current_window is None
+
+    fake_select = _register_fake_select(hass)  # the controls appear
+    _delay, fire, _cancel = armed[0]
+    with (
+        patch("custom_components.sungrow.schedule.async_call_later", side_effect=fake_call_later),
+        patch("homeassistant.util.dt.now", return_value=_at(time(3, 0, 30))),
+    ):
+        fire(_at(time(3, 0, 30)))
+        await hass.async_block_till_done()
+
+    fake_select.async_select_option.assert_awaited_once_with("Force charge")
+    assert scheduler._current_window is window
+    assert len(armed) == 1  # no further retry once applied
+    scheduler.async_stop()
+
+
+async def test_catchup_retries_until_controls_register(hass: HomeAssistant):
+    """Each retry that still finds no controls re-arms the next one."""
+    scheduler, _window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+    await _start_at(scheduler, fake_call_later, _at(time(3, 0)))
+
+    for attempt in range(1, 4):
+        assert len(armed) == attempt
+        with (
+            patch("custom_components.sungrow.schedule.async_call_later", side_effect=fake_call_later),
+            patch("homeassistant.util.dt.now", return_value=_at(time(3, 1))),
+        ):
+            armed[attempt - 1][1](_at(time(3, 1)))
+            await hass.async_block_till_done()
+
+    assert len(armed) == 4
+    assert scheduler._current_window is None
+    scheduler.async_stop()
+
+
+async def test_catchup_skip_is_logged_at_warning_when_controls_never_appear(hass: HomeAssistant, caplog):
+    """If the controls never register, giving up is a WARNING (not debug) (#526)."""
+    from custom_components.sungrow.schedule import _CATCHUP_MAX_ATTEMPTS
+
+    scheduler, _window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+    await _start_at(scheduler, fake_call_later, _at(time(3, 0)))
+
+    with (
+        patch("custom_components.sungrow.schedule.async_call_later", side_effect=fake_call_later),
+        patch("homeassistant.util.dt.now", return_value=_at(time(3, 1))),
+    ):
+        for attempt in range(1, _CATCHUP_MAX_ATTEMPTS + 1):
+            assert not [r for r in caplog.records if r.levelname == "WARNING" and "NOT applied" in r.getMessage()]
+            armed[attempt - 1][1](_at(time(3, 1)))
+            await hass.async_block_till_done()
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "NOT applied" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "force_charge" in warnings[0].getMessage()
+    assert len(armed) == _CATCHUP_MAX_ATTEMPTS  # gave up: no further retry armed
+    scheduler.async_stop()
+
+
+async def test_catchup_does_nothing_once_the_window_has_ended(hass: HomeAssistant):
+    """A window that ended while we waited for the controls is not actuated late."""
+    scheduler, _window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+    await _start_at(scheduler, fake_call_later, _at(time(4, 59)))
+    fake_select = _register_fake_select(hass)
+
+    with patch("homeassistant.util.dt.now", return_value=_at(time(5, 1))):
+        armed[0][1](_at(time(5, 1)))
+        await hass.async_block_till_done()
+
+    fake_select.async_select_option.assert_not_awaited()
+    assert len(armed) == 1
+    scheduler.async_stop()
+
+
+async def test_stopping_the_scheduler_cancels_a_pending_catchup(hass: HomeAssistant):
+    """Unload/reload must not leave a catch-up retry armed (#526)."""
+    scheduler, _window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+    await _start_at(scheduler, fake_call_later, _at(time(3, 0)))
+    _delay, _fire, cancel = armed[0]
+
+    scheduler.async_stop()
+
+    cancel.assert_called_once()
+
+
+async def test_catchup_is_not_retried_when_the_write_itself_fails(hass: HomeAssistant):
+    """Controls present but the write failed: that is #522's error path, not a late-controls retry."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    scheduler, _window, armed, fake_call_later = _catchup_harness(
+        hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}]
+    )
+    fake_select = _register_fake_select(hass)
+    fake_select.async_select_option = AsyncMock(side_effect=HomeAssistantError("network down"))
+
+    await _start_at(scheduler, fake_call_later, _at(time(3, 0)))
+
+    assert armed == []
+    assert scheduler._current_window is None
+    scheduler.async_stop()
+
+
+# ---------------------------------------------------------------------------
 # Weekday-mask parsing (#433)
 # ---------------------------------------------------------------------------
 
