@@ -500,3 +500,57 @@ async def test_refresh_tokens_service_fails_loudly_when_expiry_key_missing(hass:
     # No refresh was attempted and no stray key was written.
     auth.async_get_access_token.assert_not_awaited()
     assert "expires_at" not in auth.tokens
+
+
+# ---------------------------------------------------------------------------
+# One shared entry resolver, parameterised by allowed transports (#530)
+# ---------------------------------------------------------------------------
+
+
+def test_default_sweeps_differ_only_by_their_allowed_transports(hass: HomeAssistant):
+    """Backfill sweeps cloud_user too; the token refresh sweeps only OAuth entries (#530)."""
+    from custom_components.sungrow.const import TRANSPORT_CLOUD_USER
+    from custom_components.sungrow.services import _resolve_oauth_entries
+
+    oauth = _make_entry(hass, entry_id="oauth")
+    user = _make_entry(hass, entry_id="user", transport=TRANSPORT_CLOUD_USER)
+    modbus = _make_entry(hass, entry_id="mb", transport=TRANSPORT_MODBUS_ONLY)
+    legacy = _make_entry(hass, entry_id="legacy")
+    del legacy.data[CONF_TRANSPORT]  # no stored transport behaves as cloud_only
+
+    with patch.object(hass.config_entries, "async_entries", return_value=[oauth, user, modbus, legacy]):
+        assert _resolve_entries(hass, None) == [oauth, user, legacy]
+        assert _resolve_oauth_entries(hass, None) == [oauth, legacy]
+
+
+def test_unloaded_entries_are_skipped_by_every_sweep(hass: HomeAssistant):
+    """A sweep only ever returns loaded entries (#530)."""
+    from custom_components.sungrow.services import _resolve_oauth_entries
+
+    failed = _make_entry(hass, entry_id="failed", state=ConfigEntryState.SETUP_ERROR)
+
+    with patch.object(hass.config_entries, "async_entries", return_value=[failed]):
+        assert _resolve_entries(hass, None) == []
+        assert _resolve_oauth_entries(hass, None) == []
+
+
+@pytest.mark.parametrize(
+    ("resolver", "transport", "message"),
+    [
+        ("_resolve_entries", TRANSPORT_MODBUS_ONLY, "local Modbus entry; Backfill is cloud-only"),
+        ("_resolve_oauth_entries", TRANSPORT_MODBUS_ONLY, "no OAuth tokens to refresh"),
+        ("_resolve_oauth_entries", "cloud_user", "user-account login"),
+        ("_resolve_oauth_entries", "something_new", "not supported by this service"),
+    ],
+)
+def test_targeted_rejection_messages_come_from_the_shared_helper(hass: HomeAssistant, resolver, transport, message):
+    """A disallowed transport is rejected with its own message; unknown ones get the generic one (#530)."""
+    import custom_components.sungrow.services as services
+
+    entry = _make_entry(hass, transport=transport)
+
+    with (
+        patch.object(hass.config_entries, "async_get_entry", return_value=entry),
+        pytest.raises(ServiceValidationError, match=message),
+    ):
+        getattr(services, resolver)(hass, entry.entry_id)
