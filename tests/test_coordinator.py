@@ -2518,3 +2518,180 @@ async def test_cloud_user_poll_counts_the_per_poll_device_fetch(hass: HomeAssist
     counts = coordinator.rate_tracker.counts_by_type()
     assert counts.get("realtime") == 1
     assert counts.get(CALL_TYPE_USER_DEVICE_FETCH) == 1
+
+
+# ---------------------------------------------------------------------------
+# Side-call rate limits trigger back-off + the rate_limited Repair (#523)
+# ---------------------------------------------------------------------------
+
+_E999 = PySolarCloudException.from_response({"result_code": "E999"})
+_SIDE_INVERTER = {"uuid": "dev-1", "device_type": DeviceType.INVERTER, "ps_key": "12345_1_1_1"}
+
+
+def _oauth_side_call_plants(failing: str | None = None) -> MagicMock:
+    """A plants service whose main call works; ``failing`` (a method name) is quota-rejected."""
+    plants = MagicMock()
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_plant_devices = AsyncMock(return_value=[_SIDE_INVERTER])
+    plants.async_get_plant_details = AsyncMock(return_value=[])
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    if failing is not None:
+        getattr(plants, failing).side_effect = _E999
+    return plants
+
+
+@pytest.mark.real_refresh
+@pytest.mark.parametrize("failing", ["async_get_plant_devices", "async_get_plant_details", "async_get_device_realtime"])
+async def test_side_call_quota_rejection_backs_off_and_raises_repair(hass: HomeAssistant, failing):
+    """A quota rejection on a side call backs off the poll and raises the Repair; a clean poll clears it (#523)."""
+    plants = _oauth_side_call_plants(failing)
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant", [dict(_SIDE_INVERTER)]
+    )
+    base = coordinator.update_interval
+    registry = ir.async_get(hass)
+
+    await coordinator._async_update_data()  # the main call succeeded, so the poll itself succeeds
+
+    assert coordinator.update_interval == base * 2
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+    # The next poll is clean: the interval is restored and the Repair cleared.
+    setattr(plants, failing, AsyncMock(return_value=[] if failing != "async_get_device_realtime" else {}))
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is None
+
+
+@pytest.mark.real_refresh
+async def test_several_rejected_side_calls_back_off_once_per_poll(hass: HomeAssistant):
+    """Three quota-rejected side calls in one poll double the interval once, not three times (#523)."""
+    plants = _oauth_side_call_plants()
+    for name in ("async_get_plant_devices", "async_get_plant_details", "async_get_device_realtime"):
+        getattr(plants, name).side_effect = _E999
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant", [dict(_SIDE_INVERTER)]
+    )
+    base = coordinator.update_interval
+
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base * 2
+
+
+@pytest.mark.real_refresh
+async def test_side_call_rejection_after_clean_main_call_keeps_the_backoff(hass: HomeAssistant):
+    """A clean main call must not restore the interval in a poll whose side call was rejected (#523)."""
+    plants = _oauth_side_call_plants()
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant", [dict(_SIDE_INVERTER)]
+    )
+    base = coordinator.update_interval
+    registry = ir.async_get(hass)
+
+    # Main call rejected first: backed off once.
+    plants.async_get_realtime_data = AsyncMock(side_effect=_E999)
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 2
+
+    # Main call recovers but the per-device call is still over quota: keep backing off.
+    plants.async_get_realtime_data = AsyncMock(return_value=MOCK_REALTIME_DATA)
+    plants.async_get_device_realtime.side_effect = _E999
+    await coordinator._async_update_data()
+    assert coordinator.update_interval == base * 4
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+    # Fully clean poll: restored.
+    plants.async_get_device_realtime = AsyncMock(return_value={})
+    await coordinator._async_update_data()
+    assert coordinator.update_interval == base
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is None
+
+
+@pytest.mark.real_refresh
+async def test_side_call_server_retry_hint_is_honoured(hass: HomeAssistant):
+    """A side call's retry_after hint sets the back-off just like the main call's (#458/#523)."""
+    plants = _oauth_side_call_plants()
+    plants.async_get_plant_details.side_effect = PySolarCloudException.from_response(
+        {"result_code": "E999", "retry_after": 900}
+    )
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant", [dict(_SIDE_INVERTER)]
+    )
+
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == timedelta(seconds=900)
+
+
+@pytest.mark.real_refresh
+async def test_non_quota_side_call_failure_does_not_back_off(hass: HomeAssistant):
+    """An ordinary side-call failure stays a soft failure: no back-off, no Repair (#523)."""
+    plants = _oauth_side_call_plants()
+    plants.async_get_plant_devices.side_effect = ClientError("boom")
+    plants.async_get_plant_details.side_effect = PySolarCloudException({"error": "E000"})
+    coordinator = SungrowPlantCoordinator(
+        hass, _make_entry({CONF_SCAN_INTERVAL: 300}), plants, "12345", "Test Plant", [dict(_SIDE_INVERTER)]
+    )
+    base = coordinator.update_interval
+
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "rate_limited_12345") is None
+
+
+_USER_SIDE_CALL_CLEAN = {
+    "async_get_devices": [],
+    "async_query_faults": [],
+    "async_get_fault_count": {},
+    "async_get_charging_piles": [],
+}
+
+
+@pytest.mark.parametrize("failing", sorted(_USER_SIDE_CALL_CLEAN))
+async def test_cloud_user_side_call_quota_rejection_backs_off_and_clears(hass: HomeAssistant, failing):
+    """On cloud_user a quota rejection on the device-list/fault/charger calls backs off and raises the Repair (#523)."""
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "0.49", "unit": "kW"}})
+    for name, ok in _USER_SIDE_CALL_CLEAN.items():
+        setattr(client, name, AsyncMock(return_value=ok))
+    getattr(client, failing).side_effect = _E999
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True, CONF_SCAN_INTERVAL: 300})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+    base = coordinator.update_interval
+    registry = ir.async_get(hass)
+
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base * 2
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+
+    setattr(client, failing, AsyncMock(return_value=_USER_SIDE_CALL_CLEAN[failing]))
+    await coordinator._async_update_data()
+
+    assert coordinator.update_interval == base
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is None
+
+
+async def test_cloud_user_per_device_realtime_quota_rejection_backs_off(hass: HomeAssistant):
+    """The per-device realtime backfill on cloud_user is a side call too (#405/#523)."""
+    metadata_only = {"uuid": "dev-1", "device_type": 43, "ps_key": "12345_1_1_1", "device_name": "SBR096"}
+    client = MagicMock()
+    client.async_get_plant_detail = AsyncMock(return_value={})
+    client.async_get_devices = AsyncMock(return_value=[metadata_only])
+    client.async_query_faults = AsyncMock(return_value=[])
+    client.async_get_fault_count = AsyncMock(return_value={})
+    client.async_get_charging_piles = AsyncMock(return_value=[])
+    client.async_get_device_realtime = AsyncMock(side_effect=_E999)
+    entry = _make_entry(options={CONF_ENABLE_DEVICE_SENSORS: True, CONF_SCAN_INTERVAL: 300})
+    coordinator = SungrowPlantCoordinator(hass, entry, None, "12345", "Test Plant", user_auth=client)
+    base = coordinator.update_interval
+
+    await coordinator._async_update_data()
+
+    client.async_get_device_realtime.assert_awaited_once()
+    assert coordinator.update_interval == base * 2
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "rate_limited_12345") is not None

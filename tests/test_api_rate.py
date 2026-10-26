@@ -187,3 +187,15 @@ def test_label_for_known_and_unknown_types():
     """Known call types get a friendly label; unknown ones pass through unchanged."""
     assert label_for(CALL_TYPE_USER_DEVICE_FETCH) == "per-poll device-list fetch (user account)"
     assert label_for("something_new") == "something_new"
+
+
+def test_off_poll_call_types_have_readable_labels():
+    """Backfill, heartbeat and read-back spend is labelled in the warning text (#524)."""
+    from custom_components.sungrow.api_rate import (
+        CALL_TYPE_BACKFILL,
+        CALL_TYPE_DISPATCH_READBACK,
+        CALL_TYPE_HEARTBEAT,
+    )
+
+    for call_type in (CALL_TYPE_BACKFILL, CALL_TYPE_HEARTBEAT, CALL_TYPE_DISPATCH_READBACK):
+        assert label_for(call_type) != call_type

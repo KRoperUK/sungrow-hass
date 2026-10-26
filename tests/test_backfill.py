@@ -14,7 +14,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -376,6 +376,7 @@ def _engine_coordinator(*, option_days: int | None = 1, plant_id: str = "123"):
         options[CONF_BACKFILL_DAYS] = option_days
     return SimpleNamespace(
         plant_id=plant_id,
+        record_api_call=MagicMock(),
         config_entry=SimpleNamespace(options=options),
         plants_service=SimpleNamespace(
             measure_points=dict(_MEASURE_POINTS),
@@ -748,6 +749,7 @@ def _mgr_coordinator(plant_id: str, *, history=None, option_days: int | None = 1
     return SimpleNamespace(
         plant_id=plant_id,
         plant_name=plant_name or f"Plant {plant_id}",
+        record_api_call=MagicMock(),
         config_entry=SimpleNamespace(options=options),
         plants_service=service,
     )
@@ -1111,3 +1113,30 @@ async def test_manager_partial_run_raises_repair_then_clears_it(hass: HomeAssist
     await asyncio.gather(*entry.background_tasks)
 
     assert issue_reg.async_get_issue(DOMAIN, "backfill_partial_p1") is None
+
+
+@pytest.mark.asyncio
+async def test_engine_records_every_history_call_in_the_rate_tracker(hass: HomeAssistant):
+    """Each history request, retries included, is counted against the hourly budget (#524)."""
+    from custom_components.sungrow.api_rate import CALL_TYPE_BACKFILL
+
+    coordinator = _engine_coordinator(option_days=1)
+    attempts = 0
+
+    async def history(plant_id, start, end, *, measure_points, interval):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("blip")  # one transient failure, retried
+        return {plant_id: [_row(c, start, 100.0) for c in measure_points]}
+
+    coordinator.plants_service.async_get_historical_data.side_effect = history
+    engine, _throttle, _store = _make_engine(hass, coordinator)
+
+    with _frozen_now(), patch("custom_components.sungrow.backfill.import_statistics"):
+        await engine.async_run()
+
+    awaited = coordinator.plants_service.async_get_historical_data.await_count
+    assert awaited == 9  # 8 chunks + 1 retry
+    assert coordinator.record_api_call.call_count == awaited
+    assert {call.args[0] for call in coordinator.record_api_call.call_args_list} == {CALL_TYPE_BACKFILL}

@@ -1440,3 +1440,58 @@ async def test_heartbeat_loop_uses_update_parameters_without_native_loop(hass: H
     assert control.async_update_parameters.await_count >= 1
     payload = control.async_update_parameters.await_args.args[1]
     assert "external_ems_heartbeat" in payload
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat keepalives count against the API budget (#524)
+# ---------------------------------------------------------------------------
+
+
+def _entry_with_recording_coordinator(hass: HomeAssistant, control) -> tuple[MockConfigEntry, MagicMock]:
+    entry = _entry_with_heartbeats(hass)
+    coordinator = MagicMock()
+    coordinator.plant_id = "12345"
+    entry.runtime_data.coordinators = [coordinator]
+    entry.runtime_data.control = control
+    return entry, coordinator
+
+
+async def test_user_control_keepalives_are_counted(hass: HomeAssistant):
+    """The UserControl heartbeat loop records one call per keepalive it sends (#524)."""
+    from custom_components.sungrow.api_rate import CALL_TYPE_HEARTBEAT
+
+    control = MagicMock(spec=["async_update_parameters"])
+    control.async_update_parameters = AsyncMock(return_value=[])
+    entry, coordinator = _entry_with_recording_coordinator(hass, control)
+
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=60)
+    await asyncio.sleep(0.05)
+    await async_stop_heartbeat(hass, entry, "12345")
+
+    control.async_update_parameters.assert_awaited_once()
+    coordinator.record_api_call.assert_called_once_with(CALL_TYPE_HEARTBEAT)
+
+
+async def test_oauth_control_library_loop_keepalives_are_counted_once(hass: HomeAssistant):
+    """pysolarcloud's own Control.heartbeat_loop is counted per keepalive, even across restarts (#524)."""
+    from pysolarcloud.control import Control
+
+    from custom_components.sungrow.api_rate import CALL_TYPE_HEARTBEAT
+
+    control = Control(MagicMock())
+    control.async_update_parameters = AsyncMock(return_value=[])
+    entry, coordinator = _entry_with_recording_coordinator(hass, control)
+
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=1)
+    await asyncio.sleep(0.05)
+    assert coordinator.record_api_call.call_count == 1
+    assert control.async_update_parameters.await_count == 1
+
+    # Restarting must not wrap the already-counting hook a second time (double counting).
+    await async_start_heartbeat(hass, entry, "12345", "dev-1", interval=1)
+    await asyncio.sleep(0.05)
+    await async_stop_heartbeat(hass, entry, "12345")
+
+    assert control.async_update_parameters.await_count == 2
+    assert coordinator.record_api_call.call_count == 2
+    assert {call.args[0] for call in coordinator.record_api_call.call_args_list} == {CALL_TYPE_HEARTBEAT}

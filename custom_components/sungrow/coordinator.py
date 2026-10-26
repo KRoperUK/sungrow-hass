@@ -315,6 +315,10 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Latched once the proactive rate Repair is raised, so it is cleared exactly once
         # when the observed rate falls back under the threshold.
         self._rate_repair_raised = False
+        # Set when a side call (device list, plant detail, per-device, fault, charger) is
+        # quota-rejected during the current poll, so a clean main call doesn't restore the
+        # interval / clear the Repair that same poll (#523).
+        self._side_call_rate_limited = False
         self.plant_id = plant_id
         self.plant_name = plant_name
         # The user-configured poll interval, restored after a rate-limit back-off (#156).
@@ -495,6 +499,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data for this plant, holding server-derived counters through small dips."""
+        self._side_call_rate_limited = False
         data = await self._async_fetch_plant_data()
         # Applied after every transport's fetch so plant and per-device totals get the same
         # treatment wherever they came from. Re-applying to last-good data served from the
@@ -542,9 +547,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A timeout arrives here as TimeoutError and is treated as transient.
             raise UpdateFailed(describe_api_error(err) or f"Error communicating with iSolarCloud API: {err}") from err
 
-        # Success: the plant recovered, so clear any Repairs and restore the interval.
-        self._async_clear_repairs()
-        self._adjust_poll_backoff(rate_limited=False)
+        # Success: the plant recovered. The Repairs are cleared and the interval restored
+        # once the side calls below have also come back clean.
         self._last_successful_update = self.hass.loop.time()
 
         # Refresh the device list so devices added to the plant after setup are
@@ -565,6 +569,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             uuid: add_pack_health_points(normalize_energy_units(tag_source(points, "cloud")))
             for uuid, points in raw_devices.items()
         }
+        self._async_recover_if_not_rate_limited()
 
         # pysolarcloud is untyped, so the realtime payload is Any.
         cloud_data = cast("dict[str, Any]", all_plants_data.get(self.plant_id, {}))
@@ -621,6 +626,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_refresh_user_device_data()
         await self._async_refresh_faults()
         await self._async_refresh_chargers()
+        self._async_recover_if_not_rate_limited()
         points = map_plant_detail_to_points(detail)
         # Proactively warn if this poll's calls push the observed rate toward the budget
         # (#434). The per-poll device-list fetch is the dominant contributor here (#439).
@@ -651,6 +657,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_USER_DEVICE_FETCH)
                 devices = await self._user_auth.async_get_devices(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             # Do not bail out. On this transport the device list *is* the per-device
             # realtime source, so returning here left ``device_data`` empty and silently
             # dropped every per-device entity — the only trace being a debug line nobody
@@ -719,6 +726,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 realtime = await self._user_auth.async_get_device_realtime(list(ps_key_by_uuid.values()))
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             _LOGGER.debug("Per-device realtime backfill failed for plant %s: %s", self.plant_id, err)
             return
         for uuid in ps_key_by_uuid:
@@ -746,6 +754,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 faults = await self._user_auth.async_query_faults(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
         else:
             self.fault_list = list(faults) if isinstance(faults, list) else []
@@ -754,6 +763,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                 summary = await self._user_auth.async_get_fault_count(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             _LOGGER.debug("Fault count fetch failed for %s: %s", self.plant_name, err)
         else:
             self.fault_summary = dict(summary) if isinstance(summary, dict) else {}
@@ -778,6 +788,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                     piles = await self._user_auth.async_get_charging_piles(self.plant_id)
             except (PySolarCloudException, ClientError, TimeoutError) as err:
+                self._note_side_call_error(err)
                 _LOGGER.debug("Charger discovery failed for %s: %s", self.plant_name, err)
                 return
             self.charging_piles = [p for p in piles if isinstance(p, dict) and p.get("uuid") is not None]
@@ -791,6 +802,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
                     data = await self._user_auth.async_get_charging_pile_realtime(pile["uuid"])
             except (PySolarCloudException, ClientError, TimeoutError, ValueError) as err:
+                self._note_side_call_error(err)
                 _LOGGER.debug("Charger realtime fetch failed for %s (%s): %s", uuid, self.plant_name, err)
                 continue
             if isinstance(data, dict) and data:
@@ -1000,6 +1012,36 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._base_update_interval,
             )
 
+    def _note_side_call_error(self, err: Exception) -> None:
+        """Give a quota rejection on a side call the treatment the main plant call gets (#523).
+
+        The device-list, plant-detail, per-device, fault and charger calls are best-effort
+        and swallow their errors, so an E998/E999 on one of them used to vanish into a debug
+        line while the budget kept being spent. Raise the ``rate_limited`` Repair and back
+        off the poll interval — once per poll, however many side calls are rejected, so a
+        burst of rejections doesn't compound the doubling. Anything that isn't a quota
+        rejection is ignored here (the caller still treats it as an ordinary soft failure).
+        """
+        if not is_rate_limit_error(err):
+            return
+        first = not self._side_call_rate_limited
+        self._side_call_rate_limited = True
+        self._async_raise_repair(err)
+        if first:
+            self._adjust_poll_backoff(rate_limited=True, retry_after=rate_limit_retry_after(err))
+
+    def _async_recover_if_not_rate_limited(self) -> None:
+        """Clear the rate-limit state at the end of a clean poll (#153/#156/#523).
+
+        Run after the side calls, not straight after the main call: a poll whose main call
+        succeeded but whose side calls were quota-rejected is not clean, and restoring the
+        interval then re-backing-off in the same poll would only flap it.
+        """
+        if self._side_call_rate_limited:
+            return
+        self._async_clear_repairs()
+        self._adjust_poll_backoff(rate_limited=False)
+
     def _async_raise_repair(self, err: Exception) -> None:
         """Raise the Repair matching this error's actionable code, if any (#153).
 
@@ -1127,6 +1169,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_DEVICE_LIST)
                 devices = await self.plants_service.async_get_plant_devices(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             _LOGGER.debug("Could not refresh devices for plant %s: %s", self.plant_id, err)
             return
         # Mutate in place so holders of this list (runtime_data.devices) see updates.
@@ -1155,6 +1198,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._record_api_call(CALL_TYPE_PLANT_DETAIL)
                 details = await self.plants_service.async_get_plant_details(self.plant_id)
         except (PySolarCloudException, ClientError, TimeoutError) as err:
+            self._note_side_call_error(err)
             _LOGGER.debug("Could not refresh plant detail for plant %s: %s", self.plant_id, err)
             return
         for row in details or []:
@@ -1291,6 +1335,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._unsupported_device_types.add(type_id)
                 continue
             except (PySolarCloudException, ClientError, TimeoutError) as err:
+                self._note_side_call_error(err)
                 _LOGGER.debug("Per-device realtime failed for plant %s type %s: %s", self.plant_id, type_id, err)
                 continue
             if not result:

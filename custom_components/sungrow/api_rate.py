@@ -28,6 +28,10 @@ CALL_TYPE_PLANT_DETAIL = "plant_detail"
 CALL_TYPE_DEVICE_REALTIME = "device_realtime"
 CALL_TYPE_USER_DEVICE_FETCH = "user_device_fetch"
 CALL_TYPE_CONTROL = "control"
+# Spend that sits outside the poll loop but counts against the same hourly budget (#524).
+CALL_TYPE_BACKFILL = "backfill"
+CALL_TYPE_HEARTBEAT = "heartbeat"
+CALL_TYPE_DISPATCH_READBACK = "dispatch_readback"
 
 # Human-readable labels for the call types, used in the warning / Repair text so the
 # message reads naturally rather than exposing the internal tag.
@@ -38,6 +42,9 @@ CALL_TYPE_LABELS: dict[str, str] = {
     CALL_TYPE_DEVICE_REALTIME: "per-device data fetch",
     CALL_TYPE_USER_DEVICE_FETCH: "per-poll device-list fetch (user account)",
     CALL_TYPE_CONTROL: "dispatch control write",
+    CALL_TYPE_BACKFILL: "history backfill",
+    CALL_TYPE_HEARTBEAT: "EMS heartbeat keepalive",
+    CALL_TYPE_DISPATCH_READBACK: "dispatch read-back",
 }
 
 # Documented free-plan hourly request budget. The E999 rejection is the *hourly* API
