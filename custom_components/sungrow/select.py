@@ -293,6 +293,21 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         await super().async_will_remove_from_hass()
 
     @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Re-key the battery-mode registry when the entity_id is renamed in place (#515).
+
+        Home Assistant 2026.11+ updates a renamed entity without removing and re-adding it,
+        so the ``entity_id`` key written in ``async_added_to_hass`` would go stale. Only
+        invoked by HA 2026.11+, where the base-class hook exists.
+        """
+        super().async_entity_id_changed(old_entity_id)  # type: ignore[misc]
+        if self.param != BATTERY_MODE_PARAM:
+            return
+        registry = self.hass.data.setdefault(DOMAIN, {}).setdefault("battery_mode_selects", {})
+        registry.pop(old_entity_id, None)
+        registry[self.entity_id] = self
+
+    @callback
     def _handle_coordinator_update(self) -> None:
         """Handle a coordinator update — includes throttled EMS-mode read-back (#286).
 
