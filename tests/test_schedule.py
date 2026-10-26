@@ -398,6 +398,58 @@ async def test_day_mask_boundary_actuates_on_a_matching_weekday(hass: HomeAssist
     assert scheduler._current_window is window
 
 
+@pytest.mark.parametrize("entering", [True, False])
+async def test_failed_boundary_write_leaves_window_unapplied_and_logs_error(hass: HomeAssistant, caplog, entering):
+    """A boundary write that fails is not recorded as applied and is logged at error level (#522)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry = _entry_with_windows(hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}])
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    window = scheduler.windows[0]
+    if not entering:
+        # Leaving: the window was applied earlier, so a failed release must leave it applied.
+        scheduler._current_window = window
+    fake_select = _register_fake_select(hass)
+    fake_select.entity_id = "select.plant_battery_mode"
+    fake_select.async_select_option = AsyncMock(
+        side_effect=HomeAssistantError("Failed to update battery_mode on the inverter: Connection reset")
+    )
+
+    boundary = _at(time(1, 0) if entering else time(5, 0))
+    with patch("homeassistant.util.dt.now") as fake_now:
+        fake_now.return_value = boundary
+        await scheduler._on_boundary_impl(window, entering=entering)
+
+    fake_select.async_select_option.assert_awaited_once()
+    assert scheduler._current_window is (None if entering else window)
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(errors) == 1
+    assert "select.plant_battery_mode" in errors[0].getMessage()
+    assert "not applied" in errors[0].getMessage()
+
+
+async def test_failed_startup_write_leaves_window_unapplied(hass: HomeAssistant):
+    """A failed catch-up write at startup does not record the enclosing window as applied (#522)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry = _entry_with_windows(hass, [{"start": "01:00", "end": "05:00", "mode": "force_charge"}])
+    scheduler = SungrowScheduler.from_entry(hass, entry)
+    fake_select = _register_fake_select(hass)
+    fake_select.async_select_option = AsyncMock(side_effect=HomeAssistantError("network down"))
+
+    with (
+        patch("custom_components.sungrow.schedule.async_track_time_change") as tracker,
+        patch("homeassistant.util.dt.now") as fake_now,
+    ):
+        tracker.return_value = MagicMock()
+        fake_now.return_value = _at(time(3, 0))
+        await scheduler.async_start()
+
+    fake_select.async_select_option.assert_awaited_once()
+    assert scheduler._current_window is None
+    scheduler.async_stop()
+
+
 # ---------------------------------------------------------------------------
 # Weekday-mask parsing (#433)
 # ---------------------------------------------------------------------------

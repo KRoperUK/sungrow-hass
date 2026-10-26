@@ -15,7 +15,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
 from . import (
@@ -30,7 +29,7 @@ from .api_rate import CALL_TYPE_CONTROL
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
-from .modbus_control import ModbusControlError
+from .heartbeat import DISPATCH_WRITE_ERRORS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -410,7 +409,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         try:
             self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, payload)
-        except (PySolarCloudException, ModbusControlError) as err:
+        except DISPATCH_WRITE_ERRORS as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",
@@ -509,7 +508,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 self.device_uuid,
                 self._command_payload(safe_option, self.options_map[safe_option]),
             )
-        except (PySolarCloudException, ModbusControlError) as err:
+        except DISPATCH_WRITE_ERRORS as err:
             _LOGGER.warning("Auto-revert to %s failed for %s: %s", safe_option, self.device_uuid, err)
         entry = self.coordinator.config_entry
         if entry is not None:
@@ -584,7 +583,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         """
         try:
             params = await self.control.async_read_parameters(self.device_uuid, [_EMS_MODE_PARAM])
-        except (PySolarCloudException, ModbusControlError, TimeoutError) as err:
+        except DISPATCH_WRITE_ERRORS as err:
             # Best-effort verification: cloud, user-account, and Modbus dispatch all
             # come through here, so keep the union of their typed error surfaces.
             _LOGGER.debug("EMS-mode read-back failed for %s; skipping actuation check: %s", self.device_uuid, err)
@@ -618,7 +617,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             await self.control.async_update_parameters(
                 self.device_uuid, self._command_payload(option, self.options_map[option])
             )
-        except (PySolarCloudException, ModbusControlError) as err:
+        except DISPATCH_WRITE_ERRORS as err:
             _LOGGER.debug("Forced-mode retry write failed for %s: %s", self.device_uuid, err)
 
         still_self = await self._read_still_self_consumption()

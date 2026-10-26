@@ -15,7 +15,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
 
 from . import (
@@ -29,7 +28,7 @@ from .api_rate import CALL_TYPE_CONTROL
 from .const import DOMAIN
 from .coordinator import SungrowPlantCoordinator
 from .entity_platform_helpers import create_entity_adder
-from .modbus_control import ModbusControlError
+from .heartbeat import DISPATCH_WRITE_ERRORS
 from .model_specs import spec_for
 
 _LOGGER = logging.getLogger(__name__)
@@ -550,7 +549,7 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
         try:
             self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
-        except (PySolarCloudException, ModbusControlError) as err:
+        except DISPATCH_WRITE_ERRORS as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",

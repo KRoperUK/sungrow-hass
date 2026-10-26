@@ -1,9 +1,11 @@
 """Tests for the Sungrow dispatch (number/select) platforms."""
 
+import json
 import math
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import ClientConnectionError, ClientConnectorError, ContentTypeError
 from homeassistant.components.number import NumberDeviceClass
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
@@ -1816,6 +1818,90 @@ async def test_select_option_api_error_raises_translated_error(hass: HomeAssista
     assert exc.value.translation_key == "dispatch_write_failed"
     assert exc.value.translation_domain == DOMAIN
     assert exc.value.translation_placeholders["param"] == "battery_mode"
+
+
+# A dropped connection / stalled server, and a reply that is not the expected envelope.
+_NETWORK_AND_MALFORMED_FAILURES = [
+    pytest.param(ClientConnectionError("Connection reset by peer"), id="dropped-connection"),
+    pytest.param(ClientConnectorError(MagicMock(), OSError("Network is unreachable")), id="network-down"),
+    pytest.param(TimeoutError(), id="timeout"),
+    pytest.param(ContentTypeError(MagicMock(), (), message="Attempt to decode JSON"), id="non-json-reply"),
+    pytest.param(json.JSONDecodeError("Expecting value", "<html>", 0), id="undecodable-json"),
+    pytest.param(KeyError("result_data"), id="missing-envelope-key"),
+    pytest.param(IndexError("list index out of range"), id="empty-dev-result-list"),
+    pytest.param(TypeError("'NoneType' object is not subscriptable"), id="null-reply"),
+]
+
+
+@pytest.mark.parametrize("failure", _NETWORK_AND_MALFORMED_FAILURES)
+async def test_number_write_network_or_malformed_failure_raises_translated_error(hass: HomeAssistant, failure):
+    """A dropped connection or malformed reply on a slider write is a translated error (#522)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=failure)
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+
+    with pytest.raises(HomeAssistantError) as exc:
+        await power.async_set_native_value(2500)
+
+    assert exc.value.translation_key == "dispatch_write_failed"
+    assert exc.value.translation_placeholders["param"] == "charge_discharge_power"
+    assert exc.value.__cause__ is failure
+    # The write failed, so the slider must not claim the new value.
+    assert power.native_value != 2500
+
+
+@pytest.mark.parametrize("failure", _NETWORK_AND_MALFORMED_FAILURES)
+async def test_select_write_network_or_malformed_failure_raises_translated_error(hass: HomeAssistant, failure):
+    """A dropped connection or malformed reply on a battery-mode change is a translated error (#522)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=failure)
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "battery_mode")
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as start,
+        pytest.raises(HomeAssistantError) as exc,
+    ):
+        await command.async_select_option("Force charge")
+
+    assert exc.value.translation_key == "dispatch_write_failed"
+    assert exc.value.translation_placeholders["param"] == "battery_mode"
+    assert exc.value.__cause__ is failure
+    # A failed write must not start the keepalive or record the option as applied.
+    start.assert_not_awaited()
+    assert command.current_option != "Force charge"
+
+
+async def test_autorevert_network_failure_is_logged_not_raised(hass: HomeAssistant, caplog):
+    """A dropped connection during the auto-revert write is logged; the revert still completes (#522)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
+    data.control.async_update_parameters = AsyncMock(side_effect=ClientConnectionError("Connection reset"))
+
+    added: list = []
+    await select_setup_entry(hass, entry, lambda e: added.extend(e))
+    command = next(e for e in added if e.param == "battery_mode")
+    command.hass = hass
+    command.async_write_ha_state = MagicMock()
+    command._attr_current_option = "Force charge"
+
+    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
+        await command._do_revert()
+
+    assert "Auto-revert to Self-consumption failed" in caplog.text
+    mock_stop.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
