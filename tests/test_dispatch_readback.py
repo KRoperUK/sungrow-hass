@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.core import HomeAssistant
 from pysolarcloud import PySolarCloudException
 from pysolarcloud.control import Control
@@ -197,11 +198,15 @@ async def test_readback_in_flight_guard_released_when_the_read_raises(hass: Home
     """A read-back that blows up must not wedge the guard and block every later one (#531)."""
     select = _make_select(hass)
     select._attr_current_option = BATTERY_MODE_FORCE_CHARGE
+    select._readback_in_flight = True
 
-    with patch.object(select, "_async_dispatch_readback", new=AsyncMock(side_effect=RuntimeError("boom"))):
-        _trigger_readback(select)
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+    # Run the wrapper directly: through a hass task the error would be an unretrieved task
+    # exception, which the test harness (rightly) fails on.
+    with (
+        patch.object(select, "_async_dispatch_readback", new=AsyncMock(side_effect=RuntimeError("boom"))),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await select._async_run_readback()
 
     assert select._readback_in_flight is False
 
