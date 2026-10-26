@@ -53,6 +53,11 @@ _REGISTER_TYPE_HOLDING = "holding"
 _BATTERY_MODE_KEYS = ("self_consumption", "force_charge", "force_discharge", "stop")
 _BATTERY_MODE_PARAM = "battery_mode"
 
+# ``pysolarcloud.Auth`` caches the access-token expiry under this key; zeroing it forces
+# the refresh path in ``refresh_tokens``. Asserted present so a library rename can't
+# turn the service into a silent no-op (#532).
+_TOKEN_EXPIRY_KEY = "expires_at"
+
 _BACKFILL_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
@@ -346,8 +351,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 # invalidating the cached expiry. The lock + double-check in the
                 # library handles concurrent callers, and ``SungrowAuth`` persists
                 # the rotated tokens back to the entry via ``token_updater`` so
-                # they survive a restart.
-                auth.tokens["expires_at"] = 0
+                # they survive a restart. If the library ever renames the expiry key,
+                # writing the old name would silently force nothing and the service
+                # would report a fake success — fail loudly instead (#532).
+                if _TOKEN_EXPIRY_KEY not in auth.tokens:
+                    msg = f"auth library no longer exposes the {_TOKEN_EXPIRY_KEY!r} token key; cannot force a refresh"
+                    _LOGGER.error("Token refresh not attempted for entry %s: %s", entry.entry_id, msg)
+                    errors.append((entry.entry_id, msg))
+                    continue
+                auth.tokens[_TOKEN_EXPIRY_KEY] = 0
                 try:
                     await auth.async_get_access_token()
                 except (PySolarCloudException, ClientError, TimeoutError) as err:
