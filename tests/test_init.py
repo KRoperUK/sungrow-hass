@@ -16,6 +16,7 @@ from pysolarcloud.plants import DeviceType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sungrow import (
+    PLATFORMS,
     SungrowAuthCallbackView,
     SungrowData,
     async_remove_config_entry_device,
@@ -1495,3 +1496,47 @@ async def test_oauth_control_library_loop_keepalives_are_counted_once(hass: Home
     assert control.async_update_parameters.await_count == 2
     assert coordinator.record_api_call.call_count == 2
     assert {call.args[0] for call in coordinator.record_api_call.call_args_list} == {CALL_TYPE_HEARTBEAT}
+
+
+# ---------------------------------------------------------------------------
+# One platform list for setup and unload (#529)
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_and_unload_share_the_single_platform_list(
+    hass: HomeAssistant, mock_setup_auth, mock_plants_service
+):
+    """Setup forwards, and unload tears down, the very same PLATFORMS list (#529)."""
+    import custom_components.sungrow as integration
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy(), unique_id="test_app_id")
+    entry.add_to_hass(hass)
+
+    with patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()) as forward:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    forward.assert_awaited_once()
+    assert forward.await_args.args[1] is PLATFORMS
+
+    with patch.object(hass.config_entries, "async_unload_platforms", new=AsyncMock(return_value=True)) as unload:
+        assert await async_unload_entry(hass, entry)
+    assert unload.await_args.args[1] is PLATFORMS
+
+    # The per-transport copies and the dispatcher between them are gone.
+    for gone in ("_entry_platforms", "MODBUS_ONLY_PLATFORMS", "CLOUD_USER_PLATFORMS"):
+        assert not hasattr(integration, gone)
+
+
+async def test_modbus_only_entry_unloads_with_the_same_platform_list(hass: HomeAssistant):
+    """A cloud-free entry sets up and unloads the same list too, so options-change reload works (#529)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_TRANSPORT: TRANSPORT_MODBUS_ONLY, CONF_MODBUS_HOST: "10.0.0.9"},
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = SungrowData(coordinators=[], control=None, devices={})
+
+    with patch.object(hass.config_entries, "async_unload_platforms", new=AsyncMock(return_value=True)) as unload:
+        assert await async_unload_entry(hass, entry)
+
+    assert unload.await_args.args[1] is PLATFORMS
