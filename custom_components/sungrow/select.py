@@ -225,6 +225,8 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # Throttle counter for the periodic EMS-mode read-back (#286). Only the battery-
         # mode select reads back; other selects leave this at 0.
         self._readback_counter: int = 0
+        # True while a read-back is running, so the next one is held until it finishes (#531).
+        self._readback_in_flight: bool = False
 
     def _normalize_restored_option(self, state: str) -> str | None:
         """Map a restored state to a current option (including pre-#255 legacy names)."""
@@ -321,8 +323,22 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         self._readback_counter += 1
         if self._readback_counter < 3:
             return
+        # The read-back is due. Hold it (the counter stays due, so it runs on the first
+        # update that allows it) while the previous read is still running — a slow cloud
+        # call must not pile overlapping reads onto the API quota — and while the last
+        # poll failed, when the cloud/device is evidently unreachable (#531).
+        if self._readback_in_flight or not self.coordinator.last_update_success:
+            return
         self._readback_counter = 0
-        self.hass.async_create_task(self._async_dispatch_readback())
+        self._readback_in_flight = True
+        self.hass.async_create_task(self._async_run_readback())
+
+    async def _async_run_readback(self) -> None:
+        """Run one read-back, always releasing the in-flight guard (#531)."""
+        try:
+            await self._async_dispatch_readback()
+        finally:
+            self._readback_in_flight = False
 
     async def _async_dispatch_readback(self) -> None:
         """Read the inverter's EMS mode and reconcile with the assumed state (#286)."""
