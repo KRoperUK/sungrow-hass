@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime, time
 from typing import Any
 
@@ -25,7 +26,13 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 from pysolarcloud import PySolarCloudException
 
-from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_CLOUD_USER, TRANSPORT_MODBUS_ONLY
+from .const import (
+    CONF_TRANSPORT,
+    DOMAIN,
+    TRANSPORT_CLOUD_ONLY,
+    TRANSPORT_CLOUD_USER,
+    TRANSPORT_MODBUS_ONLY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,42 +101,56 @@ _READ_REGISTERS_SCHEMA = vol.Schema(
 )
 
 
-def _cloud_backfill_entries(hass: HomeAssistant) -> list[Any]:
-    """Return every loaded cloud Sungrow config entry (those that own a manager)."""
-    return [
-        entry
-        for entry in hass.config_entries.async_entries(DOMAIN)
-        if entry.state is ConfigEntryState.LOADED and entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY
-    ]
+def _resolve_loaded_entries(
+    hass: HomeAssistant,
+    entry_id: str | None,
+    allowed_transports: frozenset[str | None],
+    rejections: Mapping[str | None, str],
+    *,
+    unsupported: str = "is not supported by this service",
+) -> list[Any]:
+    """Resolve the addressed loaded Sungrow entries whose transport is allowed.
 
-
-def _resolve_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
-    """Resolve the addressed cloud entries, defaulting to all loaded cloud entries."""
+    With no ``entry_id`` this returns every loaded entry on an allowed transport. Only
+    loaded entries are eligible, since an entry's clients aren't reachable while it is
+    failed/unloaded. A targeted entry must exist, belong to this integration, be loaded
+    and be on an allowed transport; otherwise a :class:`ServiceValidationError` is raised
+    with ``rejections[transport]`` (or ``unsupported``) completing "Config entry '<id>' …".
+    One helper for every service so entry validation is fixed in one place (#530).
+    """
     if entry_id is None:
-        return _cloud_backfill_entries(hass)
+        return [
+            entry
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry.state is ConfigEntryState.LOADED and entry.data.get(CONF_TRANSPORT) in allowed_transports
+        ]
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None or entry.domain != DOMAIN:
         raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
     if entry.state is not ConfigEntryState.LOADED:
         raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
-    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_MODBUS_ONLY:
-        raise ServiceValidationError(f"Config entry '{entry_id}' is a local Modbus entry; Backfill is cloud-only")
+    transport = entry.data.get(CONF_TRANSPORT)
+    if transport not in allowed_transports:
+        raise ServiceValidationError(f"Config entry '{entry_id}' {rejections.get(transport, unsupported)}")
     return [entry]
 
 
-def _oauth_cloud_entries(hass: HomeAssistant) -> list[Any]:
-    """Return every loaded OAuth cloud entry — those that own a token pair we can refresh.
+# ``None`` is an entry with no stored transport, which setup treats as ``cloud_only``.
+_BACKFILL_TRANSPORTS: frozenset[str | None] = frozenset({None, TRANSPORT_CLOUD_ONLY, TRANSPORT_CLOUD_USER})
+# Only the OAuth transport owns a refreshable token pair: ``cloud_user`` has an
+# email/password login and ``modbus_only`` has no cloud at all.
+_OAUTH_TRANSPORTS: frozenset[str | None] = frozenset({None, TRANSPORT_CLOUD_ONLY})
+_MODBUS_TRANSPORTS: frozenset[str | None] = frozenset({TRANSPORT_MODBUS_ONLY})
 
-    Excludes ``cloud_user`` entries (email/password login, no OAuth refresh token) and
-    ``modbus_only`` entries (no cloud at all). Only loaded entries are eligible since
-    the auth client isn't reachable when an entry is failed/unloaded.
-    """
-    return [
-        entry
-        for entry in hass.config_entries.async_entries(DOMAIN)
-        if entry.state is ConfigEntryState.LOADED
-        and entry.data.get(CONF_TRANSPORT) not in (TRANSPORT_MODBUS_ONLY, TRANSPORT_CLOUD_USER)
-    ]
+
+def _resolve_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
+    """Resolve the addressed cloud entries, defaulting to all loaded cloud entries."""
+    return _resolve_loaded_entries(
+        hass,
+        entry_id,
+        _BACKFILL_TRANSPORTS,
+        {TRANSPORT_MODBUS_ONLY: "is a local Modbus entry; Backfill is cloud-only"},
+    )
 
 
 def _resolve_oauth_entries(hass: HomeAssistant, entry_id: str | None) -> list[Any]:
@@ -139,23 +160,15 @@ def _resolve_oauth_entries(hass: HomeAssistant, entry_id: str | None) -> list[An
     isn't loaded, isn't a Sungrow entry, or is a non-OAuth transport (``cloud_user``
     or ``modbus_only``) that doesn't have refreshable OAuth tokens.
     """
-    if entry_id is None:
-        return _oauth_cloud_entries(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None or entry.domain != DOMAIN:
-        raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
-    if entry.state is not ConfigEntryState.LOADED:
-        raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
-    transport = entry.data.get(CONF_TRANSPORT)
-    if transport == TRANSPORT_MODBUS_ONLY:
-        raise ServiceValidationError(
-            f"Config entry '{entry_id}' is a local Modbus entry; there are no OAuth tokens to refresh"
-        )
-    if transport == TRANSPORT_CLOUD_USER:
-        raise ServiceValidationError(
-            f"Config entry '{entry_id}' uses user-account login; there is no OAuth refresh token to force"
-        )
-    return [entry]
+    return _resolve_loaded_entries(
+        hass,
+        entry_id,
+        _OAUTH_TRANSPORTS,
+        {
+            TRANSPORT_MODBUS_ONLY: "is a local Modbus entry; there are no OAuth tokens to refresh",
+            TRANSPORT_CLOUD_USER: "uses user-account login; there is no OAuth refresh token to force",
+        },
+    )
 
 
 def _resolve_modbus_client(hass: HomeAssistant, entry_id: str) -> Any:
@@ -166,15 +179,13 @@ def _resolve_modbus_client(hass: HomeAssistant, entry_id: str) -> Any:
     user-account entries have no Modbus client and are rejected with a clear
     :class:`ServiceValidationError`.
     """
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None or entry.domain != DOMAIN:
-        raise ServiceValidationError(f"No Sungrow config entry found for '{entry_id}'")
-    if entry.state is not ConfigEntryState.LOADED:
-        raise ServiceValidationError(f"Sungrow config entry '{entry_id}' is not loaded")
-    if entry.data.get(CONF_TRANSPORT) != TRANSPORT_MODBUS_ONLY:
-        raise ServiceValidationError(
-            f"Config entry '{entry_id}' is not a local Modbus entry; the register probe is Modbus-only"
-        )
+    [entry] = _resolve_loaded_entries(
+        hass,
+        entry_id,
+        _MODBUS_TRANSPORTS,
+        {},
+        unsupported="is not a local Modbus entry; the register probe is Modbus-only",
+    )
     data = getattr(entry, "runtime_data", None)
     for coordinator in getattr(data, "coordinators", None) or []:
         client = getattr(coordinator, "_modbus_client", None)

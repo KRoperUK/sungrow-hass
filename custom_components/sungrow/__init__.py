@@ -88,34 +88,9 @@ from .oauth_view import SungrowAuthCallbackView
 from .schedule import SungrowScheduler
 from .services import async_setup_services
 
+# One list for every transport — setup and unload MUST use the same one (unloading a platform
+# that was never set up fails the unload, which breaks options-change reload).
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
-# Modbus-only: sensors + connectivity binary sensor + local active-power controls (#220).
-# Setup and unload MUST use the same list — unloading a platform that was never set up
-# fails the unload, which breaks options-change reload.
-MODBUS_ONLY_PLATFORMS: list[Platform] = [
-    Platform.BINARY_SENSOR,
-    Platform.NUMBER,
-    Platform.SELECT,
-    Platform.SENSOR,
-]
-# cloud_user has sensors plus dispatch (UserControl over the app/web API, #271). No
-# binary sensors (device fault/connectivity come from the OAuth device list shape).
-CLOUD_USER_PLATFORMS: list[Platform] = [
-    Platform.BINARY_SENSOR,
-    Platform.NUMBER,
-    Platform.SELECT,
-    Platform.SENSOR,
-]
-
-
-def _entry_platforms(entry: SungrowConfigEntry) -> list[Platform]:
-    """Return the platforms this entry sets up (fewer for cloud-free entries, #159/#268)."""
-    transport = entry.data.get(CONF_TRANSPORT)
-    if transport == TRANSPORT_MODBUS_ONLY:
-        return MODBUS_ONLY_PLATFORMS
-    if transport == TRANSPORT_CLOUD_USER:
-        return CLOUD_USER_PLATFORMS
-    return PLATFORMS
 
 
 # How long to wait for a single cloud call during entry setup before giving up
@@ -381,7 +356,7 @@ async def _async_setup_modbus_only(hass: HomeAssistant, entry: SungrowConfigEntr
     # a matching cloud plant when one exists). Remove any legacy synthetic local plant
     # anchor left over from earlier builds so the UI does not show two plant devices.
     _remove_synthetic_local_plant_device(hass, entry, serial)
-    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # If no cloud plant was found at setup time, the local entry may have set up before
     # the cloud entry. Re-check once HA is running and reload so the inverter can nest
@@ -508,7 +483,7 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         # Record the parent's registry id so entities nest under it via via_device_id.
         coordinator.via_device_id = plant_device.id
 
-    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await _async_start_scheduler(hass, entry)
     return True
 
@@ -680,7 +655,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         # Record the parent's registry id so entities nest under it via via_device_id.
         coordinator.via_device_id = plant_device.id
 
-    await hass.config_entries.async_forward_entry_setups(entry, _entry_platforms(entry))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Prune devices that drop out of the API after each refresh (stale-devices).
     @callback
@@ -740,7 +715,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> 
     # them up front would strand an active Charge/Discharge dispatch without its keepalive
     # (the inverter times out of External-EMS mode) while the entry stays LOADED on a
     # failed unload.
-    unloaded = await hass.config_entries.async_unload_platforms(entry, _entry_platforms(entry))
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         # Cancel any armed schedule transitions so a reload doesn't leak timers (#359).
         scheduler = entry.runtime_data.scheduler

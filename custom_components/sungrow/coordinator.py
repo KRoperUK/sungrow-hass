@@ -864,6 +864,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
           firmware-dependent (#401/#431), and a family without the counter skips it.
 
         Baselines are persisted so a restart mid-day keeps counting from the same day start.
+        They are written only when the baseline (or its date) changes — a day rollover or a
+        re-anchor — not when ``last_total`` merely moves with the counter (#527). Because the
+        stored ``last_total`` is therefore stale, it is discarded on load: a restart that
+        spans midnight re-anchors on its first sample instead of treating a day-old total as
+        the start of today.
         """
         from .derived_daily import (
             DerivedDailyBaseline,
@@ -879,7 +884,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         family = getattr(self._modbus_client, "model", None)
         if needs_derived_daily_yield(family):
             if not self._daily_yield_baseline_loaded:
-                self._daily_yield_state = DerivedDailyBaseline.from_store(await self._daily_yield_store.async_load())
+                self._daily_yield_state = DerivedDailyBaseline.from_store(
+                    await self._daily_yield_store.async_load()
+                ).without_last_total()
                 self._daily_yield_baseline_loaded = True
             if self._daily_yield_state is None:
                 self._daily_yield_state = DerivedDailyBaseline()
@@ -887,14 +894,16 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data, new_state, daily = apply_derived_daily_yield(
                 data, local_date=local_date, state=self._daily_yield_state
             )
-            if daily is not None and new_state.to_store() != self._daily_yield_state.to_store():
+            if daily is not None and new_state.baseline_key() != self._daily_yield_state.baseline_key():
                 await self._daily_yield_store.async_save(new_state.to_store())
             self._daily_yield_state = new_state
 
         if self._energy_daily_store is None:
             return data
         if not self._energy_daily_baseline_loaded:
-            self._energy_daily_state = DerivedDailyEnergyState.from_store(await self._energy_daily_store.async_load())
+            self._energy_daily_state = DerivedDailyEnergyState.from_store(
+                await self._energy_daily_store.async_load()
+            ).without_last_total()
             self._energy_daily_baseline_loaded = True
         if self._energy_daily_state is None:
             self._energy_daily_state = DerivedDailyEnergyState()
@@ -905,7 +914,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state=self._energy_daily_state,
             untrusted=self._untrusted_lifetime_counters(data, elapsed_seconds),
         )
-        if new_energy_state.to_store() != self._energy_daily_state.to_store():
+        if new_energy_state.baseline_key() != self._energy_daily_state.baseline_key():
             await self._energy_daily_store.async_save(new_energy_state.to_store())
         self._energy_daily_state = new_energy_state
         return data

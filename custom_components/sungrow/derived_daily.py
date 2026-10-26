@@ -48,6 +48,19 @@ class DerivedDailyBaseline:
             "last_total": self.last_total,
         }
 
+    def baseline_key(self) -> tuple[float | None, date | None]:
+        """The part of the state that must be persisted whenever it changes (#527).
+
+        ``last_total`` moves on every poll, so it is deliberately excluded: writing the
+        store each time a counter merely ticks over costs flash writes for nothing. The
+        baseline and its date only change at a day rollover or a re-anchor.
+        """
+        return (self.baseline, self.baseline_date)
+
+    def without_last_total(self) -> DerivedDailyBaseline:
+        """Return a copy that has forgotten ``last_total`` (see :meth:`baseline_key`)."""
+        return DerivedDailyBaseline(baseline=self.baseline, baseline_date=self.baseline_date)
+
     @classmethod
     def from_store(cls, data: dict[str, Any] | None) -> DerivedDailyBaseline:
         """Restore from HA Store (tolerant of missing/partial payloads)."""
@@ -275,6 +288,16 @@ class DerivedDailyEnergyState:
     def to_store(self) -> dict[str, Any]:
         """Serialize for HA Store (keyed by the lifetime code)."""
         return {code: baseline.to_store() for code, baseline in self.baselines.items()}
+
+    def baseline_key(self) -> dict[str, tuple[float | None, date | None]]:
+        """Per-code persisted-on-change view of the state; see :meth:`DerivedDailyBaseline.baseline_key`."""
+        return {code: baseline.baseline_key() for code, baseline in self.baselines.items()}
+
+    def without_last_total(self) -> DerivedDailyEnergyState:
+        """Return a copy whose baselines have all forgotten ``last_total``."""
+        return DerivedDailyEnergyState(
+            baselines={code: baseline.without_last_total() for code, baseline in self.baselines.items()}
+        )
 
     @classmethod
     def from_store(cls, data: dict[str, Any] | None) -> DerivedDailyEnergyState:
