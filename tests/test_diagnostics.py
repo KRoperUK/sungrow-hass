@@ -538,3 +538,29 @@ async def test_diagnostics_repairs_are_sorted_deterministically(hass: HomeAssist
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert [row["issue_id"] for row in diag["repairs"]] == ["a_first", "m_middle", "z_last"]
+
+
+async def test_diagnostics_contains_no_secret_material_for_cloud_user_entry(hass: HomeAssistant):
+    """A cloud_user entry's password and tokens never reach the diagnostics bundle (#528)."""
+    entry = MagicMock()
+    entry.entry_id = "user_entry"
+    entry.data = {
+        "transport": "cloud_user",
+        "gateway": "Europe",
+        "user_account": "owner@example.invalid",
+        "user_password": "hunter2-super-secret",
+        "tokens": {"access_token": "tok-access-secret", "refresh_token": "tok-refresh-secret"},
+        "app_key": "app-key-secret",
+    }
+    # The password key is redacted by name even if it ever lands in ``options``.
+    entry.options = {"scan_interval": 10, "user_password": "hunter2-super-secret"}
+    entry.runtime_data = SungrowData(
+        coordinators=[_make_coordinator("123", "Test Plant", {})], control=MagicMock(), devices={}
+    )
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["options"]["user_password"] == "**REDACTED**"
+    dump = json.dumps(diag)
+    for secret in ("hunter2-super-secret", "tok-access-secret", "tok-refresh-secret", "app-key-secret"):
+        assert secret not in dump

@@ -63,7 +63,7 @@ the cloud plant in the device registry (`via_device_id`) — a soft “related t
 If you don't have (or don't want to register) an iSolarCloud **developer application**, you can connect with the **normal email + password** you use in the iSolarCloud app/web portal. Choose **Cloud (User Account via Unofficial API - Cloud Polling)** as the transport and enter your email, password and region.
 
 !!! warning "Unofficial and experimental"
-    This uses Sungrow's **undocumented app/web API**, not the official OpenAPI. It may change or stop working without notice, and its use may be subject to Sungrow's terms of service. Your password is stored in the Home Assistant config entry and is never logged. Prefer the developer **Cloud-only** transport if you can.
+    This uses Sungrow's **undocumented app/web API**, not the official OpenAPI. It may change or stop working without notice, and its use may be subject to Sungrow's terms of service. Your password is stored in the Home Assistant config entry as plaintext JSON (`.storage/core.config_entries`, protected only by the filesystem permissions of your Home Assistant configuration directory, like every other integration's credentials). It is never logged and is redacted from diagnostics downloads. Prefer the developer **Cloud-only** transport if you can.
 
 Current limitations:
 

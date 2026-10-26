@@ -15,7 +15,7 @@ from pysolarcloud import PySolarCloudException
 from . import SungrowConfigEntry, SungrowData
 from ._serialization import anonymise_device_keys, catalog_rows, jsonable
 from .api_rate import ApiCallRateTracker
-from .const import DOMAIN
+from .const import CONF_USER_PASSWORD, DOMAIN
 from .model_capabilities import resolve_capabilities
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,7 +36,12 @@ PROBE_TIMEOUT = 30
 # support would leak a home address. The hardware is still identifiable for support
 # from ``device_type`` / ``device_model_code`` / ``factory_name`` (kept), and reports
 # stay correlatable via ``ps_id`` (the plant id — deliberately kept; not a secret).
+#
+# ``CONF_USER_PASSWORD`` (the cloud_user account password) is redacted defensively:
+# the entry's ``data`` is never dumped wholesale, but if that key ever lands in
+# ``options`` or a nested payload it must not reach a shared bundle (#528).
 TO_REDACT = {
+    CONF_USER_PASSWORD,
     "app_id",
     "uuid",
     "ps_key",
