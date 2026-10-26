@@ -34,6 +34,39 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.7.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.6.0...v6.7.0) (2026-10-26)
+
+
+### Features
+
+* **api-rate:** count backfill, heartbeat and read-back calls ([f877418](https://github.com/KRoperUK/sungrow-hass/commit/f877418b972b08755db1c49330d1b24ce815e3ef)), closes [#524](https://github.com/KRoperUK/sungrow-hass/issues/524)
+
+
+### Bug Fixes
+
+* **coordinator:** back off and raise the Repair on side-call rate limits ([6f7f4e7](https://github.com/KRoperUK/sungrow-hass/commit/6f7f4e77157e4b8321d622680408b1755a12f1b8)), closes [#523](https://github.com/KRoperUK/sungrow-hass/issues/523)
+* detect grid meter via live power, not just phase voltage ([89f1a87](https://github.com/KRoperUK/sungrow-hass/commit/89f1a87ccfcb8afd795541e652d8892874bbad2c))
+* detect grid meter via live power, not just phase voltage ([95b5e24](https://github.com/KRoperUK/sungrow-hass/commit/95b5e24cc0c513c4a7b83282a011f8f81d2b2483))
+* **diagnostics:** correct password-at-rest comment and redact the key ([69cf874](https://github.com/KRoperUK/sungrow-hass/commit/69cf87493d6ca3cf7d34ea3d06b1c4fc69b304a1)), closes [#528](https://github.com/KRoperUK/sungrow-hass/issues/528)
+* **diagnostics:** strip host:port from recorded Modbus errors ([e50fc78](https://github.com/KRoperUK/sungrow-hass/commit/e50fc7848a2f840ece6959db8effbbb7e70017eb)), closes [#533](https://github.com/KRoperUK/sungrow-hass/issues/533)
+* **dispatch:** survive network and malformed-reply errors on writes ([6db4a42](https://github.com/KRoperUK/sungrow-hass/commit/6db4a42bbcd9f91a6274dcddf702b136a83794b3)), closes [#522](https://github.com/KRoperUK/sungrow-hass/issues/522)
+* handle entity_id changes in place (HA 2026.11) ([4cb1dfb](https://github.com/KRoperUK/sungrow-hass/commit/4cb1dfb1f6d1cc5c540ab2ebeee31cadc6eb7eaf))
+* handle entity_id changes in place (HA 2026.11) ([9a9c3ad](https://github.com/KRoperUK/sungrow-hass/commit/9a9c3ad617a19b98781311c86e559a59039737bc))
+* harden dispatch writes, heartbeat stop, catch-up and read-back ([0d711ce](https://github.com/KRoperUK/sungrow-hass/commit/0d711ce95edbf2de0fbc233108760b37bcca0604))
+* **heartbeat:** stopping a crashed heartbeat never raises ([47672b6](https://github.com/KRoperUK/sungrow-hass/commit/47672b6d9d342c4eea15430671583df52a90aa9b)), closes [#525](https://github.com/KRoperUK/sungrow-hass/issues/525)
+* normalize kW to W for cloud_user per-device power points ([30fe12b](https://github.com/KRoperUK/sungrow-hass/commit/30fe12b3b207e1ab580e41ee99af4e551554176b))
+* normalize kW to W for cloud_user per-device power points ([d17bc3c](https://github.com/KRoperUK/sungrow-hass/commit/d17bc3c7117b8915514eb43c7215acc268336eb9)), closes [#536](https://github.com/KRoperUK/sungrow-hass/issues/536)
+* rate-limit side calls and count all API spend ([8854671](https://github.com/KRoperUK/sungrow-hass/commit/8854671a762b66b7fc47be4ea4fd87a1609e5c0a))
+* redact password, strip host from errors, harden refresh_tokens ([94926fc](https://github.com/KRoperUK/sungrow-hass/commit/94926fc03836604f078caf086eec5e7e6a7194c3))
+* **schedule:** retry the restart catch-up until battery controls register ([12225a3](https://github.com/KRoperUK/sungrow-hass/commit/12225a3a30f8f03900426be5c6791e86f952dbca)), closes [#526](https://github.com/KRoperUK/sungrow-hass/issues/526)
+* **select:** guard the EMS read-back against overlap and failed polls ([09aa972](https://github.com/KRoperUK/sungrow-hass/commit/09aa972e98533c05fc4000853cff1973f4a7d590)), closes [#531](https://github.com/KRoperUK/sungrow-hass/issues/531)
+* **services:** refresh_tokens fails loudly when the token key is missing ([893bf06](https://github.com/KRoperUK/sungrow-hass/commit/893bf06033bd7064f73f62c56ea9dbe174c3c065)), closes [#532](https://github.com/KRoperUK/sungrow-hass/issues/532)
+
+
+### Performance Improvements
+
+* **coordinator:** persist daily baselines only when they change ([b92a408](https://github.com/KRoperUK/sungrow-hass/commit/b92a40856aa5d771746b3b902ae24199a4967898)), closes [#527](https://github.com/KRoperUK/sungrow-hass/issues/527)
+
 ## [6.6.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.5.0...v6.6.0) (2026-10-18)
 
 
