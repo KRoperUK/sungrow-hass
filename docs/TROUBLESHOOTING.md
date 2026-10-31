@@ -417,16 +417,27 @@ reported case where the daily register reads `0` while the lifetime totals are c
 There are two setups where the *lifetime* counters are empty too, and the derived sensors
 cannot appear — there is genuinely no local grid data to work from:
 
-- **iHomeManager without a DTSU666.** The grid metrics live on the iHomeManager rather
-  than the inverter, so the inverter's registers stay empty
-  ([mkaiser#651](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/651)).
+- **iHomeManager / external EMS.** When the inverter reports `Running in External EMS
+  mode` (wire register 12999 = `0x4000`, local `running_state_raw`), an iHomeManager
+  on RS485-1 owns metering and the DTSU666 feeds it rather than the inverter — so the
+  inverter's `5600-5606` / `5740-5745` / `13009-13010` registers stay at the
+  `0xFFFF`/`0x7FFF` sentinels (or plain `0` / rejected blocks via WiNet-S) even though
+  the meter is wired and live
+  ([#519](https://github.com/KRoperUK/sungrow-hass/issues/519),
+  [mkaiser#651](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/651)).
+  The local entry logs an explicit iHomeManager hint in this state and records
+  `modbus_diagnostics.external_ems: true`. Read the iHM directly instead: enable
+  **Modbus TCP port 503** in its config WLAN UI and poll it (unit 247, e.g. grid total
+  active power at 8156) alongside this integration, e.g. via ha-modbus-manager's
+  "Sungrow iHomeManager EMS" template.
 - **Firmware that never populates them.** Some SH hardware reports `0` for both the daily
   *and* the lifetime import/export registers
   ([mkaiser#364](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/364)).
 
 In both cases use a **cloud** entry for grid figures.
 
-Check `modbus_diagnostics.meter_present` in the local entry's diagnostics download:
+Check `modbus_diagnostics.meter_present` (and `external_ems`) in the local entry's
+diagnostics download:
 
 - `false` — no meter detected. PV, battery and inverter-output metrics still work; use
   the **cloud** entry for grid import/export, which iSolarCloud computes server-side.
