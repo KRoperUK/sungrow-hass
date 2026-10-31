@@ -34,6 +34,14 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.8.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.7.0...v6.8.0) (2026-10-31)
+
+
+### Features
+
+* hint iHomeManager when meter absent in External EMS mode ([205ace8](https://github.com/KRoperUK/sungrow-hass/commit/205ace87568c2ab613f451363d0db431348bbf02))
+* hint iHomeManager when meter absent in External EMS mode ([a90c873](https://github.com/KRoperUK/sungrow-hass/commit/a90c873ee32f4d54e005af54f0bbdc330e9a0b16)), closes [#519](https://github.com/KRoperUK/sungrow-hass/issues/519)
+
 ## [6.7.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.6.0...v6.7.0) (2026-10-26)
 
 
