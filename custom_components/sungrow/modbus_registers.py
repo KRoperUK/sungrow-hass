@@ -564,6 +564,11 @@ def family_for_device_type_code(device_type_code: int | None) -> str | None:
 # Source: mkaiser SHx YAML ``sg_inverter_state`` template map (MIT).
 # Some raw codes deliberately share a display name (e.g. 0x0000 and 0x0040 both
 # "Running") — that reflects Sungrow's own mapping and is preserved verbatim.
+# ``EXTERNAL_EMS_RUNNING_STATE`` (0x4000) means an iHomeManager (or other external
+# EMS) has taken over metering/control over RS485-1 — the inverter then leaves its
+# own meter registers unpopulated (0xFFFF/0x7FFF sentinels, or plain 0 via WiNet-S)
+# even though the DTSU666 is wired and live (#519).
+EXTERNAL_EMS_RUNNING_STATE = 0x4000
 RUNNING_STATE_NAMES: dict[int, str] = {
     0x0000: "Running",
     0x0001: "Stop",
@@ -868,6 +873,23 @@ def _point_value_is_nonzero(point: dict[str, Any]) -> bool:
         # A non-numeric value is still *a* reading, so treat it as present rather than
         # risk suppressing a live meter on a parse quirk.
         return True
+
+
+def is_external_ems_mode(decoded: dict[str, dict[str, Any]]) -> bool:
+    """Return whether the decoded block reports External EMS control (#519).
+
+    Wire register 12999 (``running_state_raw``) reads ``0x4000`` when an
+    iHomeManager (or other external EMS) regulates the plant. Metering then lives
+    on the iHM rather than the inverter, so empty meter registers are expected —
+    not a missing-meter or mapping fault.
+    """
+    point = decoded.get("running_state_raw")
+    if not isinstance(point, dict):
+        return False
+    try:
+        return int(float(point.get("value", -1))) == EXTERNAL_EMS_RUNNING_STATE
+    except TypeError, ValueError:
+        return False
 
 
 def meter_appears_present(decoded: dict[str, dict[str, Any]]) -> bool:

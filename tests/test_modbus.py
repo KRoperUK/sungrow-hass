@@ -19,6 +19,7 @@ from custom_components.sungrow.modbus_registers import (
     daily_yield_diagnostic_dump,
     decode_registers,
     family_for_device_type_code,
+    is_external_ems_mode,
     meter_appears_present,
     needs_derived_daily_yield,
     suppress_absent_meter_points,
@@ -1373,6 +1374,50 @@ async def test_read_realtime_records_meter_presence_diagnostic():
 
     # An all-zero read looks exactly like a hybrid with no meter fitted.
     assert client.modbus_diagnostics["meter_present"] is False
+    assert client.modbus_diagnostics["external_ems"] is False
+
+
+def test_external_ems_mode_detected_from_running_state():
+    """Wire 12999 = 0x4000 means an iHomeManager owns metering (#519)."""
+    assert is_external_ems_mode({"running_state_raw": _pt(0x4000, None)}) is True
+    assert is_external_ems_mode({"running_state_raw": _pt(0x0000, None)}) is False
+    assert is_external_ems_mode({}) is False
+    assert is_external_ems_mode({"running_state_raw": _pt("n/a", None)}) is False
+
+
+async def test_read_realtime_flags_external_ems_in_diagnostics(caplog):
+    """Absent meter + External EMS logs the iHomeManager hint (#519)."""
+    import logging
+
+    client = SungrowModbusClient("10.0.0.9", model="sh_rt")
+    decoded = {
+        "meter_phase_a_voltage": {
+            "code": "meter_phase_a_voltage",
+            "value": 0.0,
+            "unit": "V",
+            "source": "modbus",
+        },
+        "running_state_raw": {
+            "code": "running_state_raw",
+            "value": 0x4000,
+            "unit": None,
+            "source": "modbus",
+        },
+    }
+    with (
+        patch.object(client, "_async_ensure_family", AsyncMock(return_value=None)),
+        patch.object(client, "_read_input", AsyncMock(return_value=[0] * 120)),
+        patch(
+            "custom_components.sungrow.modbus.decode_registers",
+            return_value=dict(decoded),
+        ),
+        caplog.at_level(logging.DEBUG, logger="custom_components.sungrow.modbus"),
+    ):
+        await client.async_read_realtime()
+
+    assert client.modbus_diagnostics["meter_present"] is False
+    assert client.modbus_diagnostics["external_ems"] is True
+    assert "iHomeManager" in caplog.text
 
 
 # ---------------------------------------------------------------------------
