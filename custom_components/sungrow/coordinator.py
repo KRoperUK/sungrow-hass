@@ -615,7 +615,7 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with asyncio.timeout(self._poll_timeout):
                 self._record_api_call(CALL_TYPE_REALTIME)
                 detail = await self._user_auth.async_get_plant_detail(self.plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
+        except Exception as err:  # noqa: BLE001 - parity with the OAuth poll; non-API bugs ride the grace window too
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
             if self.data is not None and self._within_availability_grace():

@@ -429,7 +429,7 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         try:
             async with asyncio.timeout(SETUP_TIMEOUT):
                 devices = await user_auth.async_get_devices(plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
+        except Exception as err:  # noqa: BLE001 - per-plant isolation; degrade to plant-level data
             _LOGGER.warning("Could not fetch devices for plant %s (user account): %s", plant_name, err)
             devices = []
 
