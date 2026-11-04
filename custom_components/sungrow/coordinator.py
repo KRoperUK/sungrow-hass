@@ -708,6 +708,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         and non-fatal: a failure leaves the embedded-mapping result (and any last-known
         values) untouched, matching the rest of this transport's degrade-don't-vanish
         contract.
+
+        Devices with only *partial* embedded ``point_data`` are completed from the
+        realtime response; embedded readings win on conflict since they are the
+        freshest per-poll values (#558). Devices without a ``ps_key`` cannot be
+        recovered and keep whatever the list carried.
         """
         assert self._user_auth is not None
         ps_key_by_uuid: dict[str, str] = {}
@@ -716,9 +721,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             uuid = device.get("uuid")
             ps_key = device.get("ps_key")
-            # Only devices the list did not already carry readings for, and only when a
-            # ps_key is present to drive the realtime call.
-            if uuid is None or not ps_key or mapped.get(str(uuid)):
+            # Only when a ps_key is present to drive the realtime call.
+            if uuid is None or not ps_key:
                 continue
             ps_key_by_uuid[str(uuid)] = str(ps_key)
         if not ps_key_by_uuid:
@@ -734,7 +738,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for uuid in ps_key_by_uuid:
             points = realtime.get(uuid)
             if isinstance(points, dict) and points:
-                mapped[uuid] = points
+                merged = dict(points)
+                merged.update(mapped.get(uuid, {}))
+                mapped[uuid] = merged
 
     async def _async_refresh_faults(self) -> None:
         """Best-effort refresh of the plant fault detail from the app fault API (#457).

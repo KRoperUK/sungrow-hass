@@ -2201,17 +2201,26 @@ async def test_user_update_backfills_realtime_when_list_omits_point_data(hass: H
     assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
 
 
-async def test_user_update_embedded_point_data_skips_realtime_backfill(hass: HomeAssistant):
-    """When the list already embeds point_data, the extra realtime call is not spent (#405)."""
+async def test_user_update_partial_embedded_completed_by_realtime_backfill(hass: HomeAssistant):
+    """Partial embedded point_data is completed from realtime; embedded wins (#558).
+
+    The realtime call is spent for every device with a ps_key (one batched call),
+    and the merge keeps the fresher embedded readings on conflict.
+    """
     from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
 
-    # The embedded fixture also carries a ps_key, to prove the skip keys off "already has
-    # points", not off "has no ps_key".
     device = {**_user_battery_device(), "ps_key": "KEY-BATTERY-1"}
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[device])
-    client.async_get_device_realtime = AsyncMock(return_value={})
+    client.async_get_device_realtime = AsyncMock(
+        return_value={
+            "dev-battery-1": {
+                "58604": {"id": "58604", "value": "49.2", "unit": "%", "name": "Battery SOC"},
+                "58601": {"id": "58601", "value": "380.1", "unit": "V", "name": "Battery Voltage"},
+            }
+        }
+    )
     client.async_query_faults = AsyncMock(return_value=[])
     client.async_get_fault_count = AsyncMock(return_value={})
     client.async_get_charging_piles = AsyncMock(return_value=[])
@@ -2220,8 +2229,10 @@ async def test_user_update_embedded_point_data_skips_realtime_backfill(hass: Hom
 
     await coordinator._async_update_data()
 
-    client.async_get_device_realtime.assert_not_awaited()
-    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+    client.async_get_device_realtime.assert_awaited_once_with(["KEY-BATTERY-1"])
+    points = coordinator.device_data["dev-battery-1"]
+    assert points["58604"]["value"] == "32.2"
+    assert points["58601"]["value"] == "380.1"
 
 
 async def test_user_update_realtime_backfill_failure_is_non_fatal(hass: HomeAssistant):
