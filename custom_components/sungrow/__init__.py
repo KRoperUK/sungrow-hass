@@ -638,6 +638,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         # The capability probes are documented fail-open, but an *unexpected* error in
         # one plant must not abort setup for the others (#115) — isolate this plant too.
         # The coordinator's own defaults (True/True) are the fail-open fallback.
+        # NB: no battery power-limit probe here — it resolves from the app battery
+        # endpoints, which only exist on the user-account transport (#561). This route
+        # sizes the dispatch slider from the device/model-code nameplate instead.
         try:
             coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
             coordinator.has_battery = await _async_has_battery(plants_service, plant_id, devices)
