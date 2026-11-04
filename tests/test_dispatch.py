@@ -235,9 +235,15 @@ GRID_SIDE_NUMBERS = {
     "active_power_limit_ratio",
     "q_t",
     "pf",
+    "reactive_power_regulation_time",
 }
 BATTERY_ONLY_SELECTS = {"battery_mode", "forced_charging", "battery_first"}
-GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch", "reactive_power_regulation_mode"}
+GRID_SIDE_SELECTS = {
+    "feed_in_limitation",
+    "limited_power_switch",
+    "reactive_power_regulation_mode",
+    "reactive_response",
+}
 
 
 def test_battery_only_sets_partition_dispatch_dicts():
@@ -1226,6 +1232,10 @@ async def test_param_write_encodings(hass: HomeAssistant):
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"q_t": "300"})
     await by_param["q_t"].async_set_native_value(-60)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"q_t": "-600"})
+
+    # Reactive power regulation time is seconds sent as tenths (x10) (#559).
+    await by_param["reactive_power_regulation_time"].async_set_native_value(5.5)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"reactive_power_regulation_time": "55"})
 
     # Power factor is thousandths, signed (x1000) (#181).
     await by_param["pf"].async_set_native_value(0.9)

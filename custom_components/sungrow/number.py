@@ -190,6 +190,17 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "mode": NumberMode.BOX,
         "entity_category": EntityCategory.CONFIG,
     },
+    # Reactive power regulation time in seconds (API range 1..6000 = 0.1..600 s).
+    # Only takes effect when the Reactive Power Mode select is set to a regulating
+    # mode. Applies to PV and hybrid inverters, so not battery-gated.
+    "reactive_power_regulation_time": {
+        "native_unit_of_measurement": "s",
+        "native_min_value": 0.1,
+        "native_max_value": 600,
+        "native_step": 0.1,
+        "mode": NumberMode.BOX,
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
 # Watt-valued dispatch parameters whose slider maximum is sized from the device.

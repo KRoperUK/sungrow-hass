@@ -285,6 +285,9 @@
       },
       "forced_dispatch_duration": {
         "name": "Duración del despacho forzado"
+      },
+      "reactive_power_regulation_time": {
+        "name": "Reactive Power Regulation Time"
       }
     },
     "select": {
@@ -305,6 +308,9 @@
       },
       "battery_mode": {
         "name": "Modo de batería"
+      },
+      "reactive_response": {
+        "name": "Reactive Power Response"
       }
     },
     "sensor": {

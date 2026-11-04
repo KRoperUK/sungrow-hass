@@ -39,6 +39,7 @@ _PV_ONLY_GAP = frozenset(
         "forced_charging_target_soc_2",
         "q_t",
         "pf",
+        "reactive_power_regulation_time",
     }
 )
 _HYBRID_GAP = frozenset(
@@ -48,6 +49,7 @@ _HYBRID_GAP = frozenset(
         "forced_charging_target_soc_2",
         "q_t",
         "pf",
+        "reactive_power_regulation_time",
     }
 )
 

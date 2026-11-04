@@ -130,6 +130,13 @@ DISPATCH_SELECTS: dict[str, dict[str, Any]] = {
         },
         "entity_category": EntityCategory.CONFIG,
     },
+    # Reactive power response enable (Appendix 10, param 10034). Sungrow
+    # enable/disable enum (device-verified): Enable=170, Disable=85. Applies to PV
+    # and hybrid inverters, so not battery-gated.
+    "reactive_response": {
+        "options_map": {"Disable": "85", "Enable": "170"},
+        "entity_category": EntityCategory.CONFIG,
+    },
 }
 
 
