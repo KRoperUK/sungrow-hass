@@ -618,10 +618,17 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001 - parity with the OAuth poll; non-API bugs ride the grace window too
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
+            # Surface actionable errors as HA Repairs and back off while rate-limited,
+            # mirroring the OAuth main poll (#153/#156/#564). Raise-only like there: a
+            # transient error interleaved with an active rate-limit must not dismiss a
+            # still-valid Repair — only a successful poll clears them.
+            self._async_raise_repair(err)
+            if is_rate_limit_error(err):
+                self._adjust_poll_backoff(rate_limited=True, retry_after=rate_limit_retry_after(err))
             if self.data is not None and self._within_availability_grace():
                 _LOGGER.debug("Transient user-account poll failure for %s; keeping last-good: %s", self.plant_name, err)
                 return self.data
-            raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
+            raise UpdateFailed(describe_api_error(err) or f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
         await self._async_refresh_user_device_data()
         await self._async_refresh_faults()

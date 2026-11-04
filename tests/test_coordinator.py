@@ -262,6 +262,25 @@ async def test_rate_limit_error_raises_its_repair_only(hass: HomeAssistant):
     assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is None
 
 
+async def test_user_rate_limit_raises_repair_and_hint(hass: HomeAssistant):
+    """A rate-limited user-account main poll raises the Repair with an API hint (#564)."""
+    from homeassistant.helpers import issue_registry as ir
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    client = _user_client_with_extras(
+        async_get_plant_detail=AsyncMock(
+            side_effect=PySolarCloudException({"result_code": "E999", "result_msg": "er_freq_limit"})
+        ),
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+    with pytest.raises(UpdateFailed) as exc:
+        await coordinator._async_update_data()
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+    assert "E999" in str(exc.value)
+
+
 async def test_rate_limit_backs_off_and_recovers(hass: HomeAssistant):
     """Rate-limit errors widen the poll interval; a success restores it (#156)."""
     plants = MagicMock()
