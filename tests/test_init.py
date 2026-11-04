@@ -1320,6 +1320,52 @@ async def test_setup_cloud_user_entry(hass: HomeAssistant):
     assert hass.services.has_service(DOMAIN, SERVICE_SET_BATTERY_MODE)
 
 
+async def test_setup_cloud_user_device_fetch_failure_hides_battery_controls(hass: HomeAssistant):
+    """A failed cloud_user device fetch fails closed on has_battery (#553).
+
+    Showing battery controls on a possibly PV-only plant risks the #148
+    External-EMS curtailment; hiding them on a transient failure only costs a
+    reload. The entry itself still sets up with plant sensors.
+    """
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            CONF_USER_ACCOUNT: "me@example.com",
+            CONF_USER_PASSWORD: "pw",
+            CONF_GATEWAY: "Europe",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 5, "ps_name": "Home"}])
+    client.async_get_token = AsyncMock(return_value="T")
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "3200", "unit": "W"}})
+    client.async_get_devices = AsyncMock(side_effect=TimeoutError("boom"))
+
+    control = MagicMock()
+    control.async_check_update_support = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sungrow.UserAuth", return_value=client),
+        patch("custom_components.sungrow.UserControl", return_value=control),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    data = entry.runtime_data
+    assert len(data.coordinators) == 1
+    assert data.coordinators[0].has_battery is False
+
+
 async def test_setup_cloud_user_filters_plants_by_selection(hass: HomeAssistant):
     """CONF_PLANT_IDS on the entry restricts setup to the selected plants (#358)."""
     from custom_components.sungrow.const import (

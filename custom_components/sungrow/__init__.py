@@ -451,8 +451,11 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         except Exception as err:  # noqa: BLE001 - per-plant isolation; coordinator default is fail-open
             _LOGGER.warning("Plant %s dispatch-support probe failed, using fail-open default: %s", plant_name, err)
         # User API has no design_capacity_battery plant-detail field in this path; gate
-        # battery-only controls on ESS/battery device presence (same fail-open default).
-        coordinator.has_battery = _has_battery_device(devices) if devices else True
+        # battery-only controls on ESS/battery device presence. Fail closed on an
+        # empty/failed fetch: showing battery controls on a possibly PV-only plant
+        # risks the #148 External-EMS curtailment, while hiding them on a transient
+        # failure only costs a reload (#553).
+        coordinator.has_battery = _has_battery_device(devices)
         # Best-effort: resolve the real battery charge/discharge power ceiling from the app
         # battery endpoints so the dispatch slider isn't capped at the static default when
         # the hardware differs (#450). Non-fatal — leaves the existing nameplate resolution
