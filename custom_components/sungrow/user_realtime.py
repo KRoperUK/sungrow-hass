@@ -27,6 +27,9 @@ _WARNED_MISSING_UNIT: set[str] = set()
 _VIRGIN_RE = re.compile(r"^p(\d+)_map_virgin$")
 # ``p83106_map`` -> point id 83106 (display value — fallback when no _virgin exists).
 _MAP_RE = re.compile(r"^p(\d+)_map$")
+# ``p83106_unit`` -> sibling unit for 83106 when the point dict omits it. Other
+# suffixed fields (notably ``p<ID>_percent``) are deliberately not points.
+_UNIT_RE = re.compile(r"^p(\d+)_unit$")
 
 # Named plant-level dict fields ({value, unit}) exposed with a stable code. These are
 # not catalog point IDs, so the code doubles as the naming/classification key.
@@ -73,6 +76,13 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
     ``p<ID>_map``; skips empty values. Returns ``{code: {id, code, value, unit}}``.
     """
     raw: dict[str, tuple[Any, Any]] = {}
+    # Sibling ``p<ID>_unit`` scalars, used when the point dict omits its unit (#557).
+    sibling_units: dict[str, str] = {}
+    for key, val in detail.items():
+        if isinstance(val, str) and val.strip():
+            m = _UNIT_RE.match(key)
+            if m:
+                sibling_units[m.group(1)] = val.strip()
     # Pass 1: raw (virgin) values win — they carry the real base unit.
     for key, val in detail.items():
         if not isinstance(val, dict):
@@ -90,8 +100,9 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
 
     points: dict[str, Any] = {}
     for point_id, (value, unit) in raw.items():
-        if value in (None, ""):
+        if value in (None, "") or str(value).strip().lower() in _EMPTY_VALUES:
             continue
+        unit = unit or sibling_units.get(point_id, "")
         # Use the bare numeric point ID as the code so the resolver's digit-code path
         # (``resolve_name``) consults the measure-point catalog and produces the same
         # English name/entity slug the OAuth transport gives (#269). A ``p<ID>`` code is
@@ -143,7 +154,8 @@ def map_plant_detail_to_points(detail: dict[str, Any]) -> dict[str, Any]:
     return points
 
 
-# Placeholders the app/web API uses for "this device does not report this point".
+# Placeholders the app/web API uses for "not reported" (plant points and device
+# points alike — e.g. "--" for a point the plant does not report).
 _EMPTY_VALUES = frozenset({"", "--", "-", "null", "none", "unknown"})
 
 

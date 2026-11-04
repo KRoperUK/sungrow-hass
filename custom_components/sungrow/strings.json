@@ -283,6 +283,9 @@
       "pf": {
         "name": "Power Factor"
       },
+      "reactive_power_regulation_time": {
+        "name": "Reactive Power Regulation Time"
+      },
       "forced_dispatch_duration": {
         "name": "Forced Dispatch Duration"
       }
@@ -302,6 +305,9 @@
       },
       "reactive_power_regulation_mode": {
         "name": "Reactive Power Mode"
+      },
+      "reactive_response": {
+        "name": "Reactive Power Response"
       },
       "battery_mode": {
         "name": "Battery Mode"

@@ -235,9 +235,15 @@ GRID_SIDE_NUMBERS = {
     "active_power_limit_ratio",
     "q_t",
     "pf",
+    "reactive_power_regulation_time",
 }
 BATTERY_ONLY_SELECTS = {"battery_mode", "forced_charging", "battery_first"}
-GRID_SIDE_SELECTS = {"feed_in_limitation", "limited_power_switch", "reactive_power_regulation_mode"}
+GRID_SIDE_SELECTS = {
+    "feed_in_limitation",
+    "limited_power_switch",
+    "reactive_power_regulation_mode",
+    "reactive_response",
+}
 
 
 def test_battery_only_sets_partition_dispatch_dicts():
@@ -1227,6 +1233,10 @@ async def test_param_write_encodings(hass: HomeAssistant):
     await by_param["q_t"].async_set_native_value(-60)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"q_t": "-600"})
 
+    # Reactive power regulation time is seconds sent as tenths (x10) (#559).
+    await by_param["reactive_power_regulation_time"].async_set_native_value(5.5)
+    data.control.async_update_parameters.assert_awaited_with("ess-1", {"reactive_power_regulation_time": "55"})
+
     # Power factor is thousandths, signed (x1000) (#181).
     await by_param["pf"].async_set_native_value(0.9)
     data.control.async_update_parameters.assert_awaited_with("ess-1", {"pf": "900"})
@@ -1829,6 +1839,47 @@ async def test_number_set_value_api_error_raises_translated_error(hass: HomeAssi
     assert exc.value.translation_key == "dispatch_write_failed"
     assert exc.value.translation_domain == DOMAIN
     assert exc.value.translation_placeholders["param"] == "charge_discharge_power"
+
+
+async def test_number_set_value_auth_error_triggers_reauth(hass: HomeAssistant):
+    """A dead credential on a dispatch write raises ConfigEntryAuthFailed (#562)."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from pysolarcloud import AuthError
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=AuthError({"error": "auth_failed"}))
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await power.async_set_native_value(2500)
+
+
+async def test_select_option_auth_error_triggers_reauth(hass: HomeAssistant):
+    """A dead credential on a dispatch command raises ConfigEntryAuthFailed (#562)."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from pysolarcloud import AuthError
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=AuthError({"error": "auth_failed"}))
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "battery_mode")
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
+        pytest.raises(ConfigEntryAuthFailed),
+    ):
+        await command.async_select_option("Force charge")
 
 
 async def test_select_option_api_error_raises_translated_error(hass: HomeAssistant):
