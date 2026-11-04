@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
@@ -27,7 +27,7 @@ from . import (
 )
 from .api_rate import CALL_TYPE_CONTROL, CALL_TYPE_DISPATCH_READBACK
 from .const import DOMAIN
-from .coordinator import SungrowPlantCoordinator
+from .coordinator import SungrowPlantCoordinator, is_auth_error
 from .entity_platform_helpers import create_entity_adder
 from .heartbeat import DISPATCH_WRITE_ERRORS
 
@@ -433,6 +433,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, payload)
         except DISPATCH_WRITE_ERRORS as err:
+            # A dead credential surfaces reauth at the point of failure instead of a
+            # generic write error the next poll would have to notice (#562).
+            if is_auth_error(err):
+                raise ConfigEntryAuthFailed(f"iSolarCloud authentication failed: {err}") from err
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",

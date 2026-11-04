@@ -1841,6 +1841,47 @@ async def test_number_set_value_api_error_raises_translated_error(hass: HomeAssi
     assert exc.value.translation_placeholders["param"] == "charge_discharge_power"
 
 
+async def test_number_set_value_auth_error_triggers_reauth(hass: HomeAssistant):
+    """A dead credential on a dispatch write raises ConfigEntryAuthFailed (#562)."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from pysolarcloud import AuthError
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=AuthError({"error": "auth_failed"}))
+
+    added = []
+    await number_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    power = next(e for e in added if e.param == "charge_discharge_power")
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await power.async_set_native_value(2500)
+
+
+async def test_select_option_auth_error_triggers_reauth(hass: HomeAssistant):
+    """A dead credential on a dispatch command raises ConfigEntryAuthFailed (#562)."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from pysolarcloud import AuthError
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    entry_data = _setup_entry_data(entry, devices)
+    entry_data.control.async_update_parameters = AsyncMock(side_effect=AuthError({"error": "auth_failed"}))
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    command = next(e for e in added if e.param == "battery_mode")
+
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()),
+        pytest.raises(ConfigEntryAuthFailed),
+    ):
+        await command.async_select_option("Force charge")
+
+
 async def test_select_option_api_error_raises_translated_error(hass: HomeAssistant):
     """A failed dispatch command surfaces as a translated HomeAssistantError."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
