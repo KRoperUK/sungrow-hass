@@ -745,21 +745,23 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         this never affects the sensor's on/off (that is driven by the reliable fault/alarm
         counts), so an unavailable fault API cannot flip the problem state.
 
-        Gated on ``enable_device_sensors`` for parity with the other opt-in per-device
-        fetches, so the extra calls are only spent when the user has asked for the richer
-        entity set.
+        The ``fault_summary`` count is always fetched: it is the authoritative on/off
+        source for the plant Fault sensor (#555). Only the heavier ``fault_list``
+        detail is gated on ``enable_device_sensors``, so the extra calls are spent
+        only when the user has asked for the richer entity set.
         """
-        if self._user_auth is None or not self.enable_device_sensors:
+        if self._user_auth is None:
             return
-        try:
-            async with asyncio.timeout(self._poll_timeout):
-                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
-                faults = await self._user_auth.async_query_faults(self.plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
-            self._note_side_call_error(err)
-            _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
-        else:
-            self.fault_list = list(faults) if isinstance(faults, list) else []
+        if self.enable_device_sensors:
+            try:
+                async with asyncio.timeout(self._poll_timeout):
+                    self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
+                    faults = await self._user_auth.async_query_faults(self.plant_id)
+            except (PySolarCloudException, ClientError, TimeoutError) as err:
+                self._note_side_call_error(err)
+                _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
+            else:
+                self.fault_list = list(faults) if isinstance(faults, list) else []
         try:
             async with asyncio.timeout(self._poll_timeout):
                 self._record_api_call(CALL_TYPE_DEVICE_REALTIME)

@@ -2004,6 +2004,7 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
             "p83106_map_virgin": {"value": "12500", "unit": "Wh"},
         }
     )
+    client.async_get_fault_count = AsyncMock(return_value={})
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     data = await coordinator._async_update_data()
@@ -2136,6 +2137,7 @@ async def test_user_update_skips_device_fetch_when_option_off(hass: HomeAssistan
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    client.async_get_fault_count = AsyncMock(return_value={})
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     await coordinator._async_update_data()
@@ -2381,9 +2383,14 @@ async def test_user_update_fault_and_charger_refresh_is_non_fatal(hass: HomeAssi
 
 
 async def test_user_update_skips_fault_and_charger_when_option_off(hass: HomeAssistant):
-    """Fault/charger calls are only spent when per-device sensors are enabled."""
+    """Fault list/charger calls are only spent when per-device sensors are enabled.
+
+    The lightweight fault-count summary is always fetched: it drives the plant
+    Fault sensor on/off (#555).
+    """
     client = _user_client_with_extras(
         async_query_faults=AsyncMock(return_value=[{"fault_name": "x"}]),
+        async_get_fault_count=AsyncMock(return_value={"fault": "1", "warn": "0"}),
         async_get_charging_piles=AsyncMock(return_value=[{"uuid": 1}]),
     )
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
@@ -2392,7 +2399,9 @@ async def test_user_update_skips_fault_and_charger_when_option_off(hass: HomeAss
 
     client.async_query_faults.assert_not_awaited()
     client.async_get_charging_piles.assert_not_awaited()
+    client.async_get_fault_count.assert_awaited()
     assert coordinator.fault_list == []
+    assert coordinator.fault_summary == {"fault": "1", "warn": "0"}
     assert coordinator.charging_piles == []
 
 
