@@ -68,6 +68,7 @@ If you don't have (or don't want to register) an iSolarCloud **developer applica
 Current limitations:
 
 - **Plant-level realtime** from `getPsDetail` (power, yield, alarm/fault counts, …). Device discovery is used for dispatch targeting; per-device sensor parity with OAuth may still differ by model.
+- **Per-device enrichment needs the per-device sensors option.** The plant Fault sensor always works (from alarm/fault counts), but the fault-detail attributes, per-device Fault/Connectivity sensors, and charger/battery detail only populate when per-device sensors are enabled (Configure → options). History backfill (`sungrow.backfill`) is not available on this transport.
 - **Dispatch** uses the same number/select entities and safety rails as the developer Cloud transport (battery gating, forced-mode verification, EMS heartbeat). Some EMS modes (e.g. Energy Management Mode on PV-only plants) may report “template not configured” — that is a plant capability limit, not a missing feature.
 - Prefer the developer **Cloud-only** transport when you need the official OpenAPI path or full OAuth device metrics.
 - If login fails with "account or password incorrect", it's most often the **wrong region** — pick the region your account actually uses.
