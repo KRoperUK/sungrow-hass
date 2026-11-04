@@ -1408,6 +1408,58 @@ async def test_setup_cloud_user_unexpected_device_error_degrades(hass: HomeAssis
     assert len(entry.runtime_data.coordinators) == 1
 
 
+async def test_setup_cloud_user_wires_stale_device_prune(hass: HomeAssistant):
+    """A device that drops out of the cloud_user device list is pruned (#560)."""
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.sungrow.const import (
+        CONF_GATEWAY,
+        CONF_USER_ACCOUNT,
+        CONF_USER_PASSWORD,
+        TRANSPORT_CLOUD_USER,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TRANSPORT: TRANSPORT_CLOUD_USER,
+            CONF_USER_ACCOUNT: "me@example.com",
+            CONF_USER_PASSWORD: "pw",
+            CONF_GATEWAY: "Europe",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = MagicMock()
+    client.async_get_plants = AsyncMock(return_value=[{"ps_id": 5, "ps_name": "Home"}])
+    client.async_get_token = AsyncMock(return_value="T")
+    client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "3200", "unit": "W"}})
+    client.async_get_devices = AsyncMock(return_value=[{"uuid": "inv-1", "device_type": 1}])
+    client.async_get_fault_count = AsyncMock(return_value={})
+
+    control = MagicMock()
+    control.async_check_update_support = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sungrow.UserAuth", return_value=client),
+        patch("custom_components.sungrow.UserControl", return_value=control),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data.coordinators[0]
+    registry = dr.async_get(hass)
+    stale = registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers={(DOMAIN, "old-dev")})
+
+    # The device drops out of the API; the next refresh notifies listeners.
+    coordinator.devices = []
+    for callback, _context in list(coordinator._listeners.values()):
+        callback()
+    await hass.async_block_till_done()
+
+    assert registry.async_get(stale.id) is None
+
+
 async def test_setup_cloud_user_filters_plants_by_selection(hass: HomeAssistant):
     """CONF_PLANT_IDS on the entry restricts setup to the selected plants (#358)."""
     from custom_components.sungrow.const import (

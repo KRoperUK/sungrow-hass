@@ -487,6 +487,17 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         coordinator.via_device_id = plant_device.id
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Prune devices that drop out of the API after each refresh (stale-devices),
+    # mirroring the developer-account setup (#560). History backfill itself stays
+    # developer-transport-only: BackfillManager needs the Plants service.
+    @callback
+    def _prune() -> None:
+        _async_prune_stale_devices(hass, entry)
+
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_prune))
+
     await _async_start_scheduler(hass, entry)
     return True
 
