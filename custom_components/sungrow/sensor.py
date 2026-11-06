@@ -401,7 +401,12 @@ class SungrowSensor(CoordinatorEntity, SensorEntity):
         # (0 < num < 1.0). The upper bound is exclusive so a genuine 1 % reading on a
         # 0–100 plant is not blown up to 100 % (#409); a fraction reading of exactly 1.0
         # is indistinguishable from 1 % and is left as-is.
-        if self._attr_device_class == SensorDeviceClass.BATTERY and 0 < num < 1.0:
+        # Local Modbus points already carry unit "%" with a 0.1 register scale, so a
+        # value below 1.0 is a genuine sub-1 % reading (e.g. raw 8 -> 0.8 % on wire
+        # 13022), never a fraction — rescaling it would turn a nearly-empty SBR into
+        # 80 % (#549). Only the cloud transports use the fraction form.
+        source = str(point.get("source") or "")
+        if self._attr_device_class == SensorDeviceClass.BATTERY and 0 < num < 1.0 and not source.startswith("modbus"):
             return num * 100
         return num
 
