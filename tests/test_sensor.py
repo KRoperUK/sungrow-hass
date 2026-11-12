@@ -243,6 +243,29 @@ def test_battery_soc_percent_form_unchanged(raw, expected):
     assert sensor.native_value == expected
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (0.8, 0.8),  # raw 8 * 0.1 on wire 13022 — a nearly-empty SBR, not an 80 % fraction
+        (0.9, 0.9),
+        (0.1, 0.1),
+        (0.0, 0.0),
+        (90.0, 90.0),
+    ],
+)
+def test_modbus_battery_level_sub_one_percent_not_rescaled(raw, expected):
+    """Modbus SOC below 1 % is a real reading, not a 0–1 fraction (#549).
+
+    The #314/#409 fraction rescale targets cloud ``battery_level_soc`` points that
+    arrive unitless as 0–1. A Modbus ``battery_level`` point already carries unit
+    ``%`` and a 0.1 scale, so 0.8 means 0.8 %, never 80 %.
+    """
+    point = {"code": "battery_level", "value": raw, "unit": "%", "source": "modbus"}
+    coordinator = _coord_with_devices([], data={"battery_level": point})
+    sensor = SungrowSensor(coordinator, "battery_level", "123", "Plant", point)
+    assert sensor.native_value == expected
+
+
 def test_power_fraction_gets_gauge_icon():
     """A per-code override gives power_fraction a gauge icon, not the solar fallback."""
     point = {"code": "power_fraction", "value": "0.83", "unit": ""}
