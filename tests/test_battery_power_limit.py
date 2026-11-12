@@ -85,6 +85,24 @@ async def test_probe_stores_limit_when_power_field_present():
     assert coordinator.battery_power_limit_w == 9000
 
 
+async def test_probe_is_noop_without_user_auth():
+    """Without an app-API client (developer route) the probe is a no-op (#561).
+
+    The dispatch slider then sizes from the device/model-code nameplate instead
+    of a live app-endpoint override — specified per-route behaviour.
+    """
+    from custom_components.sungrow.coordinator import SungrowPlantCoordinator
+
+    coordinator = MagicMock(spec=SungrowPlantCoordinator)
+    coordinator.has_battery = True
+    coordinator._user_auth = None
+    coordinator.battery_power_limit_w = None
+
+    await SungrowPlantCoordinator.async_probe_battery_power_limit(coordinator)
+
+    assert coordinator.battery_power_limit_w is None
+
+
 async def test_probe_is_noop_without_battery():
     """No battery -> the probe returns immediately and makes no calls (#148/#450)."""
     from custom_components.sungrow.coordinator import SungrowPlantCoordinator

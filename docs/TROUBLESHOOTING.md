@@ -429,7 +429,8 @@ cannot appear — there is genuinely no local grid data to work from:
   `modbus_diagnostics.external_ems: true`. Read the iHM directly instead: enable
   **Modbus TCP port 503** in its config WLAN UI and poll it (unit 247, e.g. grid total
   active power at 8156) alongside this integration, e.g. via ha-modbus-manager's
-  "Sungrow iHomeManager EMS" template.
+  "Sungrow iHomeManager EMS" template. Use port 503 for EMS metering — port 502 on
+  the iHM serves the wallbox line when a charger is attached.
 - **Firmware that never populates them.** Some SH hardware reports `0` for both the daily
   *and* the lifetime import/export registers
   ([mkaiser#364](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant/issues/364)).

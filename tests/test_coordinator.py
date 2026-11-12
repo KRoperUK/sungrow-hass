@@ -262,6 +262,25 @@ async def test_rate_limit_error_raises_its_repair_only(hass: HomeAssistant):
     assert registry.async_get_issue(DOMAIN, "whitelist_rejection_12345") is None
 
 
+async def test_user_rate_limit_raises_repair_and_hint(hass: HomeAssistant):
+    """A rate-limited user-account main poll raises the Repair with an API hint (#564)."""
+    from homeassistant.helpers import issue_registry as ir
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    client = _user_client_with_extras(
+        async_get_plant_detail=AsyncMock(
+            side_effect=PySolarCloudException({"result_code": "E999", "result_msg": "er_freq_limit"})
+        ),
+    )
+    coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
+    with pytest.raises(UpdateFailed) as exc:
+        await coordinator._async_update_data()
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, "rate_limited_12345") is not None
+    assert "E999" in str(exc.value)
+
+
 async def test_rate_limit_backs_off_and_recovers(hass: HomeAssistant):
     """Rate-limit errors widen the poll interval; a success restores it (#156)."""
     plants = MagicMock()
@@ -2004,6 +2023,7 @@ async def test_user_update_maps_plant_detail_points(hass: HomeAssistant):
             "p83106_map_virgin": {"value": "12500", "unit": "Wh"},
         }
     )
+    client.async_get_fault_count = AsyncMock(return_value={})
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     data = await coordinator._async_update_data()
@@ -2136,6 +2156,7 @@ async def test_user_update_skips_device_fetch_when_option_off(hass: HomeAssistan
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[_user_battery_device()])
+    client.async_get_fault_count = AsyncMock(return_value={})
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
 
     await coordinator._async_update_data()
@@ -2199,17 +2220,26 @@ async def test_user_update_backfills_realtime_when_list_omits_point_data(hass: H
     assert coordinator.device_data["dev-battery-1"]["58604"]["source"] == "cloud_user"
 
 
-async def test_user_update_embedded_point_data_skips_realtime_backfill(hass: HomeAssistant):
-    """When the list already embeds point_data, the extra realtime call is not spent (#405)."""
+async def test_user_update_partial_embedded_completed_by_realtime_backfill(hass: HomeAssistant):
+    """Partial embedded point_data is completed from realtime; embedded wins (#558).
+
+    The realtime call is spent for every device with a ps_key (one batched call),
+    and the merge keeps the fresher embedded readings on conflict.
+    """
     from custom_components.sungrow.const import CONF_ENABLE_DEVICE_SENSORS
 
-    # The embedded fixture also carries a ps_key, to prove the skip keys off "already has
-    # points", not off "has no ps_key".
     device = {**_user_battery_device(), "ps_key": "KEY-BATTERY-1"}
     client = MagicMock()
     client.async_get_plant_detail = AsyncMock(return_value={"curr_power": {"value": "1", "unit": "W"}})
     client.async_get_devices = AsyncMock(return_value=[device])
-    client.async_get_device_realtime = AsyncMock(return_value={})
+    client.async_get_device_realtime = AsyncMock(
+        return_value={
+            "dev-battery-1": {
+                "58604": {"id": "58604", "value": "49.2", "unit": "%", "name": "Battery SOC"},
+                "58601": {"id": "58601", "value": "380.1", "unit": "V", "name": "Battery Voltage"},
+            }
+        }
+    )
     client.async_query_faults = AsyncMock(return_value=[])
     client.async_get_fault_count = AsyncMock(return_value={})
     client.async_get_charging_piles = AsyncMock(return_value=[])
@@ -2218,8 +2248,10 @@ async def test_user_update_embedded_point_data_skips_realtime_backfill(hass: Hom
 
     await coordinator._async_update_data()
 
-    client.async_get_device_realtime.assert_not_awaited()
-    assert coordinator.device_data["dev-battery-1"]["58604"]["value"] == "32.2"
+    client.async_get_device_realtime.assert_awaited_once_with(["KEY-BATTERY-1"])
+    points = coordinator.device_data["dev-battery-1"]
+    assert points["58604"]["value"] == "32.2"
+    assert points["58601"]["value"] == "380.1"
 
 
 async def test_user_update_realtime_backfill_failure_is_non_fatal(hass: HomeAssistant):
@@ -2381,9 +2413,14 @@ async def test_user_update_fault_and_charger_refresh_is_non_fatal(hass: HomeAssi
 
 
 async def test_user_update_skips_fault_and_charger_when_option_off(hass: HomeAssistant):
-    """Fault/charger calls are only spent when per-device sensors are enabled."""
+    """Fault list/charger calls are only spent when per-device sensors are enabled.
+
+    The lightweight fault-count summary is always fetched: it drives the plant
+    Fault sensor on/off (#555).
+    """
     client = _user_client_with_extras(
         async_query_faults=AsyncMock(return_value=[{"fault_name": "x"}]),
+        async_get_fault_count=AsyncMock(return_value={"fault": "1", "warn": "0"}),
         async_get_charging_piles=AsyncMock(return_value=[{"uuid": 1}]),
     )
     coordinator = SungrowPlantCoordinator(hass, _make_entry(), None, "12345", "Test Plant", user_auth=client)
@@ -2392,7 +2429,9 @@ async def test_user_update_skips_fault_and_charger_when_option_off(hass: HomeAss
 
     client.async_query_faults.assert_not_awaited()
     client.async_get_charging_piles.assert_not_awaited()
+    client.async_get_fault_count.assert_awaited()
     assert coordinator.fault_list == []
+    assert coordinator.fault_summary == {"fault": "1", "warn": "0"}
     assert coordinator.charging_piles == []
 
 

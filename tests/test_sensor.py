@@ -929,6 +929,37 @@ async def test_device_sensors_created_when_enabled(hass: HomeAssistant):
     assert sensor.native_value == 7.2
 
 
+async def test_device_sensor_kept_when_reading_differs_from_plant(hass: HomeAssistant):
+    """A per-device point sharing the plant code but not its reading survives (#554).
+
+    cloud_user plant and device points share the bare numeric-ID code space, so a
+    code match alone must not drop a genuinely different per-device copy.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+
+    coordinator = _coordinator_with("12345", "Plant A", {"58604": {"value": "80", "unit": "%"}})
+    coordinator.enable_device_sensors = True
+    coordinator.local_configuration_url = None
+    coordinator.devices = [{"uuid": "bat-1", "device_name": "Battery"}]
+    coordinator.device_data = {
+        "bat-1": {"58604": {"code": "58604", "value": "32.2", "unit": "%"}},
+    }
+    entry.runtime_data = SungrowData(
+        coordinators=[coordinator],
+        control=MagicMock(),
+        devices={"12345": coordinator.devices},
+    )
+
+    added = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    device_sensors = [e for e in added if isinstance(e, SungrowDeviceSensor)]
+    assert len(device_sensors) == 1
+    assert device_sensors[0].point_code == "58604"
+    assert device_sensors[0].native_value == 32.2
+
+
 async def test_sensor_dynamic_add_on_new_point(hass: HomeAssistant):
     """A plant point that appears after setup is added at runtime (dynamic-devices)."""
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())

@@ -429,7 +429,7 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         try:
             async with asyncio.timeout(SETUP_TIMEOUT):
                 devices = await user_auth.async_get_devices(plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
+        except Exception as err:  # noqa: BLE001 - per-plant isolation; degrade to plant-level data
             _LOGGER.warning("Could not fetch devices for plant %s (user account): %s", plant_name, err)
             devices = []
 
@@ -451,8 +451,11 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         except Exception as err:  # noqa: BLE001 - per-plant isolation; coordinator default is fail-open
             _LOGGER.warning("Plant %s dispatch-support probe failed, using fail-open default: %s", plant_name, err)
         # User API has no design_capacity_battery plant-detail field in this path; gate
-        # battery-only controls on ESS/battery device presence (same fail-open default).
-        coordinator.has_battery = _has_battery_device(devices) if devices else True
+        # battery-only controls on ESS/battery device presence. Fail closed on an
+        # empty/failed fetch: showing battery controls on a possibly PV-only plant
+        # risks the #148 External-EMS curtailment, while hiding them on a transient
+        # failure only costs a reload (#553).
+        coordinator.has_battery = _has_battery_device(devices)
         # Best-effort: resolve the real battery charge/discharge power ceiling from the app
         # battery endpoints so the dispatch slider isn't capped at the static default when
         # the hardware differs (#450). Non-fatal — leaves the existing nameplate resolution
@@ -484,6 +487,17 @@ async def _async_setup_cloud_user(hass: HomeAssistant, entry: SungrowConfigEntry
         coordinator.via_device_id = plant_device.id
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Prune devices that drop out of the API after each refresh (stale-devices),
+    # mirroring the developer-account setup (#560). History backfill itself stays
+    # developer-transport-only: BackfillManager needs the Plants service.
+    @callback
+    def _prune() -> None:
+        _async_prune_stale_devices(hass, entry)
+
+    for coordinator in coordinators:
+        entry.async_on_unload(coordinator.async_add_listener(_prune))
+
     await _async_start_scheduler(hass, entry)
     return True
 
@@ -624,6 +638,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SungrowConfigEntry) -> b
         # The capability probes are documented fail-open, but an *unexpected* error in
         # one plant must not abort setup for the others (#115) — isolate this plant too.
         # The coordinator's own defaults (True/True) are the fail-open fallback.
+        # NB: no battery power-limit probe here — it resolves from the app battery
+        # endpoints, which only exist on the user-account transport (#561). This route
+        # sizes the dispatch slider from the device/model-code nameplate instead.
         try:
             coordinator.dispatch_update_supported = await _async_dispatch_supported(control_service, devices)
             coordinator.has_battery = await _async_has_battery(plants_service, plant_id, devices)
