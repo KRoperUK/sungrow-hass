@@ -615,13 +615,20 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with asyncio.timeout(self._poll_timeout):
                 self._record_api_call(CALL_TYPE_REALTIME)
                 detail = await self._user_auth.async_get_plant_detail(self.plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
+        except Exception as err:  # noqa: BLE001 - parity with the OAuth poll; non-API bugs ride the grace window too
             if is_auth_error(err):
                 raise ConfigEntryAuthFailed(f"iSolarCloud user-account login failed: {err}") from err
+            # Surface actionable errors as HA Repairs and back off while rate-limited,
+            # mirroring the OAuth main poll (#153/#156/#564). Raise-only like there: a
+            # transient error interleaved with an active rate-limit must not dismiss a
+            # still-valid Repair — only a successful poll clears them.
+            self._async_raise_repair(err)
+            if is_rate_limit_error(err):
+                self._adjust_poll_backoff(rate_limited=True, retry_after=rate_limit_retry_after(err))
             if self.data is not None and self._within_availability_grace():
                 _LOGGER.debug("Transient user-account poll failure for %s; keeping last-good: %s", self.plant_name, err)
                 return self.data
-            raise UpdateFailed(f"iSolarCloud user-account poll failed: {err}") from err
+            raise UpdateFailed(describe_api_error(err) or f"iSolarCloud user-account poll failed: {err}") from err
         self._last_successful_update = self.hass.loop.time()
         await self._async_refresh_user_device_data()
         await self._async_refresh_faults()
@@ -708,6 +715,11 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         and non-fatal: a failure leaves the embedded-mapping result (and any last-known
         values) untouched, matching the rest of this transport's degrade-don't-vanish
         contract.
+
+        Devices with only *partial* embedded ``point_data`` are completed from the
+        realtime response; embedded readings win on conflict since they are the
+        freshest per-poll values (#558). Devices without a ``ps_key`` cannot be
+        recovered and keep whatever the list carried.
         """
         assert self._user_auth is not None
         ps_key_by_uuid: dict[str, str] = {}
@@ -716,9 +728,8 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             uuid = device.get("uuid")
             ps_key = device.get("ps_key")
-            # Only devices the list did not already carry readings for, and only when a
-            # ps_key is present to drive the realtime call.
-            if uuid is None or not ps_key or mapped.get(str(uuid)):
+            # Only when a ps_key is present to drive the realtime call.
+            if uuid is None or not ps_key:
                 continue
             ps_key_by_uuid[str(uuid)] = str(ps_key)
         if not ps_key_by_uuid:
@@ -734,7 +745,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for uuid in ps_key_by_uuid:
             points = realtime.get(uuid)
             if isinstance(points, dict) and points:
-                mapped[uuid] = points
+                merged = dict(points)
+                merged.update(mapped.get(uuid, {}))
+                mapped[uuid] = merged
 
     async def _async_refresh_faults(self) -> None:
         """Best-effort refresh of the plant fault detail from the app fault API (#457).
@@ -745,21 +758,23 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         this never affects the sensor's on/off (that is driven by the reliable fault/alarm
         counts), so an unavailable fault API cannot flip the problem state.
 
-        Gated on ``enable_device_sensors`` for parity with the other opt-in per-device
-        fetches, so the extra calls are only spent when the user has asked for the richer
-        entity set.
+        The ``fault_summary`` count is always fetched: it is the authoritative on/off
+        source for the plant Fault sensor (#555). Only the heavier ``fault_list``
+        detail is gated on ``enable_device_sensors``, so the extra calls are spent
+        only when the user has asked for the richer entity set.
         """
-        if self._user_auth is None or not self.enable_device_sensors:
+        if self._user_auth is None:
             return
-        try:
-            async with asyncio.timeout(self._poll_timeout):
-                self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
-                faults = await self._user_auth.async_query_faults(self.plant_id)
-        except (PySolarCloudException, ClientError, TimeoutError) as err:
-            self._note_side_call_error(err)
-            _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
-        else:
-            self.fault_list = list(faults) if isinstance(faults, list) else []
+        if self.enable_device_sensors:
+            try:
+                async with asyncio.timeout(self._poll_timeout):
+                    self._record_api_call(CALL_TYPE_DEVICE_REALTIME)
+                    faults = await self._user_auth.async_query_faults(self.plant_id)
+            except (PySolarCloudException, ClientError, TimeoutError) as err:
+                self._note_side_call_error(err)
+                _LOGGER.debug("Fault list fetch failed for %s: %s", self.plant_name, err)
+            else:
+                self.fault_list = list(faults) if isinstance(faults, list) else []
         try:
             async with asyncio.timeout(self._poll_timeout):
                 self._record_api_call(CALL_TYPE_DEVICE_REALTIME)

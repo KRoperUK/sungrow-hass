@@ -136,6 +136,21 @@ PLANT_DETAIL_SENSORS: tuple[PlantDetailSensor, ...] = (
 )
 
 
+def _is_duplicate_of_plant(point_code: str, point_data: dict[str, Any], plant_data: dict[str, Any] | None) -> bool:
+    """Return whether a per-device point duplicates the plant-level reading (#554).
+
+    Compares value and unit as strings so `"80"` and `80` still dedupe across the
+    cloud mappers' mixed string/float payloads. A code match with a different
+    reading is a genuinely different per-device copy and must survive.
+    """
+    plant_point = (plant_data or {}).get(point_code)
+    if not isinstance(plant_point, dict) or not isinstance(point_data, dict):
+        return False
+    return str(plant_point.get("value")) == str(point_data.get("value")) and str(plant_point.get("unit") or "") == str(
+        point_data.get("unit") or ""
+    )
+
+
 def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> list[SensorEntity]:
     """Build the full set of sensors the coordinator currently warrants.
 
@@ -174,16 +189,16 @@ def _build_sensors(coordinator: SungrowPlantCoordinator, console_url: str) -> li
         )
 
     # Per-device sensors (opt-in, issue #74): surface points reported per device
-    # (EV chargers, meters, extra batteries). Points already present at the plant
-    # level are skipped so enabling this doesn't just duplicate every plant sensor
-    # under the inverter.
+    # (EV chargers, meters, extra batteries). A per-device point is skipped only
+    # when it carries the same reading as the plant point — on cloud_user both
+    # levels share the bare numeric-ID code space, so a code match alone would
+    # drop genuinely different per-device copies (#554).
     if coordinator.enable_device_sensors and coordinator.device_data:
-        plant_codes = set(coordinator.data or {})
         devices_by_uuid = {str(d["uuid"]): d for d in coordinator.devices if d.get("uuid")}
         for uuid, points in coordinator.device_data.items():
             device = devices_by_uuid.get(uuid, {"uuid": uuid})
             for point_code, point_data in points.items():
-                if point_code in plant_codes:
+                if _is_duplicate_of_plant(point_code, point_data, coordinator.data):
                     continue
                 sensor = SungrowDeviceSensor(coordinator, point_code, device, point_data)
                 if sensor.native_value is None:

@@ -72,6 +72,30 @@ def test_map_virgin_regex_not_confused_by_suffix():
     assert points["83102"]["unit"] == "kWh"
 
 
+def test_sibling_unit_used_when_dict_unit_missing():
+    """A p<ID>_unit scalar fills in a missing point-dict unit (#557)."""
+    detail = {
+        "p83022_map": {"value": "5230", "unit": ""},
+        "p83022_unit": "W",
+        "p83106_map_virgin": {"value": "12500", "unit": "Wh"},
+        "p83106_unit": "kWh",  # dict unit wins over the sibling
+    }
+    points = map_plant_detail_to_points(detail)
+    assert points["83022"]["unit"] == "W"
+    assert points["83106"]["unit"] == "Wh"
+
+
+def test_placeholder_plant_values_skipped():
+    """Placeholder display values ("--", "unknown") are not mapped (#557)."""
+    detail = {
+        "p1_map": {"value": "--", "unit": "W"},
+        "p2_map_virgin": {"value": "unknown", "unit": "kWh"},
+        "p3_map": {"value": "5", "unit": "W"},
+    }
+    points = map_plant_detail_to_points(detail)
+    assert set(points) == {"3"}
+
+
 def test_maps_today_energy():
     """today_energy becomes a today_energy point (#292)."""
     points = map_plant_detail_to_points({"today_energy": {"value": "12.5", "unit": "kWh"}})

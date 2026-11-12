@@ -36,6 +36,9 @@
       "pf": {
         "default": "mdi:angle-acute"
       },
+      "reactive_power_regulation_time": {
+        "default": "mdi:timer-cog-outline"
+      },
       "forced_dispatch_duration": {
         "default": "mdi:timer-sand"
       }
@@ -55,6 +58,9 @@
       },
       "reactive_power_regulation_mode": {
         "default": "mdi:sine-wave"
+      },
+      "reactive_response": {
+        "default": "mdi:toggle-switch"
       },
       "battery_mode": {
         "default": "mdi:battery-sync"

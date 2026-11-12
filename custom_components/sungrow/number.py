@@ -11,7 +11,7 @@ from typing import Any, Literal
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode, RestoreNumber
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -26,7 +26,7 @@ from . import (
 )
 from .api_rate import CALL_TYPE_CONTROL
 from .const import DOMAIN
-from .coordinator import SungrowPlantCoordinator
+from .coordinator import SungrowPlantCoordinator, is_auth_error
 from .entity_platform_helpers import create_entity_adder
 from .heartbeat import DISPATCH_WRITE_ERRORS
 from .model_specs import spec_for
@@ -187,6 +187,17 @@ DISPATCH_NUMBERS: dict[str, dict[str, Any]] = {
         "native_min_value": -1,
         "native_max_value": 1,
         "native_step": 0.01,
+        "mode": NumberMode.BOX,
+        "entity_category": EntityCategory.CONFIG,
+    },
+    # Reactive power regulation time in seconds (API range 1..6000 = 0.1..600 s).
+    # Only takes effect when the Reactive Power Mode select is set to a regulating
+    # mode. Applies to PV and hybrid inverters, so not battery-gated.
+    "reactive_power_regulation_time": {
+        "native_unit_of_measurement": "s",
+        "native_min_value": 0.1,
+        "native_max_value": 600,
+        "native_step": 0.1,
         "mode": NumberMode.BOX,
         "entity_category": EntityCategory.CONFIG,
     },
@@ -550,6 +561,10 @@ class SungrowDispatchNumber(CoordinatorEntity[SungrowPlantCoordinator], RestoreN
             self.coordinator.record_api_call(CALL_TYPE_CONTROL)
             await self.control.async_update_parameters(self.device_uuid, {self.param: wire_value})
         except DISPATCH_WRITE_ERRORS as err:
+            # A dead credential surfaces reauth at the point of failure instead of a
+            # generic write error the next poll would have to notice (#562).
+            if is_auth_error(err):
+                raise ConfigEntryAuthFailed(f"iSolarCloud authentication failed: {err}") from err
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="dispatch_write_failed",
