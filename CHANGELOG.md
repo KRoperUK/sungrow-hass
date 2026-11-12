@@ -34,6 +34,30 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.8.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.7.0...v6.8.0) (2026-11-12)
+
+
+### Features
+
+* expose reactive response select and regulation-time number ([f2d73ee](https://github.com/KRoperUK/sungrow-hass/commit/f2d73eed54f1e3ce9923698ff025110d3bfb1717)), closes [#559](https://github.com/KRoperUK/sungrow-hass/issues/559)
+* hint iHomeManager when meter absent in External EMS mode ([205ace8](https://github.com/KRoperUK/sungrow-hass/commit/205ace87568c2ab613f451363d0db431348bbf02))
+* hint iHomeManager when meter absent in External EMS mode ([a90c873](https://github.com/KRoperUK/sungrow-hass/commit/a90c873ee32f4d54e005af54f0bbdc330e9a0b16)), closes [#519](https://github.com/KRoperUK/sungrow-hass/issues/519)
+
+
+### Bug Fixes
+
+* always fetch fault summary on cloud_user, gate only fault detail ([2973e3b](https://github.com/KRoperUK/sungrow-hass/commit/2973e3ba6d18f122627961d326055f41fac0178e)), closes [#555](https://github.com/KRoperUK/sungrow-hass/issues/555)
+* broaden cloud_user except scopes to match OAuth degradation ([4025fb1](https://github.com/KRoperUK/sungrow-hass/commit/4025fb126aee4446a0fafa7cba18c294c9540400)), closes [#556](https://github.com/KRoperUK/sungrow-hass/issues/556)
+* complete partial embedded point_data from device realtime ([0b0d458](https://github.com/KRoperUK/sungrow-hass/commit/0b0d4584e06adc235d20ed8f64619c72ce50d514)), closes [#558](https://github.com/KRoperUK/sungrow-hass/issues/558)
+* fail closed on cloud_user has_battery when device fetch fails ([290d586](https://github.com/KRoperUK/sungrow-hass/commit/290d5865fec932da4c06d4385fe0482a8434f728)), closes [#553](https://github.com/KRoperUK/sungrow-hass/issues/553)
+* keep per-device sensors whose reading differs from plant ([c2229e5](https://github.com/KRoperUK/sungrow-hass/commit/c2229e50ebfdeb3786d9258880603f1e7c13fa4a)), closes [#554](https://github.com/KRoperUK/sungrow-hass/issues/554)
+* mirror Repair/backoff/hint into cloud_user main poll ([34888f5](https://github.com/KRoperUK/sungrow-hass/commit/34888f51ad756682efaaabb4b486c407edfd4a33)), closes [#564](https://github.com/KRoperUK/sungrow-hass/issues/564)
+* prune stale devices on cloud_user entries ([bddf0e1](https://github.com/KRoperUK/sungrow-hass/commit/bddf0e1f4e95ec8f2227e174d1757ffa8e74170a)), closes [#560](https://github.com/KRoperUK/sungrow-hass/issues/560)
+* recover sibling p-ID units and skip placeholder plant values ([1de933c](https://github.com/KRoperUK/sungrow-hass/commit/1de933c44032b0a23e02cd4acb30c76ee8f92777)), closes [#557](https://github.com/KRoperUK/sungrow-hass/issues/557)
+* skip cloud SOC fraction rescale for Modbus battery_level ([aa8a4ed](https://github.com/KRoperUK/sungrow-hass/commit/aa8a4ed64d4f37d5387ce2a1a4f0cb1b591ac5c9))
+* skip cloud SOC fraction rescale for Modbus battery_level ([e419d82](https://github.com/KRoperUK/sungrow-hass/commit/e419d824e8816f69ec45de8c8b2ef2904c2ce84f)), closes [#549](https://github.com/KRoperUK/sungrow-hass/issues/549)
+* trigger reauth on dead-credential dispatch writes ([ece0e43](https://github.com/KRoperUK/sungrow-hass/commit/ece0e431a7339870090244981b010b08dd57cc73)), closes [#562](https://github.com/KRoperUK/sungrow-hass/issues/562)
+
 ## [6.7.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.6.0...v6.7.0) (2026-10-26)
 
 
