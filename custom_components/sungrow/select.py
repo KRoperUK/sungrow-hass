@@ -70,6 +70,14 @@ _LEGACY_BATTERY_MODE_STATES: dict[str, str] = {
     "discharge": BATTERY_MODE_FORCE_DISCHARGE,
     "stop": BATTERY_MODE_STOP,
 }
+# Virtual selects and the concrete parameters they write. ``battery_mode`` has no wire
+# register of its own — it writes energy_management_mode (10003) together with
+# charge_discharge_command (10004) — so on transports whose supported_parameters only
+# list concrete map keys (local Modbus, #567) gating on its own name hides it
+# everywhere. Gate it on the underlying params instead.
+_VIRTUAL_SELECT_REQUIREMENTS: dict[str, frozenset[str]] = {
+    BATTERY_MODE_PARAM: frozenset({_EMS_MODE_PARAM, _CDC_PARAM}),
+}
 
 # Post-write actuation check (#254). After commanding a forced mode we read Energy
 # Management Mode (10003) back and, if it is *still* Self-consumption, the inverter did
@@ -159,13 +167,15 @@ def _build_selects(coordinator: SungrowPlantCoordinator, control: DispatchContro
     if not target.get("uuid"):
         return []
     # Hide battery-only controls on PV-only plants — see #148.
-    # Local ModbusControl only maps a subset of Appendix-10 params (#220).
+    # Local ModbusControl only maps a subset of Appendix-10 params (#220). Virtual
+    # selects (battery_mode) are gated on the concrete params they write (#567).
     raw_supported = getattr(control, "supported_parameters", None)
     supported = raw_supported if isinstance(raw_supported, (set, frozenset)) else None
     return [
         SungrowDispatchSelect(coordinator, control, target, param, meta)
         for param, meta in DISPATCH_SELECTS.items()
-        if (coordinator.has_battery or not meta.get("battery_only")) and (supported is None or param in supported)
+        if (coordinator.has_battery or not meta.get("battery_only"))
+        and (supported is None or _VIRTUAL_SELECT_REQUIREMENTS.get(param, frozenset({param})) <= supported)
     ]
 
 
