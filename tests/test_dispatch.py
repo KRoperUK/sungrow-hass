@@ -302,6 +302,60 @@ async def test_dispatch_full_set_with_battery(hass: HomeAssistant):
     assert {e.param for e in selects} == set(DISPATCH_SELECTS)
 
 
+# Local Modbus exposes concrete register-map keys, never the virtual battery_mode
+# name — the key set below mirrors HOLDING_CONTROL_MAPS["sh_rt"] (#567).
+MODBUS_SH_RT_SUPPORTED = frozenset(
+    {
+        "energy_management_mode",
+        "charge_discharge_command",
+        "charge_discharge_power",
+        "soc_upper_limit",
+        "soc_lower_limit",
+        "feed_in_limitation_value",
+        "feed_in_limitation",
+        "limited_power_switch",
+        "active_power_limit_ratio",
+    }
+)
+
+
+async def test_select_builds_battery_mode_on_modbus_map(hass: HomeAssistant):
+    """battery_mode is built on local Modbus: it writes 10003+10004, both mapped (#567)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].has_battery = True
+    data.control.supported_parameters = MODBUS_SH_RT_SUPPORTED
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    params = {e.param for e in added}
+    assert "battery_mode" in params
+    # forced_charging / battery_first have no Modbus registers — still hidden.
+    assert "forced_charging" not in params
+    assert "battery_first" not in params
+
+
+async def test_select_hides_battery_mode_without_underlying_modbus_params(hass: HomeAssistant):
+    """battery_mode stays hidden when its underlying params are unmapped (#567)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry.add_to_hass(hass)
+    devices = [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
+    data = _setup_entry_data(entry, devices)
+    data.coordinators[0].has_battery = True
+    data.control.supported_parameters = MODBUS_SH_RT_SUPPORTED - {"charge_discharge_command"}
+
+    added = []
+    await select_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    params = {e.param for e in added}
+    assert "battery_mode" not in params
+    # A concrete mapped select is unaffected by the virtual gating.
+    assert "feed_in_limitation" in params
+
+
 def test_has_battery_device_detects_ess_and_battery():
     """_has_battery_device matches ESS/battery devices across enum/int/string forms."""
     assert _has_battery_device([{"uuid": "e", "device_type": "ENERGY_STORAGE_SYSTEM"}])
