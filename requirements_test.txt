@@ -9,7 +9,7 @@ python-dotenv
 hypothesis
 
 # Linting & formatting (keep in sync with ci.yml and .pre-commit-config.yaml)
-ruff==0.17.3
+ruff==0.17.4
 mypy==2.4.1
 
 # Component dependencies
