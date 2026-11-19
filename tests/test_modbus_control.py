@@ -105,6 +105,17 @@ async def test_update_rejects_readback_mismatch():
         await control.async_update_parameters("sn_inv", {"active_power_limit_ratio": "900"})
 
 
+async def test_update_truncates_charge_discharge_power_to_10w():
+    """SH hybrids store power in 10 W steps: 429 is written (and verified) as 420 (#567)."""
+    client = _client(family="sh_rt")
+    client.async_read_holding = AsyncMock(return_value=[420])
+    control = ModbusControl(client, family="sh_rt")
+    out = await control.async_update_parameters("sn_inv", {"charge_discharge_power": "429"})
+    client.async_write_holding.assert_awaited_once_with(13051, 420)
+    assert out[0]["code"] == "charge_discharge_power"
+    assert out[0]["value"] == "420"
+
+
 async def test_read_parameters_shape():
     client = _client()
     client.async_read_holding = AsyncMock(return_value=[170])

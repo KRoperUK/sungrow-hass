@@ -135,6 +135,12 @@ class ModbusControl:
                 raise ModbusControlError(f"Invalid wire value for {point.param}: {value!r}") from err
             if not 0 <= wire <= 0xFFFF:
                 raise ModbusControlError(f"Wire value out of U16 range for {point.param}: {wire}")
+            # SH hybrids store charge/discharge power in 10 W steps and truncate the
+            # rest (429 -> 420, 838 -> 830 on an SH10RT-20, #567), which tripped the
+            # exact read-back check below. Truncate here so the written and verified
+            # values agree; only this param has evidenced granularity.
+            if point.param == "charge_discharge_power":
+                wire = wire // 10 * 10
             try:
                 await self._client.async_write_holding(point.wire_address, wire)
                 verify = await self._client.async_read_holding(point.wire_address, 1)
