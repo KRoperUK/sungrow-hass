@@ -26,6 +26,7 @@ from custom_components.sungrow.const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_GATEWAY,
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODEL,
@@ -800,7 +801,13 @@ async def test_reconfigure_modbus_only_edits_host_not_credentials(hass: HomeAssi
         keys = {str(m.schema) for m in result["data_schema"].schema}
         assert keys == {CONF_MODBUS_HOST, CONF_MODBUS_PORT}
 
-        with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True):
+        with (
+            patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
+            patch(
+                "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+                return_value=((None, None), False),
+            ),
+        ):
             result2 = await hass.config_entries.flow.async_configure(
                 result["flow_id"], user_input={CONF_MODBUS_HOST: "192.168.1.55"}
             )
@@ -833,7 +840,13 @@ async def test_reconfigure_modbus_only_blank_keeps_current_host(hass: HomeAssist
             DOMAIN,
             context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
         )
-        with patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True):
+        with (
+            patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
+            patch(
+                "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+                return_value=((None, None), False),
+            ),
+        ):
             result2 = await hass.config_entries.flow.async_configure(
                 result["flow_id"], user_input={CONF_MODBUS_HOST: "   "}
             )
@@ -1364,10 +1377,17 @@ async def test_zeroconf_discovery_creates_modbus_entry(hass: HomeAssistant):
     assert result["step_id"] == "zeroconf_confirm"
     assert result["description_placeholders"] == {"model": "SG3.6RS", "host": "192.168.1.93"}
 
-    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+    with (
+        patch(
+            "custom_components.sungrow._config_flow.zeroconf.async_probe_modbus",
+            return_value=((None, None), False),
+        ) as probe,
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+    ):
         result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
         await hass.async_block_till_done()
 
+    probe.assert_awaited_once_with("192.168.1.93", 502)
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result2["title"] == "Sungrow SG3.6RS (local)"
     assert result2["data"] == {
@@ -1376,6 +1396,8 @@ async def test_zeroconf_discovery_creates_modbus_entry(hass: HomeAssistant):
         CONF_MODEL: "SG3.6RS",
         CONF_MODBUS_HOST: "192.168.1.93",
         CONF_MODBUS_PORT: 502,
+        # mDNS gave model+serial; the wire probe settled the transport (#574).
+        CONF_MODBUS_ENCRYPTED: False,
         # The host came from discovery, so a later re-discovery may follow the dongle.
         CONF_DISCOVERY_MANAGED_HOST: True,
     }
@@ -1471,13 +1493,21 @@ async def test_zeroconf_creates_local_even_when_cloud_has_same_serial(hass: Home
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "zeroconf_confirm"
 
-    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+    with (
+        patch(
+            "custom_components.sungrow._config_flow.zeroconf.async_probe_modbus",
+            return_value=((None, None), True),
+        ),
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+    ):
         result2 = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
         await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result2["data"][CONF_TRANSPORT] == TRANSPORT_MODBUS_ONLY
     assert result2["data"][CONF_MODBUS_HOST] == "192.168.1.93"
+    # An SG-D dongle discovered over mDNS still gets its transport recorded (#574).
+    assert result2["data"][CONF_MODBUS_ENCRYPTED] is True
     # Cloud entry stays pure (no modbus_host mashup).
     assert CONF_MODBUS_HOST not in cloud.options
 

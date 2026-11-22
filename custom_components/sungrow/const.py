@@ -26,6 +26,11 @@ CONF_ENABLE_DEVICE_SENSORS = "enable_device_sensors"
 CONF_MODBUS_HOST = "modbus_host"
 CONF_MODBUS_PORT = "modbus_port"
 CONF_MODBUS_UNIT = "modbus_unit"
+# Entry-data flag: the dongle wraps Modbus in the SG-D AES envelope (#574). Set by the
+# config flow from its transport probe, so the coordinator picks the AES client up
+# front instead of discovering it from a failed poll. Absent/False on plain dongles and
+# on every entry created before #574.
+CONF_MODBUS_ENCRYPTED = "modbus_encrypted"
 # Opt-in: expose the raw Modbus register window on the daily_yield sensor as
 # ``daily_yield_diagnostic`` (large attribute; off by default to protect the recorder).
 CONF_MODBUS_DEBUG_DAILY_YIELD = "modbus_debug_daily_yield"

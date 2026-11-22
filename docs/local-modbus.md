@@ -18,11 +18,31 @@ the cloud plant in the device registry (`via_device_id`) — a soft “related t
 
     - **SG-RS / SG-RT** string inverters (single- and three-phase low-block layout)
     - **SH-RS / SH-RT** hybrid inverters (battery SOC/power, house load, meter points)
+    - **SG-D** string inverters (SG3K-D / SG5K-D / SG8K-D), which wrap Modbus in an
+      AES-128 envelope — see [Encrypted dongles](#encrypted-dongles-sg-d).
 
     Family is auto-detected from register 5000 (device-type code) or the configured
     model string. Local **control** (writes) is tracked in
     [#220](https://github.com/KRoperUK/sungrow-hass/issues/220); remaining map gaps in
     [#219](https://github.com/KRoperUK/sungrow-hass/issues/219).
+
+### Encrypted dongles (SG-D)
+
+Some hardware — the SG-D series and newer dongles — does not speak plain Modbus TCP.
+Every frame is wrapped in an AES-128-ECB envelope and the session key is negotiated on
+connect, so a plain Modbus client sees a connection that never answers. The integration
+detects this during setup: the wizard tries a plain read first and, if the dongle stays
+silent, retries over the encrypted transport. The result is stored on the entry, so
+polling always uses the right transport with no repeated probe.
+
+Nothing needs configuring for this: the transport is detected on setup and re-checked
+whenever you run **Reconfigure**. If an entry created before this support existed still
+fails, run Reconfigure (or re-add the entry) so the encrypted dongle is recognised.
+
+!!! note "Third-party proxies"
+    An encrypted dongle cannot sit behind a plain Modbus proxy such as
+    `ha-modbusproxy`, because the proxy would have to decrypt and re-encrypt. Point
+    the entry at the dongle (or the inverter's own LAN port) directly.
 
 ## What you need
 

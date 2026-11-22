@@ -309,6 +309,24 @@ port you configured for a Modbus proxy). If local sensors are unavailable:
 - If the dongle's IP changed, rediscovery updates the stored host, or use **Reconfigure**
   on the local entry.
 
+### Local setup fails on an SG-D inverter (encrypted Modbus)
+
+The **SG-D** series (SG3K-D, SG5K-D, SG8K-D) and some newer dongles do not speak plain
+Modbus TCP — they wrap every frame in an AES-128 envelope, so a plain client connects but
+never gets an answer. The setup wizard detects this by retrying over the encrypted
+transport and stores the result on the entry, so a fresh setup normally Just Works. If an
+existing local entry was created before that support landed, it is still pinned to plain
+Modbus:
+
+- Open **Reconfigure** on the local entry and save it unchanged — it re-reads the
+  transport at the current endpoint and stores the result. Re-adding the entry
+  (**Settings → Devices & Services → Add Integration → Sungrow → Modbus Only**) also
+  works.
+- A plain Modbus **proxy** in the path will break encrypted hardware: point the entry at
+  the dongle or the inverter's LAN port directly.
+- Diagnostics for the entry include `modbus_diagnostics.encrypted`, which reports which
+  transport is in use — useful when reporting a problem.
+
 ### The Ethernet port on the inverter appears dead
 
 On several Sungrow inverter models the **internal LAN port is disabled by default**

@@ -7,6 +7,7 @@ map without connecting or needing any cloud credentials.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigFlowResult
@@ -14,6 +15,7 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from ..const import (
     CONF_DISCOVERY_MANAGED_HOST,
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODEL,
@@ -27,7 +29,9 @@ from ..const import (
 )
 from ..helpers import resolve_modbus_port
 from ._base import _SungrowFlowBase
-from ._helpers import _parse_winet_properties
+from ._helpers import _parse_winet_properties, async_probe_modbus
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ZeroconfMixin(_SungrowFlowBase):
@@ -74,6 +78,15 @@ class ZeroconfMixin(_SungrowFlowBase):
         """Confirm setting up the discovered WiNet-S as a local (Modbus-only) integration."""
         model = self.init_info.get(CONF_MODEL, "Inverter")
         if user_input is not None:
+            # mDNS only proves the dongle is on the LAN, so the transport still has to be
+            # read off the wire (#574). The TXT records already gave us model and serial,
+            # so this probe only settles plain vs encrypted. It must never block creating
+            # the entry: any failure keeps the plain default every pre-#574 entry used.
+            try:
+                _, encrypted = await async_probe_modbus(self._discovered_modbus_host or "", DEFAULT_MODBUS_PORT)
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.debug("Transport probe failed for discovered dongle; assuming plain Modbus: %s", err)
+                encrypted = False
             return self.async_create_entry(
                 title=f"Sungrow {model} (local)",
                 data={
@@ -84,6 +97,7 @@ class ZeroconfMixin(_SungrowFlowBase):
                     # A WiNet-S announcing itself always serves Modbus on the standard
                     # port; Reconfigure / Options can point it at a proxy later (#485).
                     CONF_MODBUS_PORT: DEFAULT_MODBUS_PORT,
+                    CONF_MODBUS_ENCRYPTED: encrypted,
                     # The host came from discovery, so a later re-discovery may follow a
                     # moved dongle — until the user sets the host explicitly (#402).
                     CONF_DISCOVERY_MANAGED_HOST: True,

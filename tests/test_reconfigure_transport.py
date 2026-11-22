@@ -125,6 +125,10 @@ async def test_reconfigure_modbus_pins_host_and_clears_discovery_managed(hass: H
     with (
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
+        patch(
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=((None, None), False),
+        ),
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={CONF_MODBUS_HOST: "10.0.0.50"}

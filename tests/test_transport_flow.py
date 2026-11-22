@@ -114,8 +114,8 @@ async def test_modbus_only_flow_creates_correct_entry(hass: HomeAssistant):
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=("SG3.6RS", "SN123"),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=(("SG3.6RS", "SN123"), False),
         ),
     ):
         result4 = await hass.config_entries.flow.async_configure(
@@ -127,8 +127,8 @@ async def test_modbus_only_flow_creates_correct_entry(hass: HomeAssistant):
     # Submitting the confirm step re-runs identity as a comms probe, then creates the entry.
     with (
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=("SG3.6RS", "SN123"),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=(("SG3.6RS", "SN123"), False),
         ),
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
