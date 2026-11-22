@@ -135,18 +135,18 @@ when iSolarCloud rejects requests for a reason you can act on:
   clears automatically once the observed rate drops back under the threshold. The
   exact observed per-call-type rate is included in the **diagnostics download**
   (under each plant's `api_call_rate`) if you want to see which calls dominate.
-- **"Dispatch keepalive stopped".** While **Force charge**/**Force discharge** is
-  active, the integration runs a background keepalive (the External-EMS heartbeat)
-  that holds the inverter in forced mode. If that keepalive stops unexpectedly, the
-  inverter times out of forced mode and the command silently stops being applied —
-  so this Repair is raised. To recover, set **Battery Mode** back to
-  **Self-consumption** (or **Stop**) and then to **Force charge**/**Force discharge**
-  again to restart the keepalive; the Repair clears when the keepalive restarts or you
-  leave forced mode. If it keeps recurring, enable debug logging (below) and open an
-  issue with the log around the time it happened.
-- **"Dispatch command was not applied".** After you command **Force charge**/**Force
-  discharge**, the integration reads the inverter's Energy Management Mode back to
-  confirm it actually entered **Forced** mode. If the write was accepted but the inverter
+- **"Dispatch keepalive stopped".** While a forced state is active — **Force charge**,
+  **Force discharge** or **Stop** — the integration runs a background keepalive (the
+  External-EMS heartbeat) that holds the inverter in that state. If that keepalive stops
+  unexpectedly, the inverter times out of forced mode and the command silently stops
+  being applied — so this Repair is raised. To recover, set **Battery Mode** to
+  **Self-consumption** and then back to the mode you wanted, which restarts the
+  keepalive; the Repair clears when the keepalive restarts or you leave forced mode.
+  If it keeps recurring, enable debug logging (below) and open an issue with the log
+  around the time it happened.
+- **"Dispatch command was not applied".** After you command **Force charge**, **Force
+  discharge** or **Stop**, the integration reads the inverter's Energy Management Mode
+  back to confirm it actually entered **Forced** mode. If the write was accepted but the inverter
   stayed in **Self-consumption**, it re-sends the forced-mode command once; if it *still*
   hasn't switched, this Repair is raised — the command isn't taking effect. This can
   happen on some models/firmware or API plans. Try **Self-consumption** then **Force

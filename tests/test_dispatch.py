@@ -741,8 +741,14 @@ async def test_select_option_calls_control(hass: HomeAssistant):
     )
 
 
-async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
-    """Selecting 'Stop' stops the EMS heartbeat loop."""
+async def test_select_stop_enters_forced_stop(hass: HomeAssistant):
+    """Selecting 'Stop' holds Compulsory mode with the STOP command (KRoperUK/pysolarcloud#140).
+
+    The portal's "Forced mode → Stop" tile is Compulsory (10003=2) carrying
+    charge_discharge_command 204 — the vendor app models STOP inside
+    ``CompulsoryModeDTO``. Writing only 204 with Self-consumption made Stop a no-op
+    (byte-identical to Self-consumption). See KRoperUK/pysolarcloud#140.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     devices = [{"uuid": "dev-uuid-1", "device_type": "ENERGY_STORAGE_SYSTEM"}]
@@ -753,15 +759,23 @@ async def test_select_stop_stops_heartbeat(hass: HomeAssistant):
     command = next(e for e in added if e.param == "battery_mode")
 
     command.hass = hass
-    with patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop:
+    with (
+        patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()) as mock_start,
+        patch("custom_components.sungrow.select.async_stop_heartbeat", new=AsyncMock()) as mock_stop,
+    ):
         await command.async_select_option("Stop")
 
-    mock_stop.assert_awaited_once_with(hass, command.coordinator.config_entry, "12345")
-    # Stop restores Self-consumption (10003=0) so forced mode does not persist (#231).
+    # Compulsory mode is what makes the device honour the STOP command.
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
-        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+        {"charge_discharge_command": "204", "energy_management_mode": "2"},
     )
+    # The heartbeat has to keep the mode held, so it must be started, not stopped.
+    mock_start.assert_awaited_once()
+    mock_stop.assert_not_awaited()
+    # Stop is latched: no auto-revert is armed.
+    assert command._revert_cancel is None
+    command._cancel_verify()
 
 
 async def test_select_stop_with_poisoned_heartbeat_still_writes_safe_mode(hass: HomeAssistant):
@@ -787,13 +801,14 @@ async def test_select_stop_with_poisoned_heartbeat_still_writes_safe_mode(hass: 
     command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
 
-    await command.async_select_option("Stop")  # must not raise the heartbeat's stored error
+    with patch("custom_components.sungrow.select.async_start_heartbeat", new=AsyncMock()):
+        await command.async_select_option("Stop")  # must not raise the heartbeat's stored error
+    command._cancel_verify()  # Stop schedules an actuation check; drop the timer
 
     entry_data.control.async_update_parameters.assert_awaited_once_with(
         "dev-uuid-1",
-        {"charge_discharge_command": "204", "energy_management_mode": "0"},
+        {"charge_discharge_command": "204", "energy_management_mode": "2"},
     )
-    assert "12345" not in entry_data.heartbeats
     assert command.current_option == "Stop"
 
 
@@ -1459,13 +1474,13 @@ async def test_select_restores_last_option(hass: HomeAssistant):
     command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
     # Restore a non-dispatching option so this stays a pure restore test; the
-    # Charge/Discharge heartbeat-resume path is covered separately (#112).
-    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Stop"))
+    # forced/held heartbeat-resume path is covered separately (#112).
+    command.async_get_last_state = AsyncMock(return_value=State("select.x", "Self-consumption"))
 
     with patch.object(CoordinatorEntity, "async_added_to_hass", new=AsyncMock()):
         await command.async_added_to_hass()
 
-    assert command.current_option == "Stop"
+    assert command.current_option == "Self-consumption"
 
 
 async def test_restored_charge_command_resumes_heartbeat(hass: HomeAssistant):
@@ -1639,7 +1654,12 @@ async def test_forced_dispatch_duration_survives_poll_rebuild(hass: HomeAssistan
 
 
 async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
-    """Selecting Charge arms the auto-revert (with a persisted deadline); Stop cancels it."""
+    """Charge arms the auto-revert (with a persisted deadline); Stop cancels the revert.
+
+    Stop still arms no revert of its own — it is a latched mode
+    (KRoperUK/pysolarcloud#140) — but it does schedule an actuation check, which the
+    test clears before it exits.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     entry.add_to_hass(hass)
     data = _setup_entry_data(entry, [{"uuid": "ess-1", "device_type": "ENERGY_STORAGE_SYSTEM"}])
@@ -1661,6 +1681,7 @@ async def test_charge_arms_autorevert_and_stop_cancels(hass: HomeAssistant):
         await command.async_select_option("Stop")
         assert command._revert_deadline is None
         assert command.extra_state_attributes is None
+        command._cancel_verify()  # Stop schedules its own actuation check; drop the timer
 
 
 async def test_autorevert_writes_stop_and_stops_heartbeat(hass: HomeAssistant):
@@ -1786,8 +1807,8 @@ async def test_restored_command_rearms_when_deadline_future(hass: HomeAssistant)
     command._cancel_revert()  # avoid a lingering scheduled callback in the test
 
 
-async def test_restored_stop_command_leaves_heartbeat_off(hass: HomeAssistant):
-    """A restored 'Stop' command must not start the heartbeat (#112)."""
+async def test_restored_stop_command_resumes_heartbeat(hass: HomeAssistant):
+    """A restored 'Stop' resumes the heartbeat: it is a held forced mode (#112)."""
     from homeassistant.core import State
     from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -1808,7 +1829,8 @@ async def test_restored_stop_command_leaves_heartbeat_off(hass: HomeAssistant):
         await command.async_added_to_hass()
 
     assert command.current_option == "Stop"
-    mock_start.assert_not_awaited()
+    # Stop is Compulsory mode carrying 204, so it would time out without the heartbeat.
+    mock_start.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -2189,7 +2211,7 @@ async def test_verify_noop_when_not_charging(hass: HomeAssistant):
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
     command = next(e for e in added if e.param == "battery_mode")
     command.hass = hass
-    command._attr_current_option = "Stop"
+    command._attr_current_option = "Self-consumption"
     data.control.async_read_parameters = AsyncMock(return_value=[])
 
     await command._verify_actuation()
@@ -2198,8 +2220,12 @@ async def test_verify_noop_when_not_charging(hass: HomeAssistant):
     assert (DOMAIN, "dispatch_not_actuated_12345") not in ir.async_get(hass).issues
 
 
-async def test_charge_schedules_check_and_stop_cancels(hass: HomeAssistant):
-    """Charge schedules the actuation check; Stop cancels it and clears the Repair (#254)."""
+async def test_charge_schedules_check_and_stop_schedules_check(hass: HomeAssistant):
+    """Charge and Stop each schedule an actuation check; Self-consumption cancels it (#254).
+
+    Stop is Compulsory mode carrying 204, so it is verified like the directional
+    commands rather than treated as a return to normal operation (KRoperUK/pysolarcloud#140).
+    """
     data, entry = _command_select(hass)
     added: list = []
     await select_setup_entry(hass, entry, lambda e: added.extend(e))
@@ -2214,7 +2240,10 @@ async def test_charge_schedules_check_and_stop_cancels(hass: HomeAssistant):
         assert command._verify_cancel is not None  # a check is pending
 
         await command.async_select_option("Stop")
-        assert command._verify_cancel is None  # cancelled, no lingering timer
+        assert command._verify_cancel is not None  # Stop is held, so it verifies too
+
+        await command.async_select_option("Self-consumption")
+        assert command._verify_cancel is None  # back to normal operation, no timer
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,10 @@ control the battery and dispatch behaviour, such as:
 When you set charge/discharge to *Charge* or *Discharge*, the integration switches
 **Energy Management Mode** to Compulsory (Forced) so the inverter actually follows the
 command, and sends the required **EMS heartbeat** so the setting is maintained. *Stop*
-restores Self-consumption mode.
+also holds Compulsory mode — the portal's "Forced mode → Stop" — because writing the
+stop command while the plant stays in Self-consumption is accepted but ignored. *Stop*
+does **not** auto-revert, since holding the battery stopped is the point. Only
+*Self-consumption* returns the plant to normal operation.
 
 ### Scheduled charge / discharge windows
 
