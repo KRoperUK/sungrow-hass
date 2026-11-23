@@ -142,8 +142,12 @@ def _reply(frame: bytes) -> bytes:
     return tid + b"\x00\x00" + (len(payload) + 1).to_bytes(2, "big") + bytes([dev]) + payload
 
 
-async def _serve(encrypted: bool) -> asyncio.AbstractServer:
-    """A loopback dongle: plain handshake, then AES envelopes (or plain frames)."""
+async def _serve(encrypted: bool, handshakes: list[int] | None = None) -> asyncio.AbstractServer:
+    """A loopback dongle: plain handshake, then AES envelopes (or plain frames).
+
+    ``handshakes``, when given, has one element appended per key request received, so a
+    test can assert whether a reconnect renegotiated.
+    """
     cipher = _cipher()
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -158,6 +162,8 @@ async def _serve(encrypted: bool) -> asyncio.AbstractServer:
                     # Both kinds of dongle answer the key request; only the sentinel
                     # in the reply decides whether traffic is then encrypted.
                     fifo = fifo[len(GET_KEY) :]
+                    if handshakes is not None:
+                        handshakes.append(1)
                     public_key = PUBLIC_KEY if encrypted else NO_CRYPTO_ZERO
                     writer.write(HEADER + b"\x00" * 7 + public_key)
                     await writer.drain()
@@ -289,6 +295,36 @@ async def test_encrypted_client_starts_plain_until_connected():
     client = SungrowEncryptedTcpClient("127.0.0.1", encrypted=True, port=502)
     assert client.encrypted is False
     client.close()
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_reconnect_renegotiates_the_session_key():
+    """A dropped socket forces a new key on reconnect.
+
+    The dongle issues a per-connection key and WiNet-S drops idle sockets. Reusing the
+    key from the dead session would encrypt every frame with a stale cipher, and the
+    dongle would reject each one — the reconnect would "succeed" and then never read.
+    """
+    handshakes: list[int] = []
+    server = await _serve(encrypted=True, handshakes=handshakes)
+    port = server.sockets[0].getsockname()[1]
+    client = SungrowEncryptedTcpClient("127.0.0.1", encrypted=True, port=port, timeout=5)
+    try:
+        assert await client.connect() is True
+        assert len(handshakes) == 1, "first connect must negotiate a key"
+
+        # Simulate pymodbus losing the socket. The client object is reused: this is
+        # what SungrowModbusClient._async_ensure_connected does on a dropped session.
+        client.ctx.close()
+        await asyncio.sleep(0.2)
+        assert client.connected is False
+
+        assert await client.connect() is True
+        assert len(handshakes) == 2, "reconnect must negotiate a fresh key"
+    finally:
+        client.close()
+        server.close()
+        await server.wait_closed()
 
 
 # ---------------------------------------------------------------------------
