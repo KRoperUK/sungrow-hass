@@ -34,6 +34,7 @@ from .const import (
     CONF_ENABLE_DEVICE_SENSORS,
     CONF_EXTRA_MEASURE_POINTS,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_UNIT,
     CONF_MODEL,
@@ -480,6 +481,9 @@ class SungrowPlantCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             unit=int(config_entry.options.get(CONF_MODBUS_UNIT, DEFAULT_MODBUS_UNIT)),
             model=model,
             model_code=str(model_code) if model_code else None,
+            # Detected once by the config flow (#574); absent on pre-#574 entries, which
+            # are all plain dongles.
+            encrypted=bool(config_entry.data.get(CONF_MODBUS_ENCRYPTED)),
         )
 
     def close_modbus(self) -> None:

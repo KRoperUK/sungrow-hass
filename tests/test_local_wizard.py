@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.sungrow._config_flow._helpers import WinetDongle
 from custom_components.sungrow.const import (
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODEL,
@@ -113,8 +114,8 @@ async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=("SG3.6RS", "SN-HAPPY"),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=(("SG3.6RS", "SN-HAPPY"), False),
         ),
     ):
         confirm = await hass.config_entries.flow.async_configure(flow_id, user_input={CONF_MODBUS_HOST: "10.1.2.3"})
@@ -122,8 +123,8 @@ async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
 
     with (
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=("SG3.6RS", "SN-HAPPY"),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=(("SG3.6RS", "SN-HAPPY"), False),
         ),
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
@@ -137,6 +138,8 @@ async def test_manual_ip_happy_path_identifies_and_creates(hass: HomeAssistant):
         CONF_MODBUS_PORT: 502,
         CONF_SERIAL: "SN-HAPPY",
         CONF_MODEL: "SG3.6RS",
+        # The probe detected a plain dongle, so the entry stores that transport (#574).
+        CONF_MODBUS_ENCRYPTED: False,
     }
     assert created["options"] == {CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL}
     assert created["result"].unique_id == "modbus_SN-HAPPY"
@@ -161,8 +164,8 @@ async def test_identify_partial_falls_back_to_manual_prefilled(hass: HomeAssista
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=(None, "SN-PARTIAL"),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=((None, "SN-PARTIAL"), False),
         ),
     ):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.5"})
@@ -183,8 +186,8 @@ async def test_identify_total_failure_falls_back_to_manual_form(hass: HomeAssist
     with (
         patch("custom_components.sungrow.helpers.async_test_modbus_host", return_value=True),
         patch(
-            "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-            return_value=(None, None),
+            "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+            return_value=((None, None), False),
         ),
     ):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.5"})
@@ -206,8 +209,8 @@ async def test_confirm_probe_failure_shows_error_and_holds_step(hass: HomeAssist
 
     # Second identity read returns nothing → comms probe failed.
     with patch(
-        "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-        return_value=(None, None),
+        "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+        return_value=((None, None), False),
     ):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={})
     assert result["step_id"] == "local_confirm_identified"
@@ -221,8 +224,8 @@ async def test_confirm_serial_mismatch_refuses_to_create(hass: HomeAssistant):
     await hass.config_entries.flow.async_configure(flow_id, user_input={"choice": "192.168.1.10"})
 
     with patch(
-        "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity",
-        return_value=("SG5.0RS", "SN-DIFFERENT"),
+        "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus",
+        return_value=(("SG5.0RS", "SN-DIFFERENT"), False),
     ):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={})
     assert result["step_id"] == "local_confirm_identified"

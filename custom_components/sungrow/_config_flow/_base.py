@@ -94,6 +94,9 @@ class _SungrowFlowBase(config_entries.ConfigFlow):
         # Modbus TCP port typed alongside the host (#485). ``None`` means the 502 default,
         # which is what a dongle picked from the discovery list always uses.
         self._local_wizard_port: int | None = None
+        # Whether the dongle wraps Modbus in the SG-D AES envelope (#574), learned from
+        # the identity probe so the created entry stores the transport it detected.
+        self._local_wizard_encrypted: bool = False
         self._discovered_winet_dongles: list[WinetDongle] | None = None
 
     @callback

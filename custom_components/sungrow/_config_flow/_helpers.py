@@ -41,6 +41,12 @@ DISCOVERY_BROWSE_TIMEOUT = 3.0
 # evcc's ``modbusproxy``) multiplexing several clients onto the dongle's single session.
 MODBUS_PORT_VALIDATOR = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
 
+# Per-attempt timeout for the local-Modbus transport probe (#574). The wizard tries a
+# plain read first and an AES read second, so a dongle that ignores plain frames costs
+# this once rather than a full poll timeout. Comfortably longer than a healthy dongle's
+# millisecond reply, short enough that a dead host still fails promptly.
+MODBUS_PROBE_TIMEOUT = 3
+
 
 def _normalize_redirect_uri(raw: str | None) -> str | None:
     """Return a redirect URI whose path is the OAuth callback, or ``None`` if unfixable.
@@ -278,27 +284,69 @@ async def async_read_modbus_identity(host: str, port: int = DEFAULT_MODBUS_PORT)
     may be ``None`` independently when the register wasn't populated by the firmware
     (very old dongles), which is the "partial success" case the wizard surfaces.
     """
-    # Import late so this helper module stays cheap to import on every flow step —
-    # the Modbus client pulls in ``pymodbus`` which is heavy.
+    identity, _ = await async_probe_modbus(host, port)
+    return identity
+
+
+async def async_probe_modbus(host: str, port: int = DEFAULT_MODBUS_PORT) -> tuple[tuple[str | None, str | None], bool]:
+    """Read ``(model, serial)`` and detect whether the dongle encrypts (#574).
+
+    Returns ``((model, serial), encrypted)``. An SG-D dongle accepts the connection but
+    ignores plain frames, so the plain attempt is abandoned after
+    :data:`MODBUS_PROBE_TIMEOUT` and retried over AES. A plain dongle answers that first
+    attempt in milliseconds, so healthy hardware never pays for the second path.
+
+    The bounded plain attempt only decides *which transport to try first*, never that a
+    device is absent: a slow but plain dongle (a 7-block SH hybrid on a busy LAN) that
+    misses the deadline is still read once more, unbounded, before the probe reports
+    failure. That keeps this helper's contract identical to the pre-#574 identify read.
+
+    A Modbus *exception response* counts as plain traffic — the dongle parsed the frame —
+    so an unusual register can never switch the transport.
+    """
     from ..measure_points import resolve_enum_value
     from ..modbus import SungrowModbusClient, SungrowModbusError
 
-    client = SungrowModbusClient(host, port=port)
-    try:
+    data: dict[str, Any] | None = None
+    encrypted = False
+    # Order matters: a bounded plain attempt (fast on healthy plain hardware), then a
+    # bounded AES attempt (an SG-D dongle), then one unbounded plain attempt so a slow
+    # but plain dongle is never reported as absent.
+    for request_encryption, bounded in ((False, True), (True, True), (False, False)):
+        client = SungrowModbusClient(host, port=port, encrypted=request_encryption)
         try:
-            data = await client.async_read_realtime()
-        except SungrowModbusError as err:
-            _LOGGER.debug("modbus identity read failed for %s:%s: %s", host, port, err)
-            return None, None
-        serial_raw = data.get("inverter_serial", {}).get("value")
-        serial = str(serial_raw).strip() if serial_raw else None
-        type_code_raw = data.get("device_type_code", {}).get("value")
-        model: str | None = None
-        if type_code_raw is not None:
             try:
-                model = resolve_enum_value("device_type_code", int(type_code_raw))
-            except ValueError, TypeError:
-                model = None
-        return model or None, serial or None
-    finally:
-        client.close()
+                if bounded:
+                    async with asyncio.timeout(MODBUS_PROBE_TIMEOUT):
+                        data = await client.async_read_realtime()
+                else:
+                    data = await client.async_read_realtime()
+            except (SungrowModbusError, TimeoutError) as err:
+                _LOGGER.debug(
+                    "modbus identity read failed for %s:%s (encrypted=%s): %s",
+                    host,
+                    port,
+                    request_encryption,
+                    err,
+                )
+                continue
+            # Trust the transport the client settled on, not the one requested: an AES
+            # request to a dongle that answers the key request with a no-crypto sentinel
+            # runs as plain traffic and must be recorded that way.
+            encrypted = client.encrypted
+            break
+        finally:
+            client.close()
+    if data is None:
+        return (None, None), False
+
+    serial_raw = data.get("inverter_serial", {}).get("value")
+    serial = str(serial_raw).strip() if serial_raw else None
+    type_code_raw = data.get("device_type_code", {}).get("value")
+    model: str | None = None
+    if type_code_raw is not None:
+        try:
+            model = resolve_enum_value("device_type_code", int(type_code_raw))
+        except ValueError, TypeError:
+            model = None
+    return (model or None, serial or None), encrypted

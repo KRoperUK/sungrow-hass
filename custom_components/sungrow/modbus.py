@@ -21,6 +21,7 @@ from typing import Any
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ConnectionException, ModbusException
 
+from .modbus_crypto import SungrowEncryptedTcpClient
 from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
@@ -98,13 +99,21 @@ class SungrowModbusClient:
         unit: int = DEFAULT_UNIT,
         model: str = "sg_rs",
         model_code: str | None = None,
+        encrypted: bool = False,
     ) -> None:
-        """Initialize the client for a WiNet-S host (one inverter)."""
+        """Initialize the client for a WiNet-S host (one inverter).
+
+        ``encrypted`` selects the AES transport SG-D hardware needs (#574). The config
+        flow detects it once and stores it on the entry, so the value is always explicit
+        here and a plain dongle never sees a key handshake. Defaulting to plain keeps
+        every pre-#574 entry on exactly the transport it used before.
+        """
         self.host = host
         self.port = port
         self.unit = unit
         self.model = model
         self._configured_model = model_code or model
+        self._encrypted = encrypted
         self._client = self._new_tcp_client()
         # Serialise reads onto the single connection the WiNet-S expects.
         self._lock = asyncio.Lock()
@@ -118,7 +127,19 @@ class SungrowModbusClient:
             "last_error": None,
         }
 
+    @property
+    def encrypted(self) -> bool:
+        """Return True when this client was configured for the SG-D AES transport (#574).
+
+        This is the configured transport, not the negotiated one: a dongle that answers
+        the key request with a no-crypto sentinel falls back to plain frames, which
+        ``SungrowEncryptedTcpClient.encrypted`` reports.
+        """
+        return bool(self._encrypted)
+
     def _new_tcp_client(self) -> AsyncModbusTcpClient:
+        if self._encrypted:
+            return SungrowEncryptedTcpClient(self.host, encrypted=True, port=self.port, timeout=CONNECT_TIMEOUT)
         return AsyncModbusTcpClient(self.host, port=self.port, timeout=CONNECT_TIMEOUT)
 
     def _redact_endpoint(self, message: str) -> str:
@@ -149,6 +170,7 @@ class SungrowModbusClient:
         self.modbus_diagnostics["last_error"] = None
         await self._async_ensure_family()
         self.modbus_diagnostics["device_family"] = self.model
+        self.modbus_diagnostics["encrypted"] = self.encrypted
         points = REGISTER_MAPS.get(self.model)
         if not points:
             raise SungrowModbusError(f"No Modbus register map for model {self.model!r}")

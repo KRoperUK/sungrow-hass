@@ -38,6 +38,7 @@ from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, Sel
 from ..const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODEL,
@@ -54,7 +55,7 @@ from ._helpers import (
     MODBUS_PORT_VALIDATOR,
     WinetDongle,
     async_discover_winet_dongles,
-    async_read_modbus_identity,
+    async_probe_modbus,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -181,7 +182,8 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                 self._local_wizard_port = port
                 # Attempt identity read. Partial or total failure just means the manual
                 # form takes over with what we have.
-                model, serial = await async_read_modbus_identity(host, port)
+                (model, serial), encrypted = await async_probe_modbus(host, port)
+                self._local_wizard_encrypted = encrypted
                 if serial:
                     self._local_wizard_serial = serial
                 if model:
@@ -229,7 +231,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             # Final comms probe: re-read identity, confirm the serial still matches.
             # We accept a partial re-read (missing model on second read) but reject a
             # serial mismatch — that would be a different device on the same host.
-            reread_model, reread_serial = await async_read_modbus_identity(host, port)
+            (_, reread_serial), encrypted = await async_probe_modbus(host, port)
             if reread_serial is None:
                 return self.async_show_form(
                     step_id="local_confirm_identified",
@@ -257,6 +259,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                     CONF_MODEL: model,
                     CONF_MODBUS_HOST: host,
                     CONF_MODBUS_PORT: port,
+                    CONF_MODBUS_ENCRYPTED: encrypted,
                 },
                 options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
             )
@@ -301,6 +304,7 @@ class ModbusOnlyMixin(_SungrowFlowBase):
                         CONF_MODEL: model,
                         CONF_MODBUS_HOST: host,
                         CONF_MODBUS_PORT: port,
+                        CONF_MODBUS_ENCRYPTED: self._local_wizard_encrypted,
                     },
                     options={CONF_SCAN_INTERVAL: DEFAULT_MODBUS_SCAN_INTERVAL},
                 )
@@ -374,9 +378,20 @@ class ModbusOnlyMixin(_SungrowFlowBase):
             from ..helpers import async_test_modbus_host
 
             if host and await async_test_modbus_host(host, port):
+                # The endpoint may now be different hardware — the dongle itself, the
+                # inverter's LAN port, or a proxy — so the transport has to be re-read
+                # (#574). Without this, re-pointing an entry at an SG-D dongle would keep
+                # speaking plain Modbus and fail every poll.
+                (probed_model, probed_serial), probed = await async_probe_modbus(host, port)
+                data = {**entry.data, **_pinned_host_data(host, port)}
+                # A probe that produced no identity did not reach the inverter, so it says
+                # nothing about the transport: keep what the entry already had rather than
+                # downgrading a working encrypted entry on a transient miss.
+                if probed_model or probed_serial or not entry.data.get(CONF_MODBUS_ENCRYPTED):
+                    data[CONF_MODBUS_ENCRYPTED] = probed
                 return self.async_update_reload_and_abort(
                     entry,
-                    data={**entry.data, **_pinned_host_data(host, port)},
+                    data=data,
                     options={k: v for k, v in entry.options.items() if k != CONF_MODBUS_PORT},
                     reason="reconfigure_successful",
                 )

@@ -17,11 +17,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sungrow._config_flow._helpers import WinetDongle, async_read_modbus_identity
+from custom_components.sungrow._config_flow._helpers import (
+    WinetDongle,
+    async_probe_modbus,
+    async_read_modbus_identity,
+)
 from custom_components.sungrow.config_flow import SungrowConfigFlow
 from custom_components.sungrow.const import (
     CONF_DISCOVERY_MANAGED_HOST,
     CONF_MODBUS_DEBUG_DAILY_YIELD,
+    CONF_MODBUS_ENCRYPTED,
     CONF_MODBUS_HOST,
     CONF_MODBUS_PORT,
     CONF_MODEL,
@@ -35,12 +40,16 @@ from custom_components.sungrow.const import (
 from custom_components.sungrow.coordinator import SungrowPlantCoordinator
 from custom_components.sungrow.helpers import async_test_modbus_host, resolve_modbus_port
 from custom_components.sungrow.migration import _async_split_legacy_hybrid
+from custom_components.sungrow.modbus import SungrowModbusError
 
 from .test_config_flow import _winet_discovery
 
 _PROBE = "custom_components.sungrow.helpers.async_test_modbus_host"
-_IDENTIFY = "custom_components.sungrow._config_flow.modbus_only.async_read_modbus_identity"
+_IDENTIFY = "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus"
+# The identity tuple the probe returns, wrapped with the detected transport flag.
+_IDENTIFY_PLAIN = (("SG3.6RS", "SN485"), False)
 _DISCOVER = "custom_components.sungrow._config_flow.modbus_only.async_discover_winet_dongles"
+_MODBUS_PROBE = "custom_components.sungrow._config_flow.modbus_only.async_probe_modbus"
 
 
 @pytest.fixture(autouse=True)
@@ -119,10 +128,73 @@ async def test_identity_read_uses_given_port():
     )
     with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=client) as cls:
         model, serial = await async_read_modbus_identity("10.0.0.2", 5020)
-    cls.assert_called_once_with("10.0.0.2", port=5020)
+    cls.assert_called_once_with("10.0.0.2", port=5020, encrypted=False)
     assert serial == "SN485"
     assert model is None
     client.close.assert_called_once()
+
+
+async def test_probe_reports_encrypted_transport():
+    """A dongle that needs AES is identified on the encrypted attempt (#574)."""
+    plain = MagicMock()
+    plain.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("no answer"))
+    plain.encrypted = False
+    encrypted = MagicMock()
+    encrypted.async_read_realtime = AsyncMock(
+        return_value={"inverter_serial": {"value": "SN574"}, "device_type_code": {"value": 9732}}
+    )
+    encrypted.encrypted = True
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", side_effect=[plain, encrypted]):
+        (model, serial), detected = await async_probe_modbus("10.0.0.9", 502)
+    assert (model, serial) == ("SG3.6RS", "SN574")
+    assert detected is True
+
+
+async def test_probe_reports_plain_transport():
+    """A plain dongle is identified on the first attempt and never probes AES."""
+    plain = MagicMock()
+    plain.async_read_realtime = AsyncMock(
+        return_value={"inverter_serial": {"value": "SN485"}, "device_type_code": {"value": None}}
+    )
+    plain.encrypted = False
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=plain) as cls:
+        (_, serial), detected = await async_probe_modbus("10.0.0.9", 502)
+    cls.assert_called_once()
+    assert serial == "SN485"
+    assert detected is False
+
+
+async def test_probe_slow_plain_dongle_still_identified():
+    """A plain dongle slower than the probe deadline is retried unbounded, not lost."""
+    slow = MagicMock()
+    slow.async_read_realtime = AsyncMock(
+        return_value={"inverter_serial": {"value": "SN-SLOW"}, "device_type_code": {"value": None}}
+    )
+    slow.encrypted = False
+    failing = MagicMock()
+    failing.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("no answer"))
+    failing.encrypted = False
+    deadline_exceeded = MagicMock()
+    deadline_exceeded.async_read_realtime = AsyncMock(side_effect=TimeoutError())
+    deadline_exceeded.encrypted = False
+    with patch(
+        "custom_components.sungrow.modbus.SungrowModbusClient",
+        side_effect=[deadline_exceeded, failing, slow],
+    ):
+        (_, serial), detected = await async_probe_modbus("10.0.0.9", 502)
+    assert serial == "SN-SLOW"
+    assert detected is False
+
+
+async def test_probe_returns_none_when_every_transport_fails():
+    """Every attempt failing keeps the pre-#574 contract: no identity, no encryption."""
+    failing = MagicMock()
+    failing.async_read_realtime = AsyncMock(side_effect=SungrowModbusError("no answer"))
+    failing.encrypted = False
+    with patch("custom_components.sungrow.modbus.SungrowModbusClient", return_value=failing):
+        identity, detected = await async_probe_modbus("10.0.0.9", 502)
+    assert identity == (None, None)
+    assert detected is False
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +240,7 @@ async def test_manual_ip_custom_port_reaches_probe_identify_and_entry(hass: Home
 
     with (
         patch(_PROBE, return_value=True) as probe,
-        patch(_IDENTIFY, return_value=("SG3.6RS", "SN485")) as identify,
+        patch(_IDENTIFY, return_value=_IDENTIFY_PLAIN) as identify,
     ):
         confirm = await hass.config_entries.flow.async_configure(
             flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.20", CONF_MODBUS_PORT: 5020}
@@ -180,7 +252,7 @@ async def test_manual_ip_custom_port_reaches_probe_identify_and_entry(hass: Home
     assert confirm["description_placeholders"]["host"] == "10.0.0.20:5020"
 
     with (
-        patch(_IDENTIFY, return_value=("SG3.6RS", "SN485")) as reread,
+        patch(_IDENTIFY, return_value=_IDENTIFY_PLAIN) as reread,
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
         created = await hass.config_entries.flow.async_configure(flow_id, user_input={})
@@ -246,7 +318,7 @@ async def test_discovered_dongle_uses_502_even_after_manual_port(hass: HomeAssis
     assert confirm["description_placeholders"]["host"] == "192.168.1.42"
 
     with (
-        patch(_IDENTIFY, return_value=("SG3.6RS", "SN485")) as reread,
+        patch(_IDENTIFY, return_value=_IDENTIFY_PLAIN) as reread,
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
         created = await hass.config_entries.flow.async_configure(flow_id, user_input={})
@@ -258,7 +330,7 @@ async def test_discovered_dongle_uses_502_even_after_manual_port(hass: HomeAssis
 async def test_fallback_form_carries_and_stores_port(hass: HomeAssistant):
     """When identify misses, the manual-details form is pre-filled with the port and stores it."""
     flow_id = await _manual_ip_flow(hass)
-    with patch(_PROBE, return_value=True), patch(_IDENTIFY, return_value=(None, None)):
+    with patch(_PROBE, return_value=True), patch(_IDENTIFY, return_value=((None, None), False)):
         setup = await hass.config_entries.flow.async_configure(
             flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.20", CONF_MODBUS_PORT: 5020}
         )
@@ -288,12 +360,12 @@ async def test_readding_same_inverter_via_proxy_updates_existing_entry(hass: Hom
     """unique_id stays the serial: the same inverter via a proxy updates host+port, no duplicate."""
     entry = _local_entry(hass, data={CONF_MODBUS_PORT: 502, CONF_DISCOVERY_MANAGED_HOST: True})
     flow_id = await _manual_ip_flow(hass)
-    with patch(_PROBE, return_value=True), patch(_IDENTIFY, return_value=("SG3.6RS", "SN485")):
+    with patch(_PROBE, return_value=True), patch(_IDENTIFY, return_value=_IDENTIFY_PLAIN):
         await hass.config_entries.flow.async_configure(
             flow_id, user_input={CONF_MODBUS_HOST: "10.0.0.20", CONF_MODBUS_PORT: 5020}
         )
     with (
-        patch(_IDENTIFY, return_value=("SG3.6RS", "SN485")),
+        patch(_IDENTIFY, return_value=_IDENTIFY_PLAIN),
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
         result = await hass.config_entries.flow.async_configure(flow_id, user_input={})
@@ -380,6 +452,7 @@ async def test_reconfigure_changes_port_and_clears_option_override(hass: HomeAss
 
     with (
         patch(_PROBE, return_value=True) as probe,
+        patch(_MODBUS_PROBE, return_value=((None, None), True)),
         patch("custom_components.sungrow.async_setup_entry", return_value=True),
     ):
         done = await hass.config_entries.flow.async_configure(
@@ -388,6 +461,8 @@ async def test_reconfigure_changes_port_and_clears_option_override(hass: HomeAss
         await hass.async_block_till_done()
 
     probe.assert_awaited_once_with("10.0.0.20", 5020)
+    # Reconfigure re-reads the transport, so re-pointing at an SG-D dongle is honoured.
+    assert entry.data[CONF_MODBUS_ENCRYPTED] is True
     assert done["reason"] == "reconfigure_successful"
     assert entry.data[CONF_MODBUS_HOST] == "10.0.0.20"
     assert entry.data[CONF_MODBUS_PORT] == 5020
@@ -491,7 +566,13 @@ async def test_zeroconf_entry_stores_default_port(hass: HomeAssistant):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=_winet_discovery()
     )
-    with patch("custom_components.sungrow.async_setup_entry", return_value=True):
+    with (
+        patch(
+            "custom_components.sungrow._config_flow.zeroconf.async_probe_modbus",
+            return_value=((None, None), False),
+        ),
+        patch("custom_components.sungrow.async_setup_entry", return_value=True),
+    ):
         created = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
         await hass.async_block_till_done()
     assert created["data"][CONF_MODBUS_PORT] == 502
