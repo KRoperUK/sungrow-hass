@@ -34,6 +34,16 @@
 * match the typed token-refresh error instead of a bare KeyError ([#91](https://github.com/KRoperUK/sungrow-hass/issues/91)) ([8ea3c48](https://github.com/KRoperUK/sungrow-hass/commit/8ea3c4813321a56c58a69c47cc79814db66e908f)), closes [#82](https://github.com/KRoperUK/sungrow-hass/issues/82) [KRoperUK/pysolarcloud#1](https://github.com/KRoperUK/pysolarcloud/issues/1)
 * require pysolarcloud 0.6.0 and drop KeyError refresh fallback ([#92](https://github.com/KRoperUK/sungrow-hass/issues/92)) ([ca83f4b](https://github.com/KRoperUK/sungrow-hass/commit/ca83f4b00ee1d4e7cff792194a1104857a0b5ffc))
 
+## [6.8.1](https://github.com/KRoperUK/sungrow-hass/compare/v6.8.0...v6.8.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **modbus:** renegotiate the SG-D session key on reconnect ([4cde94b](https://github.com/KRoperUK/sungrow-hass/commit/4cde94b841476da769351a3427d7ac3114ec41cb))
+* **modbus:** renegotiate the SG-D session key on reconnect ([bc7d003](https://github.com/KRoperUK/sungrow-hass/commit/bc7d003f1c633927b7dd241b5c3309e737329a59)), closes [#574](https://github.com/KRoperUK/sungrow-hass/issues/574)
+* **modbus:** split reads wider than the encrypted reply ceiling ([746fe33](https://github.com/KRoperUK/sungrow-hass/commit/746fe33c896e5e0fbb5be6565c6a0d969e1e2ce4))
+* **modbus:** split reads wider than the encrypted reply ceiling ([83c7a8b](https://github.com/KRoperUK/sungrow-hass/commit/83c7a8bd4dbeb1c2d9e0e0c8eed9542f777f23f5)), closes [#574](https://github.com/KRoperUK/sungrow-hass/issues/574)
+
 ## [6.8.0](https://github.com/KRoperUK/sungrow-hass/compare/v6.7.0...v6.8.0) (2026-11-23)
 
 
