@@ -21,7 +21,7 @@ from typing import Any
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ConnectionException, ModbusException
 
-from .modbus_crypto import SungrowEncryptedTcpClient
+from .modbus_crypto import MAX_ENCRYPTED_READ_COUNT, SungrowEncryptedTcpClient
 from .modbus_registers import (
     DAILY_YIELD_DIAG_COUNT,
     DAILY_YIELD_DIAG_START,
@@ -323,11 +323,16 @@ class SungrowModbusClient:
         """
         async with self._lock:
             device_id = self.unit if unit is None else unit
-            return await self._transact_read(
+            return await self._read_chunked(
                 "input",
                 address,
                 count,
-                lambda: self._client.read_input_registers(address, count=count, device_id=device_id),
+                lambda a, c: self._transact_read(
+                    "input",
+                    a,
+                    c,
+                    lambda: self._client.read_input_registers(a, count=c, device_id=device_id),
+                ),
             )
 
     async def async_read_holding(self, address: int, count: int = 1, *, unit: int | None = None) -> list[int]:
@@ -338,12 +343,46 @@ class SungrowModbusClient:
         """
         async with self._lock:
             device_id = self.unit if unit is None else unit
-            return await self._transact_read(
+            return await self._read_chunked(
                 "holding",
                 address,
                 count,
-                lambda: self._client.read_holding_registers(address, count=count, device_id=device_id),
+                lambda a, c: self._transact_read(
+                    "holding",
+                    a,
+                    c,
+                    lambda: self._client.read_holding_registers(a, count=c, device_id=device_id),
+                ),
             )
+
+    async def _read_chunked(
+        self,
+        kind: str,
+        address: int,
+        count: int,
+        read: Callable[[int, int], Awaitable[list[int]]],
+    ) -> list[int]:
+        """Read ``count`` registers, splitting at the encrypted transport's reply ceiling.
+
+        The SG-D envelope encodes the reply length in one byte, so a read of 124+
+        registers has no representable reply (its frame would exceed 255 bytes). Plain
+        Modbus allows 125 per read, and the diagnostics service exposes that range, so
+        a wide probe on an encrypted dongle would otherwise time out with an unhelpful
+        malformed-envelope warning. Splitting keeps the returned block contiguous and
+        only affects the encrypted transport; a plain read is issued in one request.
+        """
+        limit = MAX_ENCRYPTED_READ_COUNT if self._encrypted else count
+        if count <= limit:
+            return await read(address, count)
+        words: list[int] = []
+        remaining = count
+        start = address
+        while remaining > 0:
+            span = min(limit, remaining)
+            words.extend(await read(start, span))
+            start += span
+            remaining -= span
+        return words
 
     async def async_write_holding(self, address: int, value: int) -> None:
         """Write a single holding register (FC6).
