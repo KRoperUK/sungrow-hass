@@ -44,6 +44,14 @@ fails, run Reconfigure (or re-add the entry) so the encrypted dongle is recognis
     `ha-modbusproxy`, because the proxy would have to decrypt and re-encrypt. Point
     the entry at the dongle (or the inverter's own LAN port) directly.
 
+!!! note "Wide register reads are split"
+    The AES envelope stores a reply's length in a single byte, so an encrypted reply
+    cannot exceed 255 bytes. A read reply is `9 + 2 × registers`, which caps a single
+    encrypted read at **123 registers** (plain Modbus allows 125). Reads wider than that
+    — including the `sungrow.read_registers` diagnostics service, which accepts up to
+    125 — are split into consecutive requests automatically, and you get the whole
+    contiguous block back. The split is invisible apart from the extra round-trip.
+
 ## What you need
 
 - A **WiNet-S** communication dongle **or** the inverter's internal LAN port on the
