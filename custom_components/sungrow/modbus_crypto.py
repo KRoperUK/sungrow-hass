@@ -120,7 +120,6 @@ class SungrowEncryptedTcpClient(AsyncModbusTcpClient):
         self._raw_receive = self.ctx.callback_data
         self._requested_encryption = encrypted
         self._cipher: Cipher[Any] | None = None
-        self._keyed = False
         self._transaction_id = b"\x00\x00"
         self._rx_fifo = b""
         self._handshake_buf = b""
@@ -136,12 +135,25 @@ class SungrowEncryptedTcpClient(AsyncModbusTcpClient):
         return self._cipher is not None
 
     async def connect(self) -> bool:
-        """Connect, negotiating the session key first when encryption was requested."""
+        """Connect, negotiating the session key first when encryption was requested.
+
+        A key is negotiated on every *new* socket rather than once per client object.
+        The dongle issues a per-connection key, and WiNet-S drops idle sockets, so
+        reusing the key from a dead session would encrypt every frame with a stale
+        cipher and the dongle would reject it. Renegotiating on reconnect is harmless
+        if a key turns out to be durable, and required if it is not.
+        """
+        was_active = self.connected
         if not await super().connect():
             return False
-        if not self._requested_encryption or self._keyed:
+        if not self._requested_encryption:
             return True
-        self._keyed = True
+        if self._cipher is not None and was_active:
+            # Same live socket: the existing key is still in force.
+            return True
+        # No key yet, or the previous socket died and its key with it.
+        self._cipher = None
+        self._reset_buffers()
         await self._async_negotiate()
         if self._cipher is None:
             return True
