@@ -52,8 +52,20 @@ BATTERY_MODE_SELF_CONSUMPTION = "Self-consumption"
 BATTERY_MODE_FORCE_CHARGE = "Force charge"
 BATTERY_MODE_FORCE_DISCHARGE = "Force discharge"
 BATTERY_MODE_STOP = "Stop"
+# Charge/discharge are transient: they hold the battery in a forced direction and
+# auto-revert to Self-consumption after the configured duration (#157/#255).
 BATTERY_MODE_FORCED = frozenset({BATTERY_MODE_FORCE_CHARGE, BATTERY_MODE_FORCE_DISCHARGE})
-BATTERY_MODE_SAFE = frozenset({BATTERY_MODE_SELF_CONSUMPTION, BATTERY_MODE_STOP})
+# Stop is a *latched* forced state, not a return to normal operation
+# (KRoperUK/pysolarcloud#140). The vendor app models its STOP command
+# (charge_discharge_command 204) inside ``CompulsoryModeDTO`` — i.e. the portal's
+# "Forced mode → Stop" tile is Compulsory mode carrying 204, exactly like Force
+# charge/discharge carry 170/187. So Stop, like the forced directions, needs Energy
+# Management Mode out of Self-consumption plus the EMS heartbeat; unlike them it does
+# not auto-revert (holding the battery stopped is the point of the mode).
+BATTERY_MODE_HELD = frozenset({BATTERY_MODE_FORCE_CHARGE, BATTERY_MODE_FORCE_DISCHARGE, BATTERY_MODE_STOP})
+# Only Self-consumption returns the plant to normal operation, so it is the sole "safe"
+# option for the EMS read-back comparison (#254/#286).
+BATTERY_MODE_SAFE = frozenset({BATTERY_MODE_SELF_CONSUMPTION})
 # Service / automation mode keys (snake_case) → display options.
 BATTERY_MODE_SERVICE_KEYS: dict[str, str] = {
     "self_consumption": BATTERY_MODE_SELF_CONSUMPTION,
@@ -279,12 +291,14 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # Only the battery-mode select owns the heartbeat, so this restarts it
         # exactly once per plant; async_start_heartbeat is idempotent (it stops
         # any existing loop first), so a stale loop is never double-started (#112).
-        if self.param == BATTERY_MODE_PARAM and restored in BATTERY_MODE_FORCED:
+        if self.param == BATTERY_MODE_PARAM and restored in BATTERY_MODE_HELD:
             entry = self.coordinator.config_entry
             assert entry is not None
             # Restore the auto-revert deadline first (#157): if the forced command
             # already timed out while HA was down, revert to Self-consumption instead
             # of resuming dispatch; otherwise resume the heartbeat and re-arm.
+            # A restored Stop has no deadline (it never auto-reverts, see the issue), so only
+            # heartbeat is resumed for it.
             deadline = self._restore_revert_deadline(last.attributes.get("revert_at"))
             if deadline is not None and deadline <= time.time():
                 await self._do_revert()
@@ -365,7 +379,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         if still_self is None:
             return  # Unknown — don't change anything.
         current = self._attr_current_option
-        if still_self and current in BATTERY_MODE_FORCED:
+        if still_self and current in BATTERY_MODE_HELD:
             # The inverter is in Self-consumption but we think it's forced — the portal
             # or a timeout reverted it externally. Sync the entity state.
             _LOGGER.info(
@@ -381,10 +395,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
             self._clear_not_actuated_issue()
             self.async_write_ha_state()
         elif not still_self and current in BATTERY_MODE_SAFE:
-            # The inverter is in a forced/compulsory mode but we think it's safe — an
-            # external tool forced it. We can't know which forced option, so just note
-            # it in the log. The entity stays at its current option (Self-consumption/Stop)
-            # since we don't know if it's charge or discharge.
+            # The inverter is in a forced/compulsory mode but we think it's Self-consumption
+            # — an external tool forced it. We can't know which forced option, so just note
+            # it in the log. The entity stays at its current option since we don't know if
+            # it's charge, discharge or stop.
             _LOGGER.debug(
                 "EMS read-back for %s shows Forced mode but entity shows %s; "
                 "an external tool may have changed the mode",
@@ -408,8 +422,10 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         Battery mode (#255) writes charge_discharge_command (10004) together with
         Energy Management Mode (10003). Without leaving Self-consumption, the inverter
         accepts 10004/10005 writes but continues normal self-consumption operation
-        (#231). Compulsory mode matches the portal "Forced mode" tile; safe modes
-        restore Self-consumption so the plant returns to default behaviour.
+        (#231). Compulsory mode matches the portal "Forced mode" tile, and that covers
+        charge, discharge **and** stop — the vendor app carries STOP inside its
+        ``CompulsoryModeDTO`` (KRoperUK/pysolarcloud#140). Only Self-consumption
+        restores mode 0 so the plant returns to default behaviour.
         """
         if self.param == BATTERY_MODE_PARAM:
             if option == BATTERY_MODE_FORCE_CHARGE:
@@ -422,7 +438,19 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                     _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["discharge"],
                     _EMS_MODE_PARAM: _EMS_MODE_COMPULSORY,
                 }
-            # Self-consumption and Stop both return the plant to the safe default.
+            if option == BATTERY_MODE_STOP:
+                # "Forced mode → Stop" in the portal (KRoperUK/pysolarcloud#140): the
+                # vendor app carries the STOP command inside Compulsory mode, so the
+                # mode has to leave
+                # Self-consumption or the device accepts 204 and keeps running normally.
+                # Writing only the command is what made Stop indistinguishable from
+                # Self-consumption.
+                return {
+                    _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["stop"],
+                    _EMS_MODE_PARAM: _EMS_MODE_COMPULSORY,
+                }
+            # Self-consumption returns the plant to normal operation: the stop command
+            # clears any previously latched forced direction while the mode reverts.
             return {
                 _CDC_PARAM: Control.CHARGE_DISCHARGE_COMMANDS["stop"],
                 _EMS_MODE_PARAM: _EMS_MODE_SELF_CONSUMPTION,
@@ -455,10 +483,13 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         # Remember the selected option so the UI reflects it and it survives restarts.
         self._attr_current_option = option
 
-        # Keep the inverter in dispatch mode while force-charging/discharging.
+        # Keep the inverter in dispatch mode while a forced state is held. Stop is
+        # included: it is Compulsory mode carrying the STOP command, so dropping the
+        # heartbeat would let the inverter time out and resume Self-consumption
+        # (KRoperUK/pysolarcloud#140).
         entry = self.coordinator.config_entry
         assert entry is not None
-        if self.param == BATTERY_MODE_PARAM and option in BATTERY_MODE_FORCED:
+        if self.param == BATTERY_MODE_PARAM and option in BATTERY_MODE_HELD:
             await async_start_heartbeat(
                 self.hass,
                 entry,
@@ -466,17 +497,22 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
                 self.device_uuid,
                 interval=60,
             )
-            # Arm the auto-revert so this forced command can't silently persist (#157/#255).
-            if duration_minutes is not None and duration_minutes > 0:
-                self._arm_revert(deadline=time.time() + float(duration_minutes) * 60)
-            elif duration_minutes is not None and duration_minutes <= 0:
-                # Explicit 0 from the service: no auto-revert for this command.
-                self._cancel_revert()
-            else:
-                self._arm_revert()
             # Verify the inverter actually entered Forced mode shortly after (#254): the
             # write can be accepted while the plant stays in Self-consumption (#231).
             self._schedule_actuation_check()
+            # Only the directional commands auto-revert. Stop is a latched mode the user
+            # selects deliberately, so reverting it back to Self-consumption on a timer
+            # would undo the command (KRoperUK/pysolarcloud#140).
+            if option in BATTERY_MODE_FORCED:
+                if duration_minutes is not None and duration_minutes > 0:
+                    self._arm_revert(deadline=time.time() + float(duration_minutes) * 60)
+                elif duration_minutes is not None and duration_minutes <= 0:
+                    # Explicit 0 from the service: no auto-revert for this command.
+                    self._cancel_revert()
+                else:
+                    self._arm_revert()
+            else:
+                self._cancel_revert()
         elif self.param == BATTERY_MODE_PARAM and option in BATTERY_MODE_SAFE:
             await async_stop_heartbeat(self.hass, entry, self.coordinator.plant_id)
             self._cancel_revert()
@@ -638,7 +674,7 @@ class SungrowDispatchSelect(CoordinatorEntity[SungrowPlantCoordinator], RestoreE
         and default to no action on an unknown/errored read-back (never a false alarm on a
         battery-control path). Only a positive Self-consumption read-back raises the Repair.
         """
-        if self._removed or self._attr_current_option not in BATTERY_MODE_FORCED:
+        if self._removed or self._attr_current_option not in BATTERY_MODE_HELD:
             return
         still_self = await self._read_still_self_consumption()
         if still_self is not True:
