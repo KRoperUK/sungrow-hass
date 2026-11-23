@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.sungrow.modbus import SungrowModbusClient, SungrowModbusError
+from custom_components.sungrow.modbus_crypto import MAX_ENCRYPTED_READ_COUNT
 from custom_components.sungrow.modbus_registers import (
     DAILY_YIELD_DIAG_CANDIDATE_ADDRESSES,
     DAILY_YIELD_DIAG_COUNT,
@@ -1554,3 +1555,70 @@ async def test_async_read_input_serialises_against_a_held_lock():
         client._lock.release()  # noqa: SLF001
         words = await task
     assert words == [1]
+
+
+# ---------------------------------------------------------------------------
+# Encrypted reply ceiling (#579 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _counting_client(encrypted: bool):
+    """Stub client that records each (address, count) read and returns that many words."""
+    inner = MagicMock()
+    inner.connected = True
+    inner.connect = AsyncMock(return_value=True)
+
+    def _result(address, *, count, device_id):
+        result = MagicMock()
+        result.isError.return_value = False
+        result.registers = list(range(count))
+        return result
+
+    reads: list[tuple[int, int]] = []
+
+    def _read(address, *, count, device_id):
+        reads.append((address, count))
+        return _result(address, count=count, device_id=device_id)
+
+    inner.read_input_registers = AsyncMock(side_effect=_read)
+    inner.read_holding_registers = AsyncMock(side_effect=_read)
+    inner.close = MagicMock()
+    cls = MagicMock(return_value=inner)
+    return cls, reads
+
+
+@pytest.mark.parametrize("count", [123, 124, 125])
+async def test_encrypted_read_splits_at_the_reply_ceiling(count):
+    """A wide read on the AES transport is split so the reply fits its 1-byte length.
+
+    The SG-D envelope encodes the reply length in one byte, so a read of 124 or more
+    registers has no representable reply (frame would exceed 255 bytes). Plain Modbus
+    allows 125, so the diagnostics probe exposes a range the encrypted transport cannot
+    answer in one request.
+    """
+    cls, reads = _counting_client(encrypted=True)
+    with patch("custom_components.sungrow.modbus.SungrowEncryptedTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1, encrypted=True)
+        _skip_family_detect(client)
+        words = await client.async_read_input(4999, count)
+
+    assert len(words) == count, "the caller still gets a contiguous block"
+    assert all(span <= MAX_ENCRYPTED_READ_COUNT for _, span in reads)
+    # Addresses advance contiguously across the split.
+    expected_start = 4999
+    for start, span in reads:
+        assert start == expected_start
+        expected_start += span
+    assert sum(span for _, span in reads) == count
+
+
+async def test_plain_read_of_125_is_one_request():
+    """A plain dongle keeps the single-request path: no splitting, no extra latency."""
+    cls, reads = _counting_client(encrypted=False)
+    with patch("custom_components.sungrow.modbus.AsyncModbusTcpClient", cls):
+        client = SungrowModbusClient("10.0.0.1", unit=1, encrypted=False)
+        _skip_family_detect(client)
+        words = await client.async_read_input(4999, 125)
+
+    assert len(words) == 125
+    assert reads == [(4999, 125)]

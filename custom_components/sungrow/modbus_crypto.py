@@ -56,6 +56,12 @@ KEY_REPLY_LEN = 25
 HEADER = b"\x68\x68"
 HANDSHAKE_TIMEOUT = 5.0
 
+# The envelope stores the reply frame length in a single byte, so an encrypted reply
+# cannot exceed 255 bytes. A read reply is MBAP(7) + FC(1) + byte count(1) + 2 * registers,
+# i.e. ``9 + 2 * count``, which caps an encrypted read at 123 registers (255 bytes).
+# Plain Modbus allows 125, so wider reads must be split rather than sent as one block.
+MAX_ENCRYPTED_READ_COUNT = (255 - 9) // 2
+
 
 def is_encrypted_key(public_key: bytes) -> bool:
     """Return True when a key reply means the dongle encrypts its Modbus traffic."""
