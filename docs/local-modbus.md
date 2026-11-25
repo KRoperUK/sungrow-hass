@@ -298,6 +298,39 @@ These use the same number/select entities as cloud dispatch. Battery EMS
 string inverters — use a **cloud** entry for hybrid/battery control
 ([#220](https://github.com/KRoperUK/sungrow-hass/issues/220)).
 
+## EV wallbox (AC22E-01) — no verified map yet
+
+The **AC22E-01** (22 kW, configurable 7.4 / 11 / 22 kW) is a different wallbox
+from the AC011E (11 kW, [#335](https://github.com/KRoperUK/sungrow-hass/issues/335))
+and is tracked separately in
+[#578](https://github.com/KRoperUK/sungrow-hass/issues/578). There is **no
+verified Modbus register map** for it yet, so the integration exposes no wallbox
+entities — reusing the AC011E map unverified would risk a control that silently
+does nothing.
+
+One reporter finding already rules out the original assumption behind that issue
+(reporter-observed, single setup): the AC22E-01's own Ethernet IP answers ping
+but **refuses TCP/502**, with no Modbus TCP toggle in the Sungrow app. The unit
+was RS485-linked to an SH10RT-20 (which *does* answer on 502 — reporter read
+register 5000 as 3603 / `0x0E13`, the code this repo already maps to SH10RT-20).
+The working hypothesis — **unverified** — is that wallbox state may surface
+through additional registers on the inverter rather than on a wallbox endpoint.
+
+To turn that hypothesis into a map, capture **read-only** snapshots with the
+existing `sungrow.read_registers` diagnostics service against the **local
+inverter entry** (Developer Tools → Actions), one snapshot per wallbox state
+(e.g. idle → car connected → charging). Keep each read to ≤ 125 registers
+(≤ 123 on encrypted SG-D dongles; wider reads are split automatically), note
+the `register_type`, `start`, `count` and `unit` for every call, and diff the
+returned `registers` lists across states. Sweep both `input` and `holding`
+blocks; `unit` defaults to the entry's poll unit and only needs overriding if
+you are deliberately probing a second slave ID. Paste the raw
+address → value pairs, plus the wallbox firmware version and how the RS485 /
+Ethernet wiring is set up, into
+[#578](https://github.com/KRoperUK/sungrow-hass/issues/578). No register is
+added to a map — and no write path ships — until it is verified against such a
+readout or an equivalent independent source.
+
 ## Current limitations
 
 Local holding control is family-gated, and which params are writable differs by family:
