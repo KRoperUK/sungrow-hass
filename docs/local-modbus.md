@@ -316,20 +316,33 @@ register 5000 as 3603 / `0x0E13`, the code this repo already maps to SH10RT-20).
 The working hypothesis — **unverified** — is that wallbox state may surface
 through additional registers on the inverter rather than on a wallbox endpoint.
 
-To turn that hypothesis into a map, capture **read-only** snapshots with the
-existing `sungrow.read_registers` diagnostics service against the **local
-inverter entry** (Developer Tools → Actions), one snapshot per wallbox state
-(e.g. idle → car connected → charging). Keep each read to ≤ 125 registers
-(≤ 123 on encrypted SG-D dongles; wider reads are split automatically), note
-the `register_type`, `start`, `count` and `unit` for every call, and diff the
-returned `registers` lists across states. Sweep both `input` and `holding`
-blocks; `unit` defaults to the entry's poll unit and only needs overriding if
-you are deliberately probing a second slave ID. Paste the raw
-address → value pairs, plus the wallbox firmware version and how the RS485 /
-Ethernet wiring is set up, into
-[#578](https://github.com/KRoperUK/sungrow-hass/issues/578). No register is
-added to a map — and no write path ships — until it is verified against such a
-readout or an equivalent independent source.
+To turn that hypothesis into a map, capture **read-only** snapshots, one per
+wallbox state (e.g. idle → car connected → charging), and diff them. The
+easiest path is the snapshot script (from the repository root —
+`pymodbus` is already a dev dependency):
+
+```bash
+python scripts/wallbox_register_snapshot.py --host <inverter-ip> \
+    --family sh_rt --state idle -o snapshot_idle.json
+# ... change the wallbox state, then rerun with --state charging ...
+python scripts/wallbox_register_snapshot.py --host <inverter-ip> \
+    --family sh_rt --state charging -o snapshot_charging.json
+```
+
+It sweeps the family's input and holding spans in ≤ 100-register reads (plus
+any `--range TYPE:START:COUNT` windows and `--units` slave IDs you add), never
+writes, and records no host address — the JSON is safe to paste into
+[#578](https://github.com/KRoperUK/sungrow-hass/issues/578) as-is. Without a
+checkout, the same reads are available inside Home Assistant via the
+`sungrow.read_registers` diagnostics service against the **local inverter
+entry** (Developer Tools → Actions): note the `register_type`, `start`,
+`count` and `unit` for every call (≤ 125 registers each, ≤ 123 on encrypted
+SG-D dongles where wider reads are split automatically).
+
+Alongside the snapshots, note the wallbox firmware version and how the RS485 /
+Ethernet wiring is set up. No register is added to a map — and no write path
+ships — until it is verified against such a readout or an equivalent
+independent source.
 
 ## Current limitations
 
