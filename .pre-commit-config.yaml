@@ -48,6 +48,16 @@ repos:
         files: ^(custom_components/sungrow/model_specs\.py|docs/SUPPORTED_MODELS\.md)$
         pass_filenames: false
 
+      # The wallbox sweep spans are generated from the register maps, so regenerate
+      # them whenever the maps change. tests/test_wallbox_snapshot.py fails CI if
+      # the committed JSON is still stale (#578).
+      - id: generate-wallbox-ranges
+        name: generate scripts/wallbox_snapshot_ranges.json
+        entry: .venv/bin/python scripts/generate_wallbox_snapshot_ranges.py
+        language: system
+        files: ^(custom_components/sungrow/modbus_registers\.py|scripts/wallbox_snapshot_ranges\.json)$
+        pass_filenames: false
+
       # Strict mypy on the whole integration + tests. Runs once per commit
       # regardless of which files staged — mypy's cross-file inference means
       # a change in one module can surface an error in another.

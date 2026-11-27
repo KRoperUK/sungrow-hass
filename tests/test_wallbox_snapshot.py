@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = REPO_ROOT / "scripts"
 SPEC = importlib.util.spec_from_file_location("wallbox_register_snapshot", SCRIPTS / "wallbox_register_snapshot.py")
 assert SPEC is not None and SPEC.loader is not None
 snapshot = importlib.util.module_from_spec(SPEC)
@@ -133,3 +135,55 @@ def test_main_rejects_bad_units(monkeypatch, units):
     _patch_client(monkeypatch)
     rc = snapshot.main(["--host", "h", "--units", units, "--state", "idle"])
     assert rc == 2
+
+
+def test_script_loads_without_integration_package():
+    """The script must run with only pymodbus — no Home Assistant import.
+
+    Regression test for the PR #583 report: loading ``modbus_registers.py``
+    through ``custom_components.sungrow`` executes the integration's
+    ``__init__`` (Home Assistant imports, 3.14-only syntax), which broke the
+    script on a 3.13 reporter machine before any Modbus traffic.
+    """
+    code = (
+        "import sys; sys.path.insert(0, 'scripts'); "
+        "import wallbox_register_snapshot as w; "
+        "assert 'custom_components' not in sys.modules, sorted(sys.modules); "
+        "assert w.build_spans('sh_rt', 100, []); "
+        "print('standalone ok')"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "standalone ok" in proc.stdout
+
+
+def test_snapshot_ranges_are_up_to_date(tmp_path):
+    """The committed ranges JSON must match the register maps (#578).
+
+    The sweep reads spans from ``wallbox_snapshot_ranges.json`` (plain data,
+    so reporter machines need only pymodbus). Regenerate with
+    ``python scripts/generate_wallbox_snapshot_ranges.py`` when the maps move.
+    """
+
+    regenerated = tmp_path / "wallbox_snapshot_ranges.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS / "generate_wallbox_snapshot_ranges.py"),
+            str(regenerated),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    committed = SCRIPTS / "wallbox_snapshot_ranges.json"
+    assert regenerated.read_text(encoding="utf-8") == committed.read_text(encoding="utf-8"), (
+        "scripts/wallbox_snapshot_ranges.json is out of date — run: python scripts/generate_wallbox_snapshot_ranges.py"
+    )

@@ -318,8 +318,8 @@ through additional registers on the inverter rather than on a wallbox endpoint.
 
 To turn that hypothesis into a map, capture **read-only** snapshots, one per
 wallbox state (e.g. idle → car connected → charging), and diff them. The
-easiest path is the snapshot script (from the repository root —
-`pymodbus` is already a dev dependency):
+easiest path is the snapshot script (from the repository root; it needs only
+`pip install pymodbus`, no Home Assistant setup):
 
 ```bash
 python scripts/wallbox_register_snapshot.py --host <inverter-ip> \
