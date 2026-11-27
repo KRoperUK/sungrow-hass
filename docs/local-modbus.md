@@ -329,6 +329,10 @@ python scripts/wallbox_register_snapshot.py --host <inverter-ip> \
     --family sh_rt --state charging -o snapshot_charging.json
 ```
 
+(On Windows use `py` instead of `python` if that is how your interpreter is
+launched; the only requirement beyond the checkout is `pymodbus`,
+e.g. `py -m pip install pymodbus`.)
+
 It sweeps the family's input and holding spans in ≤ 100-register reads (plus
 any `--range TYPE:START:COUNT` windows and `--units` slave IDs you add), never
 writes, and records no host address — the JSON is safe to paste into
