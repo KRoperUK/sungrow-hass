@@ -15,6 +15,9 @@ integration's own mapped points for ``--family`` (no new register semantics are
 claimed); anything beyond that comes from explicit ``--range`` windows. The
 output records no host address so it is safe to paste into the issue as-is.
 
+Needs only ``pymodbus`` installed (``pip install pymodbus``) plus this
+checkout — no Home Assistant install, venv, or integration setup.
+
 Usage (from the repository root)::
 
     python scripts/wallbox_register_snapshot.py --host 192.168.1.50 \\
@@ -31,18 +34,20 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+from pymodbus.client import ModbusTcpClient
 
-from pymodbus.client import ModbusTcpClient  # noqa: E402
+# Sweep spans per map family, generated from the integration's register maps by
+# scripts/generate_wallbox_snapshot_ranges.py. Plain data on purpose: importing
+# the maps at sweep time would execute the integration package (Home Assistant
+# imports, Python 3.14-only syntax) and break reporter machines — this way the
+# script needs only pymodbus (#578).
+_RANGES_PATH = Path(__file__).resolve().parent / "wallbox_snapshot_ranges.json"
 
-from custom_components.sungrow.modbus_registers import (  # noqa: E402
-    DEFAULT_MAX_BLOCK_SIZE,
-    HOLDING_CONTROL_MAPS,
-    MODBUS_MAX_READ_COUNT,
-    REGISTER_MAPS,
-    SG_RS_HOLDING_PROBE_POINTS,
-)
+with _RANGES_PATH.open(encoding="utf-8") as _ranges_file:
+    _FAMILIES: dict[str, dict[str, list[int] | None]] = json.load(_ranges_file)["families"]
+
+DEFAULT_MAX_BLOCK_SIZE = 100
+MODBUS_MAX_READ_COUNT = 125
 
 ISSUE = 578
 DEFAULT_PORT = 502
@@ -63,14 +68,6 @@ def parse_range(text: str) -> tuple[str, int, int]:
     if parsed[1] + parsed[2] - 1 > 0xFFFF:
         raise argparse.ArgumentTypeError(f"window {text!r} runs past 0xFFFF")
     return parsed
-
-
-def _holding_points(family: str) -> list[int]:
-    """Wire addresses of the mapped holding points for ``family``."""
-    points = list(HOLDING_CONTROL_MAPS.get(family, ()))
-    if not points and family.startswith("sg"):
-        points = list(SG_RS_HOLDING_PROBE_POINTS)
-    return sorted(p.wire_address for p in points)
 
 
 def _chunk_span(start: int, end: int, chunk_size: int) -> list[tuple[int, int]]:
@@ -97,12 +94,13 @@ def build_spans(
     ``extra`` windows come last.
     """
     spans: list[tuple[str, int, int]] = []
-    addresses = sorted(p.address for p in REGISTER_MAPS[family])
-    for start, count in _chunk_span(addresses[0], addresses[-1], chunk_size):
+    family_ranges = _FAMILIES[family]
+    input_start, input_end = family_ranges["input"]
+    for start, count in _chunk_span(input_start, input_end, chunk_size):
         spans.append(("input", start, count))
-    holding = _holding_points(family)
-    if holding:
-        for start, count in _chunk_span(holding[0], holding[-1], chunk_size):
+    holding = family_ranges["holding"]
+    if holding is not None:
+        for start, count in _chunk_span(holding[0], holding[1], chunk_size):
             spans.append(("holding", start, count))
     for register_type, start, count in extra:
         for chunk_start, chunk_count in _chunk_span(start, start + count - 1, chunk_size):
@@ -171,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--family",
         default="sh_rt",
-        choices=sorted(REGISTER_MAPS),
+        choices=sorted(_FAMILIES),
         help="Integration map family whose span seeds the sweep",
     )
     parser.add_argument(
